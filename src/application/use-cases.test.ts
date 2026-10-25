@@ -3,26 +3,17 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { ManualRateTable } from "../adapters/pricing/manual-table.ts";
 import { amountPolicy, STRICT_AMOUNT_POLICY, uniqueAmountPolicy } from "../domain/amount-policy.ts";
 import { defineAsset } from "../domain/asset.ts";
-import { type ChainAddress, chainAddress } from "../domain/chain-address.ts";
-import type { PaymentInstructions } from "../domain/invoice.ts";
+import { chainAddress } from "../domain/chain-address.ts";
 import { Money } from "../domain/money.ts";
 
 import { TRON, USDT_TRON } from "../domain/test-fixtures.ts";
 import { txRef, txRefKey } from "../domain/tx-ref.ts";
 import { AssetCatalog, type AssetSettings } from "./catalog.ts";
 import { ApplicationError } from "./errors.ts";
-import type {
-  AmlScreener,
-  AmlVerdict,
-  ChainAdapter,
-  Clock,
-  FetchResult,
-  RateProvider,
-  TransferCandidate,
-  VerificationResult,
-} from "./ports.ts";
+import type { AmlScreener, AmlVerdict, Clock, RateProvider, TransferCandidate } from "./ports.ts";
 import { RateService } from "./rates.ts";
 import { UniqueAmountStrategy } from "./strategies/unique-amount.ts";
+import { FakeChain } from "./testing/fake-chain.ts";
 import { InMemoryStore } from "./testing/in-memory.ts";
 import { CreateInvoice } from "./use-cases/create-invoice.ts";
 import { ExpireInvoices } from "./use-cases/expire-invoices.ts";
@@ -43,25 +34,6 @@ class FakeClock implements Clock {
   }
   advance(ms: number): void {
     this.t += ms;
-  }
-}
-
-/** Scripted chain adapter: candidates by page, verification results by tx hash. */
-class FakeChain implements ChainAdapter {
-  readonly network = TRON;
-  pages: TransferCandidate[][] = [];
-  verdicts = new Map<string, VerificationResult | Error>();
-  supports = () => true;
-  validateAddress = (raw: string): ChainAddress => chainAddress(TRON, raw);
-  buildPaymentUri = (_: PaymentInstructions) => null;
-  async fetchIncoming(_a: unknown, _b: unknown, cursor: string | null): Promise<FetchResult> {
-    const i = cursor ? Number(cursor) : 0;
-    return { candidates: this.pages[i] ?? [], next: String(Math.min(i + 1, this.pages.length)) };
-  }
-  async verify(c: TransferCandidate): Promise<VerificationResult> {
-    const v = this.verdicts.get(c.ref.txHash) ?? { status: "final", transfer: c };
-    if (v instanceof Error) throw v;
-    return v;
   }
 }
 
@@ -103,7 +75,7 @@ const manual = (rates: Array<[string, string, string]>, ageMs = 0, maxAgeMs = 60
 function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[] } = {}) {
   const store = new InMemoryStore();
   const clock = new FakeClock();
-  const chain = new FakeChain();
+  const chain = new FakeChain(TRON);
   const aml = new ScriptedAml();
   const catalog = new AssetCatalog(opts.assets ?? [settings()]);
   const strategy = new UniqueAmountStrategy();
