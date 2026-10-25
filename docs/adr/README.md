@@ -12,7 +12,7 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0003](0003-nodejs-typescript.md) | 2026-10-26 | Node.js + TypeScript (strict) | accepted |
 | [0004](0004-separate-service-http.md) | 2026-10-26 | Separate service integrated via HTTP API and webhooks | accepted |
 | [0005](0005-modular-monolith-hexagonal.md) | 2026-10-26 | Modular monolith, hexagonal architecture, DDD | accepted |
-| [0006](0006-apache-2-clean-room.md) | 2026-10-26 | Apache-2.0 license, clean-room implementation | accepted |
+| [0006](0006-apache-2-clean-room.md) | 2026-10-26 | Apache-2.0 license, clean-room implementation | amended |
 | [0007](0007-minimal-dependencies.md) | 2026-10-26 | Minimal dependencies, strict supply-chain policy | accepted |
 | [0008](0008-transactional-outbox.md) | 2026-10-26 | Transactional outbox for webhooks | accepted |
 | [0009](0009-independent-finality-check.md) | 2026-10-26 | Independent "final + successful" verification before crediting | accepted |
@@ -29,3 +29,4 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0020](0020-internal-docs-outside-repo.md) | 2026-10-26 | Internal working docs are kept outside the public repository | accepted |
 | [0021](0021-biome.md) | 2026-10-26 | Biome for linting and formatting | accepted |
 | [0022](0022-typescript-run-mode.md) | 2026-10-26 | Run TypeScript natively in development, compile for production | accepted |
+| [0023](0023-mpl-for-dev-dependencies.md) | 2026-10-26 | MPL-2.0 allowed for dev-only dependencies | accepted |

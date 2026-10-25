@@ -1,0 +1,37 @@
+{
+  "name": "nocustody",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Self-hosted, non-custodial (watch-only) crypto payment gateway",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "typecheck": "tsc -p tsconfig.json",
+    "layers": "depcruise src --config .dependency-cruiser.mjs",
+    "licenses": "node scripts/check-licenses.ts",
+    "source-policy": "node scripts/check-source.ts",
+    "test": "vitest run --project unit",
+    "test:int": "vitest run --project integration --passWithNoTests",
+    "check": "npm run lint && npm run typecheck && npm run layers && npm run licenses && npm run source-policy && npm test && npm run test:int",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "pg": "8.23.1",
+    "pino": "10.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.3",
+    "@types/node": "26.6.5",
+    "@types/pg": "8.23.1",
+    "dependency-cruiser": "18.7.0",
+    "fast-check": "4.10.2",
+    "typescript": "6.0.3",
+    "vitest": "5.0.5"
+  }
+}
