@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+# Third-party actions are pinned by commit SHA (supply-chain policy, docs/adr/0007-minimal-dependencies.md).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
+        env:
+          POSTGRES_USER: nocustody
+          POSTGRES_PASSWORD: nocustody
+          POSTGRES_DB: nocustody_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nocustody -d nocustody_test"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://nocustody:nocustody@localhost:5432/nocustody_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.12.1
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run layers
+      - run: npm run licenses
+      - run: npm run source-policy
+      - run: npm test
+      - run: npm run test:int
+      - name: Audit dependencies
+        run: npm audit --audit-level=moderate
+      - run: npm run build
+
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.12.1
+      - name: Every commit is signed off
+        run: node scripts/check-dco.ts "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"

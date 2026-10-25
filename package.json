@@ -15,6 +15,7 @@
     "layers": "depcruise src --config .dependency-cruiser.mjs",
     "licenses": "node scripts/check-licenses.ts",
     "source-policy": "node scripts/check-source.ts",
+    "dco": "node scripts/check-dco.ts",
     "test": "vitest run --project unit",
     "test:int": "vitest run --project integration --passWithNoTests",
     "check": "npm run lint && npm run typecheck && npm run layers && npm run licenses && npm run source-policy && npm test && npm run test:int",

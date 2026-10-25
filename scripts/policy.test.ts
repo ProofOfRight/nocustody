@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
+import { missingSignoff } from "./check-dco.ts";
 import { isAllowed } from "./check-licenses.ts";
 import { checkFile } from "./check-source.ts";
 
@@ -35,5 +36,14 @@ describe("source policy", () => {
     expect(checkFile("src/a.ts", `${HEADER}const x = Math.random();\n`)).toHaveLength(1);
     expect(checkFile("src/a.ts", `${HEADER}const x = parseFloat("1.5");\n`)).toHaveLength(1);
     expect(checkFile("src/a.ts", `${HEADER}eval("1");\n`)).toHaveLength(1);
+  });
+});
+
+describe("DCO", () => {
+  it("requires a sign-off matching the commit author", () => {
+    const author = "Jane Doe <jane@example.org>";
+    expect(missingSignoff([{ sha: "a", author, signoffs: [author] }])).toEqual([]);
+    expect(missingSignoff([{ sha: "b", author, signoffs: [] }])).toHaveLength(1);
+    expect(missingSignoff([{ sha: "c", author, signoffs: ["Other <o@example.org>"] }])).toHaveLength(1);
   });
 });
