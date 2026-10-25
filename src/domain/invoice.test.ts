@@ -64,7 +64,7 @@ describe("Invoice lifecycle", () => {
     expect(inv.status).toBe("confirming");
     expect(
       inv.applyPayment(
-        { transferKey: "tx/0", amount: usdt("10.01"), at: at(MIN) },
+        { from: "TSender", transferKey: "tx/0", amount: usdt("10.01"), at: at(MIN) },
         STRICT_AMOUNT_POLICY,
         at(2 * MIN),
       ),
@@ -79,7 +79,7 @@ describe("Invoice lifecycle", () => {
 
   it("is idempotent per transfer", () => {
     const inv = newInvoice();
-    const p = { transferKey: "tx/0", amount: usdt("10.01"), at: at(MIN) };
+    const p = { from: "TSender", transferKey: "tx/0", amount: usdt("10.01"), at: at(MIN) };
     inv.applyPayment(p, STRICT_AMOUNT_POLICY, at(MIN));
     expect(inv.applyPayment(p, STRICT_AMOUNT_POLICY, at(MIN))).toBe("duplicate");
     expect(inv.received().units).toBe(10_010_000n);
@@ -87,10 +87,14 @@ describe("Invoice lifecycle", () => {
 
   it("underpaid, then topped up to paid", () => {
     const inv = newInvoice();
-    inv.applyPayment({ transferKey: "a", amount: usdt("10"), at: at(MIN) }, STRICT_AMOUNT_POLICY, at(MIN));
+    inv.applyPayment(
+      { from: "TSender", transferKey: "a", amount: usdt("10"), at: at(MIN) },
+      STRICT_AMOUNT_POLICY,
+      at(MIN),
+    );
     expect(inv.status).toBe("underpaid");
     inv.applyPayment(
-      { transferKey: "b", amount: usdt("0.01"), at: at(2 * MIN) },
+      { from: "TSender", transferKey: "b", amount: usdt("0.01"), at: at(2 * MIN) },
       STRICT_AMOUNT_POLICY,
       at(2 * MIN),
     );
@@ -101,19 +105,27 @@ describe("Invoice lifecycle", () => {
     const policy = amountPolicy({ ...STRICT_AMOUNT_POLICY, underpaymentToleranceBps: 100 });
     const strict = newInvoice("100");
     strict.applyPayment(
-      { transferKey: "a", amount: usdt("99.5"), at: at(MIN) },
+      { from: "TSender", transferKey: "a", amount: usdt("99.5"), at: at(MIN) },
       STRICT_AMOUNT_POLICY,
       at(MIN),
     );
     expect(strict.status).toBe("underpaid");
     const tolerant = newInvoice("100");
-    tolerant.applyPayment({ transferKey: "a", amount: usdt("99.5"), at: at(MIN) }, policy, at(MIN));
+    tolerant.applyPayment(
+      { from: "TSender", transferKey: "a", amount: usdt("99.5"), at: at(MIN) },
+      policy,
+      at(MIN),
+    );
     expect(tolerant.status).toBe("paid");
   });
 
   it("overpaid is a separate status", () => {
     const inv = newInvoice();
-    inv.applyPayment({ transferKey: "a", amount: usdt("10.02"), at: at(MIN) }, STRICT_AMOUNT_POLICY, at(MIN));
+    inv.applyPayment(
+      { from: "TSender", transferKey: "a", amount: usdt("10.02"), at: at(MIN) },
+      STRICT_AMOUNT_POLICY,
+      at(MIN),
+    );
     expect(inv.status).toBe("overpaid");
   });
 
@@ -123,11 +135,23 @@ describe("Invoice lifecycle", () => {
     expect(inv.expire(at(30 * MIN))).toBe(true);
     expect(inv.status).toBe("expired");
     inv.applyPayment(
-      { transferKey: "a", amount: usdt("10.01"), at: at(45 * MIN) },
+      { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(45 * MIN) },
       STRICT_AMOUNT_POLICY,
       at(50 * MIN),
     );
     expect(inv.status).toBe("paid_late");
+  });
+
+  it("expires from confirming; a genuine payment made before expiry is still paid, not late", () => {
+    const inv = newInvoice();
+    inv.markDetected("tx/0", at(MIN));
+    expect(inv.expire(at(31 * MIN))).toBe(true);
+    inv.applyPayment(
+      { from: "TSender", transferKey: "tx/0", amount: usdt("10.01"), at: at(MIN) },
+      STRICT_AMOUNT_POLICY,
+      at(40 * MIN),
+    );
+    expect(inv.status).toBe("paid");
   });
 
   it("rejects late payments when the policy says so", () => {
@@ -136,7 +160,11 @@ describe("Invoice lifecycle", () => {
     const policy: AmountPolicy = { ...STRICT_AMOUNT_POLICY, acceptLatePayments: false };
     expect(
       code(() =>
-        inv.applyPayment({ transferKey: "a", amount: usdt("10.01"), at: at(45 * MIN) }, policy, at(50 * MIN)),
+        inv.applyPayment(
+          { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(45 * MIN) },
+          policy,
+          at(50 * MIN),
+        ),
       ),
     ).toBe("invoice.late_not_accepted");
   });
@@ -145,7 +173,11 @@ describe("Invoice lifecycle", () => {
     const pay =
       (ms: number, amount = usdt("10.01")) =>
       () =>
-        newInvoice().applyPayment({ transferKey: "a", amount, at: at(ms) }, STRICT_AMOUNT_POLICY, at(ms));
+        newInvoice().applyPayment(
+          { from: "TSender", transferKey: "a", amount, at: at(ms) },
+          STRICT_AMOUNT_POLICY,
+          at(ms),
+        );
     expect(code(pay(91 * MIN))).toBe("invoice.payment_after_grace");
     expect(code(pay(-MIN))).toBe("invoice.payment_before_creation");
     expect(code(pay(-10_000))).toBeUndefined(); // within clock skew
@@ -159,7 +191,7 @@ describe("Invoice lifecycle", () => {
     expect(
       code(() =>
         inv.applyPayment(
-          { transferKey: "a", amount: usdt("10.01"), at: at(2 * MIN) },
+          { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(2 * MIN) },
           STRICT_AMOUNT_POLICY,
           at(2 * MIN),
         ),
@@ -169,14 +201,18 @@ describe("Invoice lifecycle", () => {
 
   it("goes through AML: pending → completed, or hold → manual decision", () => {
     const ok = newInvoice();
-    ok.applyPayment({ transferKey: "a", amount: usdt("10.01"), at: at(MIN) }, STRICT_AMOUNT_POLICY, at(MIN));
+    ok.applyPayment(
+      { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(MIN) },
+      STRICT_AMOUNT_POLICY,
+      at(MIN),
+    );
     ok.startAmlReview(at(MIN));
     ok.amlCleared(at(MIN));
     expect(ok.status).toBe("completed");
 
     const held = newInvoice();
     held.applyPayment(
-      { transferKey: "a", amount: usdt("10.01"), at: at(MIN) },
+      { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(MIN) },
       STRICT_AMOUNT_POLICY,
       at(MIN),
     );
@@ -192,7 +228,11 @@ describe("Invoice lifecycle", () => {
   it("increments the version on every change and keeps the loaded version", () => {
     const inv = newInvoice();
     expect(inv.loadedVersion).toBeNull();
-    inv.applyPayment({ transferKey: "a", amount: usdt("10.01"), at: at(MIN) }, STRICT_AMOUNT_POLICY, at(MIN));
+    inv.applyPayment(
+      { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(MIN) },
+      STRICT_AMOUNT_POLICY,
+      at(MIN),
+    );
     const restored = Invoice.restore(inv.state);
     expect(restored.loadedVersion).toBe(1);
     expect(restored.pullEvents()).toEqual([]);
