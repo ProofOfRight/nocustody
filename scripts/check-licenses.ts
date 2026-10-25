@@ -15,6 +15,7 @@ const ALLOWED = new Set([
   "BlueOak-1.0.0",
   "CC0-1.0",
   "Python-2.0",
+  "Unlicense",
 ]);
 const DEV_ONLY_EXTRA = new Set(["MPL-2.0"]);
 

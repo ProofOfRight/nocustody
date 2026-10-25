@@ -1,6 +1,6 @@
 # 0006. Apache-2.0 license, clean-room implementation
 
-- Status: accepted, amended by [0023](0023-mpl-for-dev-dependencies.md)
+- Status: accepted, amended by [0023](0023-mpl-for-dev-dependencies.md) and [0024](0024-unlicense-allowed.md)
 - Date: 2026-10-26
 
 ## Context
