@@ -14,6 +14,11 @@ export interface Clock {
   now(): Date;
 }
 
+/** Checks that receiving addresses and asset contracts still match the pinned checksum. */
+export interface IntegrityGuard {
+  check(): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }>;
+}
+
 export interface IdGenerator {
   /** Unguessable identifier (node:crypto). */
   newId(): string;

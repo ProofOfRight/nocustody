@@ -8,7 +8,7 @@ import { convertToAsset, type ResolvedRate, withMarkup } from "../../domain/pric
 import { rationalToDecimal } from "../../domain/rational.ts";
 import type { AssetCatalog, PricingSettings } from "../catalog.ts";
 import { ApplicationError } from "../errors.ts";
-import type { Clock, IdGenerator, UnitOfWork } from "../ports.ts";
+import type { Clock, IdGenerator, IntegrityGuard, UnitOfWork } from "../ports.ts";
 import type { RateService } from "../rates.ts";
 import type { PaymentInstructionStrategy } from "../strategies/unique-amount.ts";
 
@@ -34,7 +34,10 @@ export class CreateInvoice {
   }
 
   async execute(input: CreateInvoiceInput): Promise<CreateInvoiceResult> {
-    const { uow, catalog, strategy, clock, ids } = this.#deps;
+    const { uow, catalog, strategy, clock, ids, integrity } = this.#deps;
+    // Never hand out payment instructions if the pinned addresses/contracts may have been tampered with.
+    const intact = await integrity.check();
+    if (!intact.ok) throw new ApplicationError("integrity.pin_violation", intact.reason);
     const settings = catalog.get(input.assetId);
     const now = clock.now();
     const { base, price } = await this.#price(input, settings.asset, settings.priceSymbol, now);
@@ -138,4 +141,5 @@ export interface CreateInvoiceDeps {
   readonly strategy: PaymentInstructionStrategy;
   readonly clock: Clock;
   readonly ids: IdGenerator;
+  readonly integrity: IntegrityGuard;
 }

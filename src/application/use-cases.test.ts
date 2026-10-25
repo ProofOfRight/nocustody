@@ -79,6 +79,11 @@ function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[] } = 
   const aml = new ScriptedAml();
   const catalog = new AssetCatalog(opts.assets ?? [settings()]);
   const strategy = new UniqueAmountStrategy();
+  const integrity = {
+    ok: true,
+    check: async () =>
+      integrity.ok ? { ok: true as const } : { ok: false as const, reason: "pinned checksum mismatch" },
+  };
   let n = 0;
   const create = new CreateInvoice({
     uow: store,
@@ -96,6 +101,7 @@ function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[] } = 
     strategy,
     clock,
     ids: { newId: () => `inv-${++n}` },
+    integrity,
   });
   const ingest = new IngestTransfers({
     adapter: chain,
@@ -124,7 +130,7 @@ function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[] } = 
   };
   const order = (id: string, amount = "10", cur = "USD") =>
     create.execute({ merchantOrderId: id, priceAmount: amount, priceCurrency: cur, assetId: "usdt-tron" });
-  return { store, clock, chain, aml, create, ingest, verify, settle, expire, cycle, order };
+  return { store, clock, chain, aml, create, ingest, verify, settle, expire, cycle, order, integrity };
 }
 
 const errCode = async (p: Promise<unknown>) => {
@@ -168,6 +174,13 @@ describe("CreateInvoice", () => {
     const { invoice } = await s.order("o1", "5", "USDT");
     expect(invoice.state.expected.toDecimalString()).toBe("5.010000");
     expect(invoice.state.price).toBeNull();
+  });
+
+  it("refuses to issue payment instructions when the pinned config was tampered with", async () => {
+    const s = setup();
+    s.integrity.ok = false;
+    expect(await errCode(s.order("o1"))).toBe("integrity.pin_violation");
+    expect(s.store.data.invoices.size).toBe(0);
   });
 
   it("refuses disabled currencies and stale rates", async () => {
