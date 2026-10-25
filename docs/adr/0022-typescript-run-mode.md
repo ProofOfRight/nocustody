@@ -14,3 +14,6 @@ Development and scripts run `.ts` files directly with Node. Production uses Java
 ## Consequences
 
 `tsc` is used for type checking and the production build. Tests are transpiled by Vitest independently.
+
+TypeScript is pinned to 6.0.x: TypeScript 7 (native compiler) has no JavaScript API yet, and dependency-cruiser
+needs it to parse TypeScript sources. Revisit when dependency-cruiser supports TypeScript 7.
