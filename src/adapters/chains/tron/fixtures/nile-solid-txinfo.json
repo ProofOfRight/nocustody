@@ -1,0 +1,24 @@
+{
+  "id": "320a48d17dee9e25a1a56c48bd207b4dda550c2fb2e0c76e3e7b9f49fd70262c",
+  "blockNumber": 72145236,
+  "blockTimeStamp": 1792970475000,
+  "contractResult": ["0000000000000000000000000000000000000000000000000000000000000000"],
+  "contract_address": "41eca9bc828a3005b9a3b909f2cc5c2a54794de05f",
+  "receipt": {
+    "origin_energy_usage": 14650,
+    "energy_usage_total": 14650,
+    "net_usage": 345,
+    "result": "SUCCESS"
+  },
+  "log": [
+    {
+      "address": "eca9bc828a3005b9a3b909f2cc5c2a54794de05f",
+      "topics": [
+        "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "000000000000000000000000b25a663c1368f37a254b2fb258b2d4e75fb659c1",
+        "000000000000000000000000379346817bd5482778a4dfc059b2f98ce9d23c16"
+      ],
+      "data": "00000000000000000000000000000000000000000000000000000000000f4240"
+    }
+  ]
+}
