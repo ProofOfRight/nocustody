@@ -147,6 +147,7 @@ describe("PostgreSQL repositories", () => {
       strategy,
       clock,
       ids: { newId: () => `00000000-0000-4000-8000-00000000000${++n}` },
+      integrity: { check: async () => ({ ok: true }) },
     });
     const a = await create.execute({
       merchantOrderId: "o1",
@@ -243,6 +244,7 @@ describe("PostgreSQL repositories", () => {
       strategy,
       clock,
       ids: { newId: () => "inv-x" },
+      integrity: { check: async () => ({ ok: true }) },
     });
     await create.execute({
       merchantOrderId: "o1",
