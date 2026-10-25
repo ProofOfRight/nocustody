@@ -1,0 +1,36 @@
+# Files that define security rules, what AI agents are told, and what CI and the checks run.
+# A change here needs maintainer review (enforced by branch protection with "Require review from Code Owners").
+
+# Security rules and decisions
+/docs/security.md         @fortune1dev
+/docs/threat-model.md     @fortune1dev
+/docs/adr/                @fortune1dev
+/CONTRIBUTING.md          @fortune1dev
+/SECURITY.md              @fortune1dev
+
+# Instructions and configuration for AI coding agents
+/CLAUDE.md                @fortune1dev
+/AGENTS.md                @fortune1dev
+/.claude/                 @fortune1dev
+/.mcp.json                @fortune1dev
+
+# CI, checks, toolchain and dependencies
+/.github/                 @fortune1dev
+/scripts/                 @fortune1dev
+/docker/                  @fortune1dev
+/compose.yaml             @fortune1dev
+/Makefile                 @fortune1dev
+/package.json             @fortune1dev
+/package-lock.json        @fortune1dev
+/.npmrc                   @fortune1dev
+/.gitignore               @fortune1dev
+/biome.json               @fortune1dev
+/.dependency-cruiser.mjs  @fortune1dev
+/tsconfig.json            @fortune1dev
+/tsconfig.build.json      @fortune1dev
+/vitest.config.ts         @fortune1dev
+
+# Payment verification code (see CONTRIBUTING.md)
+/src/domain/              @fortune1dev
+/src/application/         @fortune1dev
+/src/adapters/chains/     @fortune1dev
