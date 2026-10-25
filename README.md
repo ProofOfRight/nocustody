@@ -44,6 +44,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and rules.
 - [Architecture](docs/architecture.md)
 - [Security requirements](docs/security.md) and [threat model](docs/threat-model.md)
 - [Architecture decision records](docs/adr/README.md)
+- [Testing on TRON Nile](docs/testnet.md)
 - Reporting vulnerabilities: [SECURITY.md](SECURITY.md)
 
 ## License

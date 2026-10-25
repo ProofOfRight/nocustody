@@ -1,0 +1,30 @@
+{
+  "database": { "urlEnv": "DATABASE_URL" },
+  "tron": {
+    "network": "tron:nile",
+    "apiUrl": "https://nile.trongrid.io",
+    "startFrom": "2026-10-25T00:00:00Z",
+    "pollInterval": "10s"
+  },
+  "assets": [
+    {
+      "id": "usdt-nile",
+      "network": "tron:nile",
+      "kind": "token",
+      "contract": "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf",
+      "decimals": 6,
+      "symbol": "USDT",
+      "priceSymbol": "USDT",
+      "addresses": [{ "address": "REPLACE_WITH_YOUR_NILE_ADDRESS", "status": "active" }],
+      "amounts": { "step": "0.01", "maxSlots": 99, "dustThreshold": "0.01" },
+      "ttl": "30m",
+      "grace": "60m"
+    }
+  ],
+  "pricing": {
+    "currencies": ["USD"],
+    "manualRates": [
+      { "base": "USD", "quote": "USDT", "rate": "1", "setAt": "2026-10-25T00:00:00Z", "maxAge": "365d" }
+    ]
+  }
+}
