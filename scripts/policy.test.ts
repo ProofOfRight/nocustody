@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { missingSignoff } from "./check-dco.ts";
 import { isAllowed } from "./check-licenses.ts";
-import { checkFile } from "./check-source.ts";
+import { checkFile, checkInvisible } from "./check-source.ts";
 
 const HEADER = "// SPDX-License-Identifier: Apache-2.0\n";
 
@@ -36,6 +36,17 @@ describe("source policy", () => {
     expect(checkFile("src/a.ts", `${HEADER}const x = Math.random();\n`)).toHaveLength(1);
     expect(checkFile("src/a.ts", `${HEADER}const x = parseFloat("1.5");\n`)).toHaveLength(1);
     expect(checkFile("src/a.ts", `${HEADER}eval("1");\n`)).toHaveLength(1);
+  });
+
+  it("rejects invisible and bidi characters and reports their position", () => {
+    expect(checkInvisible("a.md", "plain text, emoji \u26A0\uFE0F\n")).toEqual([]);
+    expect(checkInvisible("a.ts", "ok\n// a\u200Bb\n")).toEqual([
+      "a.ts:2:5: invisible or bidi character U+200B",
+    ]);
+    expect(checkInvisible("a.ts", "/* \u202E admin \u2066 */")).toHaveLength(2);
+    expect(checkInvisible("a.md", "x\u{E0041}\u{E0049}")).toHaveLength(2);
+    expect(checkInvisible("a.md", "\uFEFFtitle")).toHaveLength(1);
+    expect(checkInvisible("a.md", "x\u{E0100}")).toHaveLength(1);
   });
 });
 
