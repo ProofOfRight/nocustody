@@ -2,6 +2,7 @@
 // Scripted chain adapter for tests: candidates by page, verification results by tx hash.
 import { type ChainAddress, chainAddress } from "../../domain/chain-address.ts";
 import type { NetworkId } from "../../domain/network.ts";
+import { txRef } from "../../domain/tx-ref.ts";
 import type { ChainAdapter, FetchResult, TransferCandidate, VerificationResult } from "../ports.ts";
 
 export class FakeChain implements ChainAdapter {
@@ -30,8 +31,14 @@ export class FakeChain implements ChainAdapter {
     return { candidates: this.pages[i] ?? [], next: String(Math.min(i + 1, this.pages.length)) };
   }
 
+  /** Default: final, one transfer equal to the hint at log index 0. */
   async verify(c: TransferCandidate): Promise<VerificationResult> {
-    const v = this.verdicts.get(c.ref.txHash) ?? { status: "final", transfer: c };
+    const v = this.verdicts.get(c.txHash) ?? {
+      status: "final",
+      transfers: [
+        { ref: txRef(c.network, c.txHash, 0n), from: c.from, to: c.to, amount: c.amount, at: c.at },
+      ],
+    };
     if (v instanceof Error) throw v;
     return v;
   }

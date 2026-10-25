@@ -24,16 +24,20 @@ export interface IdGenerator {
   newId(): string;
 }
 
-/** A possibly non-final transfer reported by an indexer. Never credited on its own. */
+/**
+ * A transaction an indexer reports as possibly containing an incoming transfer. Its fields are an untrusted hint
+ * (used for early detection and dust filtering); only the finalized-state query decides what was transferred.
+ */
 export interface TransferCandidate {
-  readonly ref: TxRef;
+  readonly network: NetworkId;
+  readonly txHash: string;
   readonly from: string;
   readonly to: ChainAddress;
   readonly amount: Money;
   readonly at: Date;
 }
 
-/** Facts confirmed by a finalized-state query (not copied from the candidate). */
+/** One transfer confirmed by a finalized-state query; `ref.index` is the real log index / lt. */
 export interface VerifiedTransfer {
   readonly ref: TxRef;
   readonly from: string;
@@ -43,7 +47,8 @@ export interface VerifiedTransfer {
 }
 
 export type VerificationResult =
-  | { readonly status: "final"; readonly transfer: VerifiedTransfer }
+  /** Final and successful; the transfers of the asset to our addresses it contains (may be several). */
+  | { readonly status: "final"; readonly transfers: readonly VerifiedTransfer[] }
   | { readonly status: "pending"; readonly reason: string }
   | { readonly status: "rejected"; readonly reason: string };
 
@@ -116,28 +121,45 @@ export interface SlotRepository {
   findCandidates(address: ChainAddress, amount: Money, at: Date): Promise<AmountSlot[]>;
 }
 
-export type TransferStatus = "seen" | "dust" | "verified" | "rejected" | "matched" | "unmatched";
+export type CandidateStatus = "seen" | "dust" | "verified" | "rejected";
+
+export interface StoredCandidate {
+  readonly candidate: TransferCandidate;
+  readonly status: CandidateStatus;
+  readonly attempts: number;
+  readonly reason: string | null;
+}
+
+export interface CandidateRepository {
+  /** Idempotent by (network, tx_hash). */
+  insert(
+    candidate: TransferCandidate,
+    status: "seen" | "dust",
+    reason: string | null,
+  ): Promise<"inserted" | "duplicate">;
+  listSeen(network: NetworkId, limit: number): Promise<StoredCandidate[]>;
+  markVerified(network: NetworkId, txHash: string): Promise<void>;
+  markRejected(network: NetworkId, txHash: string, reason: string): Promise<void>;
+  markPending(network: NetworkId, txHash: string, reason: string): Promise<void>;
+}
+
+export type TransferStatus = "verified" | "dust" | "matched" | "unmatched";
 
 export interface StoredTransfer {
-  readonly candidate: TransferCandidate;
+  readonly transfer: VerifiedTransfer;
   readonly status: TransferStatus;
-  readonly verified: VerifiedTransfer | null;
-  readonly attempts: number;
   readonly invoiceId: string | null;
   readonly reason: string | null;
 }
 
 export interface TransferRepository {
-  /** Idempotent by TxRef (UNIQUE(network, tx_hash, log_index)). */
-  insertCandidate(
-    candidate: TransferCandidate,
-    status: "seen" | "dust",
+  /** Idempotent by TxRef: UNIQUE(network, tx_hash, log_index). */
+  insert(
+    transfer: VerifiedTransfer,
+    status: "verified" | "dust",
     reason: string | null,
   ): Promise<"inserted" | "duplicate">;
-  listByStatus(network: NetworkId, status: TransferStatus, limit: number): Promise<StoredTransfer[]>;
-  markVerified(ref: TxRef, verified: VerifiedTransfer): Promise<void>;
-  markRejected(ref: TxRef, reason: string): Promise<void>;
-  markPending(ref: TxRef, reason: string): Promise<void>;
+  listVerified(network: NetworkId, limit: number): Promise<StoredTransfer[]>;
   markMatched(ref: TxRef, invoiceId: string): Promise<void>;
   markUnmatched(ref: TxRef, reason: string): Promise<void>;
 }
@@ -168,6 +190,7 @@ export interface AuditLog {
 export interface Repositories {
   readonly invoices: InvoiceRepository;
   readonly slots: SlotRepository;
+  readonly candidates: CandidateRepository;
   readonly transfers: TransferRepository;
   readonly outbox: OutboxRepository;
   readonly cursors: CursorRepository;

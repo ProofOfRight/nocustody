@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isDust } from "../../domain/amount-policy.ts";
 import { txRefKey } from "../../domain/tx-ref.ts";
 import { type AssetCatalog, watchedAddresses } from "../catalog.ts";
-import type { ChainAdapter, Clock, UnitOfWork } from "../ports.ts";
+import type { ChainAdapter, Clock, UnitOfWork, VerificationResult } from "../ports.ts";
 
 export interface VerifyStats {
   final: number;
+  transfers: number;
   pending: number;
   rejected: number;
   errors: number;
 }
 
-/** Verifier step: drive stored candidates to a decision using the adapter's finalized-state query. */
 export interface VerifyTransfersDeps {
   readonly adapter: ChainAdapter;
   readonly catalog: AssetCatalog;
@@ -19,6 +20,10 @@ export interface VerifyTransfersDeps {
   readonly batchSize: number;
 }
 
+/**
+ * Verifier step: ask the adapter's finalized-state query about each candidate transaction. Only the transfers it
+ * returns (with real log indexes) are stored for settlement; the indexer's hint is never credited.
+ */
 export class VerifyTransfers {
   readonly #deps: VerifyTransfersDeps;
 
@@ -28,49 +33,62 @@ export class VerifyTransfers {
 
   async execute(): Promise<VerifyStats> {
     const { adapter, catalog, uow, clock, batchSize } = this.#deps;
-    const stats: VerifyStats = { final: 0, pending: 0, rejected: 0, errors: 0 };
-    const pending = await uow.run((r) => r.transfers.listByStatus(adapter.network, "seen", batchSize));
-    for (const t of pending) {
-      const settings = catalog.get(t.candidate.amount.asset.id);
-      const subject = txRefKey(t.candidate.ref);
-      let result: Awaited<ReturnType<ChainAdapter["verify"]>>;
+    const stats: VerifyStats = { final: 0, transfers: 0, pending: 0, rejected: 0, errors: 0 };
+    const seen = await uow.run((r) => r.candidates.listSeen(adapter.network, batchSize));
+    for (const { candidate: c } of seen) {
+      const settings = catalog.get(c.amount.asset.id);
+      const subject = `${c.network}/${c.txHash}`;
+      let result: VerificationResult;
       try {
-        result = await adapter.verify(t.candidate, settings.asset, watchedAddresses(settings));
+        result = await adapter.verify(c, settings.asset, watchedAddresses(settings));
       } catch (e) {
-        // Provider failure: keep the candidate and retry later; never treat an error as a decision.
+        // Provider failure: keep the candidate and retry later; an error is never a decision.
         stats.errors++;
         await uow.run((r) =>
-          r.transfers.markPending(t.candidate.ref, `error: ${e instanceof Error ? e.message : e}`),
+          r.candidates.markPending(c.network, c.txHash, `error: ${e instanceof Error ? e.message : e}`),
         );
         continue;
       }
       await uow.run(async (repos) => {
         const at = clock.now();
-        if (result.status === "final") {
-          stats.final++;
-          await repos.transfers.markVerified(t.candidate.ref, result.transfer);
-          await repos.audit.record({
-            at,
-            actor: "verifier",
-            subject,
-            decision: "final",
-            reason: "finalized and successful",
-            data: { amount: result.transfer.amount.toDecimalString(), to: result.transfer.to.value },
-          });
-        } else if (result.status === "rejected") {
-          stats.rejected++;
-          await repos.transfers.markRejected(t.candidate.ref, result.reason);
-          await repos.audit.record({
-            at,
-            actor: "verifier",
-            subject,
-            decision: "rejected",
-            reason: result.reason,
-          });
-        } else {
+        if (result.status === "pending") {
           stats.pending++;
-          await repos.transfers.markPending(t.candidate.ref, result.reason);
+          await repos.candidates.markPending(c.network, c.txHash, result.reason);
+          return;
         }
+        const reason =
+          result.status === "rejected"
+            ? result.reason
+            : result.transfers.length === 0
+              ? "no transfer of the asset to a watched address"
+              : null;
+        if (reason !== null) {
+          stats.rejected++;
+          await repos.candidates.markRejected(c.network, c.txHash, reason);
+          await repos.audit.record({ at, actor: "verifier", subject, decision: "rejected", reason });
+          return;
+        }
+        if (result.status !== "final") return;
+        stats.final++;
+        for (const t of result.transfers) {
+          const dust = isDust(t.amount, settings.amountPolicy);
+          const outcome = await repos.transfers.insert(t, dust ? "dust" : "verified", dust ? "dust" : null);
+          if (outcome === "inserted") stats.transfers++;
+          await repos.audit.record({
+            at,
+            actor: "verifier",
+            subject: txRefKey(t.ref),
+            decision: dust ? "dust" : "final",
+            reason: dust ? "below dust threshold" : "finalized and successful",
+            data: {
+              amount: t.amount.toDecimalString(),
+              to: t.to.value,
+              from: t.from,
+              duplicate: outcome === "duplicate",
+            },
+          });
+        }
+        await repos.candidates.markVerified(c.network, c.txHash);
       });
     }
     return stats;

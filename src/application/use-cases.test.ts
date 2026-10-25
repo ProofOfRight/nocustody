@@ -44,9 +44,17 @@ class ScriptedAml implements AmlScreener {
   }
 }
 
-function candidate(hash: string, amount: string, at: Date, to = ADDR_A, index = 0n): TransferCandidate {
-  return { ref: txRef(TRON, hash.padEnd(64, "0"), index), from: "TSenderX", to, amount: usdt(amount), at };
+function candidate(hash: string, amount: string, at: Date, to = ADDR_A): TransferCandidate {
+  return { network: TRON, txHash: hash.padEnd(64, "0"), from: "TSenderX", to, amount: usdt(amount), at };
 }
+
+const verified = (c: TransferCandidate, index: bigint, amount: string, to = ADDR_A) => ({
+  ref: txRef(TRON, c.txHash, index),
+  from: c.from,
+  to,
+  amount: usdt(amount),
+  at: c.at,
+});
 
 function settings(over: Partial<AssetSettings> = {}): AssetSettings {
   return {
@@ -260,6 +268,7 @@ describe("payment flow", () => {
     await s.cycle();
     s.store.data.cursors.clear(); // rescan from the start (overlap)
     await s.cycle();
+    expect(s.store.data.candidates.size).toBe(1);
     expect(s.store.data.transfers.size).toBe(1);
     expect(s.store.data.outbox.filter((e) => e.type === "invoice.paid")).toHaveLength(1);
   });
@@ -269,10 +278,11 @@ describe("payment flow", () => {
     s.clock.advance(MIN);
     const c = candidate("bb", "10.01", s.clock.now());
     s.chain.pages = [[c]];
-    s.chain.verdicts.set(c.ref.txHash, { status: "rejected", reason: "receipt result REVERT" });
+    s.chain.verdicts.set(c.txHash, { status: "rejected", reason: "receipt result REVERT" });
     await s.cycle();
     expect(s.store.data.invoices.get(invoice.id)?.status).toBe("confirming");
-    expect([...s.store.data.transfers.values()][0]?.status).toBe("rejected");
+    expect([...s.store.data.candidates.values()][0]?.status).toBe("rejected");
+    expect(s.store.data.transfers.size).toBe(0);
     // the invoice still expires and its slot stays locked
     s.clock.advance(30 * MIN);
     expect(await s.expire.execute()).toBe(1);
@@ -282,12 +292,12 @@ describe("payment flow", () => {
     await s.order("o1");
     s.clock.advance(MIN);
     const c1 = candidate("cc", "10.01", s.clock.now());
-    const c2 = candidate("dd", "10.01", s.clock.now(), ADDR_A, 1n);
+    const c2 = candidate("dd", "10.01", s.clock.now());
     s.chain.pages = [[c1, c2]];
-    s.chain.verdicts.set(c1.ref.txHash, { status: "pending", reason: "not solidified" });
-    s.chain.verdicts.set(c2.ref.txHash, new Error("HTTP 503"));
+    s.chain.verdicts.set(c1.txHash, { status: "pending", reason: "not solidified" });
+    s.chain.verdicts.set(c2.txHash, new Error("HTTP 503"));
     await s.cycle();
-    const statuses = [...s.store.data.transfers.values()].map((t) => [t.status, t.attempts]);
+    const statuses = [...s.store.data.candidates.values()].map((t) => [t.status, t.attempts]);
     expect(statuses).toEqual([
       ["seen", 1],
       ["seen", 1],
@@ -302,6 +312,45 @@ describe("payment flow", () => {
     expect(s.store.data.outbox.at(-1)?.type).toBe("transfer.unmatched");
   });
 
+  it("several transfers in one transaction are separate payments; the hint is never credited", async () => {
+    const { invoice } = await s.order("o1");
+    const other = await s.order("o2");
+    s.clock.advance(MIN);
+    // the indexer says 10.01 to A; the finalized receipt has two Transfer logs: 10.02 (log 1) and 10.01 (log 4)
+    const c = candidate("mm", "10.01", s.clock.now());
+    s.chain.pages = [[c]];
+    s.chain.verdicts.set(c.txHash, {
+      status: "final",
+      transfers: [verified(c, 1n, "10.02"), verified(c, 4n, "10.01")],
+    });
+    expect(await s.cycle()).toMatchObject({ matched: 2 });
+    expect(s.store.data.invoices.get(invoice.id)?.payments[0]?.transferKey).toBe(
+      txRefKey(txRef(TRON, c.txHash, 4n)),
+    );
+    expect(s.store.data.invoices.get(other.invoice.id)?.payments[0]?.transferKey).toBe(
+      txRefKey(txRef(TRON, c.txHash, 1n)),
+    );
+  });
+
+  it("credits the verified amount, not the indexer's claim", async () => {
+    const { invoice } = await s.order("o1");
+    s.clock.advance(MIN);
+    const c = candidate("nn", "10.01", s.clock.now()); // indexer lies
+    s.chain.pages = [[c]];
+    s.chain.verdicts.set(c.txHash, { status: "final", transfers: [verified(c, 0n, "0.01")] });
+    expect(await s.cycle()).toMatchObject({ unmatched: 1, matched: 0 });
+    expect(s.store.data.invoices.get(invoice.id)?.status).toBe("confirming");
+  });
+
+  it("a final transaction without a transfer to us is rejected", async () => {
+    await s.order("o1");
+    const c = candidate("oo", "10.01", s.clock.now());
+    s.chain.pages = [[c]];
+    s.chain.verdicts.set(c.txHash, { status: "final", transfers: [] });
+    await s.cycle();
+    expect([...s.store.data.candidates.values()][0]?.status).toBe("rejected");
+  });
+
   it("ignores dust and never verifies it", async () => {
     const d = setup({
       assets: [
@@ -311,7 +360,8 @@ describe("payment flow", () => {
     d.chain.pages = [[candidate("ff", "0.000001", d.clock.now())]];
     d.chain.verdicts.set("ff".padEnd(64, "0"), new Error("must not be called"));
     await d.cycle();
-    expect([...d.store.data.transfers.values()][0]?.status).toBe("dust");
+    expect([...d.store.data.candidates.values()][0]?.status).toBe("dust");
+    expect(d.store.data.transfers.size).toBe(0);
   });
 
   it("does not advance the cursor when storing candidates fails", async () => {
@@ -321,9 +371,9 @@ describe("payment flow", () => {
       original(async (repos) => {
         const broken = {
           ...repos,
-          transfers: {
-            ...repos.transfers,
-            insertCandidate: async () => {
+          candidates: {
+            ...repos.candidates,
+            insert: async () => {
               throw new Error("disk full");
             },
           },
@@ -373,7 +423,9 @@ describe("payment flow", () => {
     const c = candidate("jj", "10.01", s.clock.now());
     s.chain.pages = [[c]];
     await s.cycle();
-    expect(s.store.data.invoices.get(invoice.id)?.payments[0]?.transferKey).toBe(txRefKey(c.ref));
+    expect(s.store.data.invoices.get(invoice.id)?.payments[0]?.transferKey).toBe(
+      txRefKey(txRef(TRON, c.txHash, 0n)),
+    );
   });
 
   it("never stores transfers for other assets or addresses", async () => {

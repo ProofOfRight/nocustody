@@ -87,20 +87,18 @@ describe("PostgreSQL repositories", () => {
     ).rejects.toThrow("rollback");
   });
 
-  it("stores each transfer once: UNIQUE(network, tx_hash, log_index)", async () => {
-    const c = {
-      ref: txRef(TRON, "a".repeat(64), 0n),
-      from: "TSender",
-      to: ADDR,
-      amount: usdt("10.01"),
-      at: T0,
-    };
+  it("stores each candidate tx once and each transfer once: UNIQUE(network, tx_hash, log_index)", async () => {
+    const hash = "a".repeat(64);
+    const c = { network: TRON, txHash: hash, from: "TSender", to: ADDR, amount: usdt("10.01"), at: T0 };
+    const t = { ref: txRef(TRON, hash, 0n), from: "TSender", to: ADDR, amount: usdt("10.01"), at: T0 };
     await uow.run(async (r) => {
-      expect(await r.transfers.insertCandidate(c, "seen", null)).toBe("inserted");
-      expect(await r.transfers.insertCandidate(c, "seen", null)).toBe("duplicate");
-      expect(
-        await r.transfers.insertCandidate({ ...c, ref: txRef(TRON, "a".repeat(64), 1n) }, "seen", null),
-      ).toBe("inserted");
+      expect(await r.candidates.insert(c, "seen", null)).toBe("inserted");
+      expect(await r.candidates.insert(c, "seen", null)).toBe("duplicate");
+      expect(await r.transfers.insert(t, "verified", null)).toBe("inserted");
+      expect(await r.transfers.insert(t, "verified", null)).toBe("duplicate");
+      expect(await r.transfers.insert({ ...t, ref: txRef(TRON, hash, 1n) }, "verified", null)).toBe(
+        "inserted",
+      );
     });
     const { rows } = await pool.query("SELECT count(*)::int AS n FROM observed_transfers");
     expect(rows[0].n).toBe(2);
@@ -175,13 +173,15 @@ describe("PostgreSQL repositories", () => {
 
     now += MIN;
     const c = {
-      ref: txRef(TRON, "b".repeat(64), 3n),
+      network: TRON,
+      txHash: "b".repeat(64),
       from: "TSender",
       to: ADDR,
       amount: usdt("10.01"),
       at: clock.now(),
     };
     chain.pages = [[c]];
+    chain.verdicts.set(c.txHash, { status: "final", transfers: [{ ...c, ref: txRef(TRON, c.txHash, 3n) }] });
     await new IngestTransfers({
       adapter: chain,
       catalog,

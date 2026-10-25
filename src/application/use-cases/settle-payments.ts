@@ -4,14 +4,7 @@ import type { Invoice } from "../../domain/invoice.ts";
 import type { NetworkId } from "../../domain/network.ts";
 import { txRefKey } from "../../domain/tx-ref.ts";
 import type { AssetCatalog } from "../catalog.ts";
-import type {
-  AmlScreener,
-  Clock,
-  Repositories,
-  StoredTransfer,
-  UnitOfWork,
-  VerifiedTransfer,
-} from "../ports.ts";
+import type { AmlScreener, Clock, Repositories, UnitOfWork, VerifiedTransfer } from "../ports.ts";
 import type { PaymentInstructionStrategy } from "../strategies/unique-amount.ts";
 
 export interface SettleStats {
@@ -48,21 +41,15 @@ export class SettlePayments {
   async execute(): Promise<SettleStats> {
     const { network, uow, batchSize } = this.#deps;
     const stats: SettleStats = { matched: 0, unmatched: 0, completed: 0, held: 0, amlDeferred: 0 };
-    const verified = await uow.run((r) => r.transfers.listByStatus(network, "verified", batchSize));
+    const verified = await uow.run((r) => r.transfers.listVerified(network, batchSize));
     for (const t of verified) {
-      if (t.verified)
-        await uow.run((repos) => this.#settleOne(repos, t, t.verified as VerifiedTransfer, stats));
+      await uow.run((repos) => this.#settleOne(repos, t.transfer, stats));
     }
     await this.#screen(stats);
     return stats;
   }
 
-  async #settleOne(
-    repos: Repositories,
-    t: StoredTransfer,
-    v: VerifiedTransfer,
-    stats: SettleStats,
-  ): Promise<void> {
+  async #settleOne(repos: Repositories, v: VerifiedTransfer, stats: SettleStats): Promise<void> {
     const { catalog, strategy, clock } = this.#deps;
     const now = clock.now();
     const subject = txRefKey(v.ref);
@@ -90,7 +77,7 @@ export class SettlePayments {
     if (m.kind === "unmatched") return unmatched(m.reason);
     const invoice = await repos.invoices.findById(m.invoiceId);
     if (!invoice) return unmatched("invoice_missing");
-    const settings = catalog.get(t.candidate.amount.asset.id);
+    const settings = catalog.get(v.amount.asset.id);
     try {
       invoice.applyPayment(
         { transferKey: subject, from: v.from, amount: v.amount, at: v.at },
