@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { candidateAmounts } from "../../domain/amount-policy.ts";
-import { type AmountSlot, amountSlot, matchSlot } from "../../domain/amount-slot.ts";
+import { type AmountSlot, amountSlot, matchSlot, type TransferFacts } from "../../domain/amount-slot.ts";
 import type { PaymentInstructions } from "../../domain/invoice.ts";
 import type { Money } from "../../domain/money.ts";
 import type { AssetSettings } from "../catalog.ts";
 import { ApplicationError } from "../errors.ts";
-import type { SlotRepository, VerifiedTransfer } from "../ports.ts";
+import type { SlotRepository } from "../ports.ts";
 
 export interface AllocationRequest {
   readonly invoiceId: string;
@@ -25,7 +25,8 @@ export interface PaymentInstructionStrategy {
     req: AllocationRequest,
     slots: SlotRepository,
   ): Promise<{ instructions: PaymentInstructions; slot: AmountSlot }>;
-  match(transfer: VerifiedTransfer, slots: SlotRepository): Promise<StrategyMatch>;
+  /** Matches by (address, amount, block time); callers pass verified facts for crediting. */
+  match(transfer: TransferFacts, slots: SlotRepository): Promise<StrategyMatch>;
 }
 
 /**
@@ -54,9 +55,9 @@ export class UniqueAmountStrategy implements PaymentInstructionStrategy {
     throw new ApplicationError("allocation.no_free_slot", `no free amount slot for ${req.settings.asset.id}`);
   }
 
-  async match(transfer: VerifiedTransfer, slots: SlotRepository): Promise<StrategyMatch> {
+  async match(transfer: TransferFacts, slots: SlotRepository): Promise<StrategyMatch> {
     const candidates = await slots.findCandidates(transfer.to, transfer.amount, transfer.at);
-    const m = matchSlot({ to: transfer.to, amount: transfer.amount, at: transfer.at }, candidates);
+    const m = matchSlot(transfer, candidates);
     return m.kind === "matched"
       ? { kind: "matched", invoiceId: m.slot.invoiceId }
       : { kind: "unmatched", reason: m.reason };

@@ -10,10 +10,11 @@ import { type TxRef, txRefKey } from "../../domain/tx-ref.ts";
 import { ConcurrencyError } from "../errors.ts";
 import type {
   AuditEntry,
+  CandidateStatus,
   Repositories,
+  StoredCandidate,
   StoredTransfer,
   TransferCandidate,
-  TransferStatus,
   UnitOfWork,
   VerifiedTransfer,
 } from "../ports.ts";
@@ -21,6 +22,7 @@ import type {
 interface Data {
   invoices: Map<string, InvoiceState>;
   slots: AmountSlot[];
+  candidates: Map<string, StoredCandidate>;
   transfers: Map<string, StoredTransfer>;
   outbox: DomainEvent[];
   cursors: Map<string, string>;
@@ -32,6 +34,7 @@ export class InMemoryStore implements UnitOfWork {
   data: Data = {
     invoices: new Map(),
     slots: [],
+    candidates: new Map(),
     transfers: new Map(),
     outbox: [],
     cursors: new Map(),
@@ -42,6 +45,7 @@ export class InMemoryStore implements UnitOfWork {
     const snapshot: Data = {
       invoices: new Map(this.data.invoices),
       slots: [...this.data.slots],
+      candidates: new Map(this.data.candidates),
       transfers: new Map(this.data.transfers),
       outbox: [...this.data.outbox],
       cursors: new Map(this.data.cursors),
@@ -62,6 +66,12 @@ export class InMemoryStore implements UnitOfWork {
       const cur = d().transfers.get(key);
       if (!cur) throw new Error(`no transfer ${key}`);
       d().transfers.set(key, { ...cur, ...p });
+    };
+    const patchCandidate = (network: NetworkId, txHash: string, p: Partial<StoredCandidate>) => {
+      const key = `${network}/${txHash}`;
+      const cur = d().candidates.get(key);
+      if (!cur) throw new Error(`no candidate ${key}`);
+      d().candidates.set(key, { ...cur, ...p });
     };
     return {
       invoices: {
@@ -122,31 +132,37 @@ export class InMemoryStore implements UnitOfWork {
               x.amount.units === amount.units,
           ),
       },
-      transfers: {
-        insertCandidate: async (c: TransferCandidate, status, reason) => {
-          const key = txRefKey(c.ref);
-          if (d().transfers.has(key)) return "duplicate";
-          d().transfers.set(key, {
-            candidate: c,
-            status,
-            verified: null,
-            attempts: 0,
-            invoiceId: null,
-            reason,
-          });
+      candidates: {
+        insert: async (c: TransferCandidate, status, reason) => {
+          const key = `${c.network}/${c.txHash}`;
+          if (d().candidates.has(key)) return "duplicate";
+          d().candidates.set(key, { candidate: c, status, attempts: 0, reason });
           return "inserted";
         },
-        listByStatus: async (network: NetworkId, status: TransferStatus, limit) =>
-          [...d().transfers.values()]
-            .filter((t) => t.candidate.ref.network === network && t.status === status)
+        listSeen: async (network: NetworkId, limit) =>
+          [...d().candidates.values()]
+            .filter((c) => c.candidate.network === network && c.status === "seen")
             .slice(0, limit),
-        markVerified: async (ref, verified: VerifiedTransfer) =>
-          patch(ref, { status: "verified", verified, reason: null }),
-        markRejected: async (ref, reason) => patch(ref, { status: "rejected", reason }),
-        markPending: async (ref, reason) => {
-          const cur = d().transfers.get(txRefKey(ref));
-          patch(ref, { reason, attempts: (cur?.attempts ?? 0) + 1 });
+        markVerified: async (network, txHash) =>
+          patchCandidate(network, txHash, { status: "verified" as CandidateStatus }),
+        markRejected: async (network, txHash, reason) =>
+          patchCandidate(network, txHash, { status: "rejected", reason }),
+        markPending: async (network, txHash, reason) => {
+          const cur = d().candidates.get(`${network}/${txHash}`);
+          patchCandidate(network, txHash, { reason, attempts: (cur?.attempts ?? 0) + 1 });
         },
+      },
+      transfers: {
+        insert: async (t: VerifiedTransfer, status, reason) => {
+          const key = txRefKey(t.ref);
+          if (d().transfers.has(key)) return "duplicate";
+          d().transfers.set(key, { transfer: t, status, invoiceId: null, reason });
+          return "inserted";
+        },
+        listVerified: async (network: NetworkId, limit) =>
+          [...d().transfers.values()]
+            .filter((t) => t.transfer.ref.network === network && t.status === "verified")
+            .slice(0, limit),
         markMatched: async (ref, invoiceId) => patch(ref, { status: "matched", invoiceId }),
         markUnmatched: async (ref, reason) => patch(ref, { status: "unmatched", reason }),
       },

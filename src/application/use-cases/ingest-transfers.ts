@@ -2,7 +2,6 @@
 import { isDust } from "../../domain/amount-policy.ts";
 import { sameAsset } from "../../domain/asset.ts";
 import { sameAddress } from "../../domain/chain-address.ts";
-import { txRefKey } from "../../domain/tx-ref.ts";
 import { type AssetCatalog, watchedAddresses } from "../catalog.ts";
 import type { ChainAdapter, Clock, UnitOfWork } from "../ports.ts";
 import type { PaymentInstructionStrategy } from "../strategies/unique-amount.ts";
@@ -15,11 +14,6 @@ export interface IngestStats {
   ignored: number;
 }
 
-/**
- * Scanner step: fetch candidates from the indexer, store them idempotently and advance the cursor in the same
- * transaction, so the cursor never moves past transfers that were not stored. A matching invoice is marked as
- * "confirming"; nothing is credited here.
- */
 export interface IngestTransfersDeps {
   readonly adapter: ChainAdapter;
   readonly catalog: AssetCatalog;
@@ -30,6 +24,11 @@ export interface IngestTransfersDeps {
   readonly maxPages: number;
 }
 
+/**
+ * Scanner step: fetch candidate transactions from the indexer, store them idempotently and advance the cursor in the
+ * same transaction, so the cursor never moves past candidates that were not stored. A matching invoice is marked
+ * "confirming" from the indexer's hint; nothing is credited here.
+ */
 export class IngestTransfers {
   readonly #deps: IngestTransfersDeps;
 
@@ -50,24 +49,21 @@ export class IngestTransfers {
         await uow.run(async (repos) => {
           const now = clock.now();
           for (const c of result.candidates) {
+            const subject = `${c.network}/${c.txHash}`;
             // Defence in depth: the adapter already filters, but never store what is not ours.
             if (!sameAsset(c.amount.asset, settings.asset) || !watched.some((a) => sameAddress(a, c.to))) {
               stats.ignored++;
               await repos.audit.record({
                 at: now,
                 actor: "scanner",
-                subject: txRefKey(c.ref),
+                subject,
                 decision: "ignored",
                 reason: "not a watched asset/address",
               });
               continue;
             }
             const dust = isDust(c.amount, settings.amountPolicy);
-            const outcome = await repos.transfers.insertCandidate(
-              c,
-              dust ? "dust" : "seen",
-              dust ? "dust" : null,
-            );
+            const outcome = await repos.candidates.insert(c, dust ? "dust" : "seen", dust ? "dust" : null);
             if (outcome === "duplicate") {
               stats.duplicates++;
               continue;
@@ -78,7 +74,7 @@ export class IngestTransfers {
               await repos.audit.record({
                 at: now,
                 actor: "scanner",
-                subject: txRefKey(c.ref),
+                subject,
                 decision: "dust",
                 reason: "below dust threshold",
                 data: { amount: c.amount.toDecimalString(), from: c.from },
@@ -89,7 +85,7 @@ export class IngestTransfers {
             if (m.kind === "matched") {
               const invoice = await repos.invoices.findById(m.invoiceId);
               if (invoice) {
-                invoice.markDetected(txRefKey(c.ref), now);
+                invoice.markDetected(subject, now);
                 await repos.invoices.update(invoice);
                 await repos.outbox.append(invoice.pullEvents());
               }

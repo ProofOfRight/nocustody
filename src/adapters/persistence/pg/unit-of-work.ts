@@ -3,7 +3,9 @@ import type { Pool, PoolClient } from "pg";
 import { ConcurrencyError } from "../../../application/errors.ts";
 import type {
   AuditEntry,
+  CandidateStatus,
   Repositories,
+  StoredCandidate,
   StoredTransfer,
   TransferCandidate,
   TransferStatus,
@@ -76,6 +78,19 @@ interface PaymentRow {
   paid_at: Date;
 }
 
+interface CandidateRow {
+  network: string;
+  tx_hash: string;
+  asset_id: string;
+  sender: string;
+  recipient: string;
+  amount_units: string;
+  block_time: Date;
+  status: CandidateStatus;
+  attempts: number;
+  reason: string | null;
+}
+
 interface TransferRow {
   network: string;
   tx_hash: string;
@@ -86,8 +101,6 @@ interface TransferRow {
   amount_units: string;
   block_time: Date;
   status: TransferStatus;
-  verified: { from: string; to: string; amount: string; at: string } | null;
-  attempts: number;
   invoice_id: string | null;
   reason: string | null;
 }
@@ -151,32 +164,50 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
   const priceJson = (p: LockedPrice | null) =>
     p ? JSON.stringify({ ...p, rateAt: p.rateAt ? p.rateAt.toISOString() : null }) : null;
 
-  const toTransfer = (r: TransferRow): StoredTransfer => {
-    const asset = assetOf(r.asset_id);
+  const toCandidate = (r: CandidateRow): StoredCandidate => {
     const network = r.network as NetworkId;
-    const ref = txRef(network, r.tx_hash, units(r.log_index));
     return {
       candidate: {
-        ref,
+        network,
+        txHash: r.tx_hash,
         from: r.sender,
         to: chainAddress(network, r.recipient),
-        amount: Money.of(asset, units(r.amount_units)),
+        amount: Money.of(assetOf(r.asset_id), units(r.amount_units)),
         at: r.block_time,
       },
       status: r.status,
-      verified: r.verified
-        ? {
-            ref,
-            from: r.verified.from,
-            to: chainAddress(network, r.verified.to),
-            amount: Money.of(asset, units(r.verified.amount)),
-            at: new Date(r.verified.at),
-          }
-        : null,
       attempts: r.attempts,
+      reason: r.reason,
+    };
+  };
+
+  const toTransfer = (r: TransferRow): StoredTransfer => {
+    const network = r.network as NetworkId;
+    return {
+      transfer: {
+        ref: txRef(network, r.tx_hash, units(r.log_index)),
+        from: r.sender,
+        to: chainAddress(network, r.recipient),
+        amount: Money.of(assetOf(r.asset_id), units(r.amount_units)),
+        at: r.block_time,
+      },
+      status: r.status,
       invoiceId: r.invoice_id,
       reason: r.reason,
     };
+  };
+
+  const setCandidate = async (
+    network: NetworkId,
+    txHash: string,
+    sets: string,
+    params: unknown[],
+  ): Promise<void> => {
+    const res = await db.query(
+      `UPDATE tx_candidates SET ${sets}, updated_at = now() WHERE network = $1 AND tx_hash = $2`,
+      [network, txHash, ...params],
+    );
+    if (res.rowCount !== 1) throw new Error(`candidate ${network}/${txHash} not found`);
   };
 
   const setTransfer = async (ref: TxRef, sets: string, params: unknown[]): Promise<void> => {
@@ -280,17 +311,14 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
       },
     },
 
-    transfers: {
-      insertCandidate: async (c: TransferCandidate, status, reason) => {
+    candidates: {
+      insert: async (c: TransferCandidate, status, reason) => {
         const res = await db.query(
-          `INSERT INTO observed_transfers (network, tx_hash, log_index, asset_id, sender, recipient, amount_units,
-             block_time, status, reason)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-           ON CONFLICT (network, tx_hash, log_index) DO NOTHING`,
+          `INSERT INTO tx_candidates (network, tx_hash, asset_id, sender, recipient, amount_units, block_time, status, reason)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (network, tx_hash) DO NOTHING`,
           [
-            c.ref.network,
-            c.ref.txHash,
-            c.ref.index.toString(),
+            c.network,
+            c.txHash,
             c.amount.asset.id,
             c.from,
             c.to.value,
@@ -302,26 +330,55 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
         );
         return res.rowCount === 1 ? "inserted" : "duplicate";
       },
-      listByStatus: async (network: NetworkId, status: TransferStatus, limit) => {
+      listSeen: async (network: NetworkId, limit: number) => {
+        const { rows } = await db.query<CandidateRow>(
+          "SELECT * FROM tx_candidates WHERE network = $1 AND status = 'seen' ORDER BY seen_at, tx_hash LIMIT $2",
+          [network, limit],
+        );
+        return rows.map(toCandidate);
+      },
+      markVerified: (network, txHash) =>
+        setCandidate(network, txHash, "status = 'verified', reason = NULL", []),
+      markRejected: (network, txHash, reason) =>
+        setCandidate(network, txHash, "status = 'rejected', reason = $3", [reason]),
+      markPending: (network, txHash, reason) =>
+        setCandidate(network, txHash, "attempts = attempts + 1, reason = $3", [reason]),
+    },
+
+    transfers: {
+      insert: async (t: VerifiedTransfer, status, reason) => {
+        const res = await db.query(
+          `INSERT INTO observed_transfers (network, tx_hash, log_index, asset_id, sender, recipient, amount_units,
+             block_time, status, reason)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT (network, tx_hash, log_index) DO NOTHING`,
+          [
+            t.ref.network,
+            t.ref.txHash,
+            t.ref.index.toString(),
+            t.amount.asset.id,
+            t.from,
+            t.to.value,
+            t.amount.units.toString(),
+            t.at,
+            status,
+            reason,
+          ],
+        );
+        return res.rowCount === 1 ? "inserted" : "duplicate";
+      },
+      listVerified: async (network: NetworkId, limit: number) => {
         const { rows } = await db.query<TransferRow>(
-          "SELECT * FROM observed_transfers WHERE network = $1 AND status = $2 ORDER BY seen_at, tx_hash, log_index LIMIT $3",
-          [network, status, limit],
+          `SELECT * FROM observed_transfers WHERE network = $1 AND status = 'verified'
+           ORDER BY created_at, tx_hash, log_index LIMIT $2`,
+          [network, limit],
         );
         return rows.map(toTransfer);
       },
-      markVerified: (ref, v: VerifiedTransfer) =>
-        setTransfer(ref, "status = 'verified', verified = $4, reason = NULL", [
-          JSON.stringify({
-            from: v.from,
-            to: v.to.value,
-            amount: v.amount.units.toString(),
-            at: v.at.toISOString(),
-          }),
-        ]),
-      markRejected: (ref, reason) => setTransfer(ref, "status = 'rejected', reason = $4", [reason]),
-      markPending: (ref, reason) => setTransfer(ref, "attempts = attempts + 1, reason = $4", [reason]),
-      markMatched: (ref, invoiceId) => setTransfer(ref, "status = 'matched', invoice_id = $4", [invoiceId]),
-      markUnmatched: (ref, reason) => setTransfer(ref, "status = 'unmatched', reason = $4", [reason]),
+      markMatched: (ref: TxRef, invoiceId: string) =>
+        setTransfer(ref, "status = 'matched', invoice_id = $4", [invoiceId]),
+      markUnmatched: (ref: TxRef, reason: string) =>
+        setTransfer(ref, "status = 'unmatched', reason = $4", [reason]),
     },
 
     outbox: {

@@ -55,7 +55,25 @@ CREATE TABLE amount_slots (
 );
 CREATE INDEX amount_slots_lookup ON amount_slots (network, address, amount_units);
 
--- Idempotency key of a transfer: (network, tx_hash, log_index).
+-- Transactions reported by an indexer (untrusted hint). Verified transfers are created from them by the verifier.
+CREATE TABLE tx_candidates (
+  network      text NOT NULL,
+  tx_hash      text NOT NULL,
+  asset_id     text NOT NULL,
+  sender       text NOT NULL,
+  recipient    text NOT NULL,
+  amount_units numeric(78, 0) NOT NULL CHECK (amount_units >= 0),
+  block_time   timestamptz NOT NULL,
+  status       text NOT NULL CHECK (status IN ('seen', 'dust', 'verified', 'rejected')),
+  attempts     integer NOT NULL DEFAULT 0,
+  reason       text,
+  seen_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (network, tx_hash)
+);
+CREATE INDEX tx_candidates_seen ON tx_candidates (network, seen_at) WHERE status = 'seen';
+
+-- Transfers confirmed by a finalized-state query. Idempotency key: (network, tx_hash, log_index).
 CREATE TABLE observed_transfers (
   network      text NOT NULL,
   tx_hash      text NOT NULL,
@@ -65,16 +83,15 @@ CREATE TABLE observed_transfers (
   recipient    text NOT NULL,
   amount_units numeric(78, 0) NOT NULL CHECK (amount_units >= 0),
   block_time   timestamptz NOT NULL,
-  status       text NOT NULL CHECK (status IN ('seen', 'dust', 'verified', 'rejected', 'matched', 'unmatched')),
-  verified     jsonb,
-  attempts     integer NOT NULL DEFAULT 0,
+  status       text NOT NULL CHECK (status IN ('verified', 'dust', 'matched', 'unmatched')),
   invoice_id   text REFERENCES invoices (id),
   reason       text,
-  seen_at      timestamptz NOT NULL DEFAULT now(),
+  created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (network, tx_hash, log_index)
+  PRIMARY KEY (network, tx_hash, log_index),
+  FOREIGN KEY (network, tx_hash) REFERENCES tx_candidates (network, tx_hash)
 );
-CREATE INDEX observed_transfers_status ON observed_transfers (network, status, seen_at);
+CREATE INDEX observed_transfers_verified ON observed_transfers (network, created_at) WHERE status = 'verified';
 
 -- Transactional outbox: events are inserted in the same transaction as the state change.
 CREATE TABLE outbox (
