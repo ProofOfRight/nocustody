@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+# Internal working docs (separate local git repo), not part of the public project
+internal-docs/
+CLAUDE.local.md

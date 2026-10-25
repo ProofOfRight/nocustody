@@ -1,0 +1,31 @@
+# Architecture Decision Records
+
+This index is the project's decision log. One file per decision; to change a decision, add a new ADR
+that supersedes the old one and update the status column.
+
+Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequences sections.
+
+| ADR | Date | Decision | Status |
+|---|---|---|---|
+| [0001](0001-own-code-not-fork.md) | 2026-10-25 | Own code instead of forking an existing gateway | accepted |
+| [0002](0002-watch-only.md) | 2026-10-26 | Watch-only (non-custodial) gateway | accepted |
+| [0003](0003-nodejs-typescript.md) | 2026-10-26 | Node.js + TypeScript (strict) | accepted |
+| [0004](0004-separate-service-http.md) | 2026-10-26 | Separate service integrated via HTTP API and webhooks | accepted |
+| [0005](0005-modular-monolith-hexagonal.md) | 2026-10-26 | Modular monolith, hexagonal architecture, DDD | accepted |
+| [0006](0006-apache-2-clean-room.md) | 2026-10-26 | Apache-2.0 license, clean-room implementation | accepted |
+| [0007](0007-minimal-dependencies.md) | 2026-10-26 | Minimal dependencies, strict supply-chain policy | accepted |
+| [0008](0008-transactional-outbox.md) | 2026-10-26 | Transactional outbox for webhooks | accepted |
+| [0009](0009-independent-finality-check.md) | 2026-10-26 | Independent "final + successful" verification before crediting | accepted |
+| [0010](0010-multi-currency-pricing.md) | 2026-10-26 | Multi-currency pricing as a first-class requirement | accepted |
+| [0011](0011-project-name.md) | 2026-10-26 | Project name `nocustody`, separate GitHub organization | accepted |
+| [0012](0012-fastify-manual-di.md) | 2026-10-26 | Fastify with a hand-written composition root | accepted |
+| [0013](0013-single-package-npm.md) | 2026-10-26 | Single package, npm, enforced layer boundaries | accepted |
+| [0014](0014-postgresql-only.md) | 2026-10-26 | PostgreSQL only, `pg` driver, plain SQL migrations | accepted |
+| [0015](0015-thin-chain-clients.md) | 2026-10-26 | Thin in-house chain clients; official libraries only where parsing is risky | accepted |
+| [0016](0016-single-tenant.md) | 2026-10-26 | Single-tenant installations | accepted |
+| [0017](0017-documentation-language.md) | 2026-10-26 | Documentation language | amended |
+| [0018](0018-node-26-docker-dev.md) | 2026-10-26 | Node.js 26; development runs entirely in Docker | accepted |
+| [0019](0019-private-consumer-notes.md) | 2026-10-26 | Consumer-specific notes stay out of the public repository | superseded |
+| [0020](0020-internal-docs-outside-repo.md) | 2026-10-26 | Internal working docs are kept outside the public repository | accepted |
+| [0021](0021-biome.md) | 2026-10-26 | Biome for linting and formatting | accepted |
+| [0022](0022-typescript-run-mode.md) | 2026-10-26 | Run TypeScript natively in development, compile for production | accepted |
