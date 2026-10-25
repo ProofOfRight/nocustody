@@ -30,3 +30,4 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0021](0021-biome.md) | 2026-10-26 | Biome for linting and formatting | accepted |
 | [0022](0022-typescript-run-mode.md) | 2026-10-26 | Run TypeScript natively in development, compile for production | accepted |
 | [0023](0023-mpl-for-dev-dependencies.md) | 2026-10-26 | MPL-2.0 allowed for dev-only dependencies | accepted |
+| [0024](0024-unlicense-allowed.md) | 2026-10-26 | Unlicense allowed; TON libraries `@ton/core` and `@ton/crypto` | accepted |

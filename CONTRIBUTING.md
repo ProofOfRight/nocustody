@@ -52,7 +52,7 @@ Run `make check` before every commit.
 ## Dependencies
 
 Each new dependency is a deliberate decision. In the pull request, explain why it is needed, why it cannot reasonably
-be written in-house, and its transitive footprint. Runtime dependencies must use MIT, BSD, ISC or Apache-2.0
+be written in-house, and its transitive footprint. Runtime dependencies must use MIT, BSD, ISC, Apache-2.0 or Unlicense
 (or similar permissive) licenses; dev-only dependencies may also use MPL-2.0 ([ADR-0023](docs/adr/0023-mpl-for-dev-dependencies.md)).
 GPL, AGPL and LGPL are not accepted. Versions are exact and the lockfile is committed; install scripts never run.
 

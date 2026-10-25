@@ -46,6 +46,6 @@ These rules are mandatory for all code in this repository. Threats they address:
 
 - Minimal dependencies; each one is justified in its pull request ([ADR-0007](adr/0007-minimal-dependencies.md)).
 - Exact versions, committed lockfile, `npm ci --ignore-scripts`, Dependabot with manual review, `npm audit` in CI.
-- License allowlist checked in CI ([ADR-0006](adr/0006-apache-2-clean-room.md), [ADR-0023](adr/0023-mpl-for-dev-dependencies.md)).
+- License allowlist checked in CI ([ADR-0006](adr/0006-apache-2-clean-room.md), [ADR-0023](adr/0023-mpl-for-dev-dependencies.md), [ADR-0024](adr/0024-unlicense-allowed.md)).
 - No `latest` tags: images pinned by version and digest; GitHub Actions pinned by commit SHA.
 - Planned for releases: signed artifacts and images, SBOM, provenance attestations.
