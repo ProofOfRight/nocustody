@@ -44,7 +44,7 @@ export default {
   ],
   options: {
     doNotFollow: { path: "node_modules" },
-    exclude: { path: "\\.test\\.ts$" },
+    exclude: { path: "(\\.test\\.ts|/test-fixtures\\.ts|/testing/.*)$" },
     tsPreCompilationDeps: true,
     enhancedResolveOptions: { extensions: [".ts", ".js"] },
   },

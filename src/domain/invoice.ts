@@ -39,6 +39,8 @@ export interface LockedPrice {
 
 export interface PaymentRecord {
   readonly transferKey: string;
+  /** Sender as reported by the finalized-state query; screened by AML. */
+  readonly from: string;
   readonly amount: Money;
   readonly at: Date;
 }
@@ -231,10 +233,19 @@ export class Invoice {
     return "applied";
   }
 
-  /** TTL elapsed without a detected transfer. Returns whether the status changed. */
+  /**
+   * TTL elapsed without a final payment. Also applies to `confirming`: a detected transfer may never become final
+   * (failed or fake), and a genuine one is still credited later — lateness is judged by its block time.
+   * Returns whether the status changed.
+   */
   expire(now: Date): boolean {
-    if (this.#state.status !== "awaiting_payment" || now.getTime() < this.#state.expiresAt.getTime())
+    const st = this.#state.status;
+    if (
+      (st !== "awaiting_payment" && st !== "confirming") ||
+      now.getTime() < this.#state.expiresAt.getTime()
+    ) {
       return false;
+    }
     this.#set({ status: "expired" });
     this.#record("invoice.expired", now, {});
     return true;
