@@ -444,10 +444,10 @@ describe("payment flow", () => {
     expect(await s.cycle()).toMatchObject({ matched: 1 });
     expect(s.store.data.invoices.get(b.invoice.id)?.status).toBe("completed");
     expect(s.store.data.invoices.get(a.invoice.id)?.status).toBe("confirming");
-    const stored = s.store.data.candidates.get(`${TRON}/${bad.txHash}`);
+    const stored = s.store.data.candidates.get(`${TRON}/${bad.txHash}/${USDT_TRON.id}`);
     expect(stored).toMatchObject({ status: "seen", attempts: 1 });
     expect(stored?.reason).toContain("store error");
-    expect(s.store.data.candidates.get(`${TRON}/${good.txHash}`)?.status).toBe("verified");
+    expect(s.store.data.candidates.get(`${TRON}/${good.txHash}/${USDT_TRON.id}`)?.status).toBe("verified");
   });
 
   it("rejects a transfer the adapter returns for a foreign address or another asset", async () => {
@@ -457,7 +457,7 @@ describe("payment flow", () => {
     s.chain.pages = [[c]];
     s.chain.verdicts.set(c.txHash, { status: "final", transfers: [verified(c, 0n, "10.01", ADDR_B)] });
     expect(await s.cycle()).toMatchObject({ matched: 0, unmatched: 0 });
-    const stored = s.store.data.candidates.get(`${TRON}/${c.txHash}`);
+    const stored = s.store.data.candidates.get(`${TRON}/${c.txHash}/${USDT_TRON.id}`);
     expect(stored?.status).toBe("rejected");
     expect(stored?.reason).toContain(ADDR_B.value);
     expect(s.store.data.transfers.size).toBe(0);
@@ -499,6 +499,25 @@ describe("payment flow", () => {
     const late = candidate("ok", "10.01", new Date(s.clock.now().getTime() - 3_000));
     s.chain.pages.push([late]); // the fake's cursor is at page 1 now
     expect(await s.cycle()).toMatchObject({ matched: 1 });
+  });
+
+  it("a dust hint does not bury a real payment: a later non-dust hint for the same transaction re-queues it", async () => {
+    const dusty = setup({
+      assets: [
+        settings({ amountPolicy: amountPolicy({ ...STRICT_AMOUNT_POLICY, dustThresholdUnits: 100_000n }) }),
+      ],
+    });
+    const { invoice } = await dusty.order("o1");
+    dusty.clock.advance(MIN);
+    const tx = candidate("dd1", "0.05", dusty.clock.now()); // the indexer's first row: a dust transfer of the tx
+    dusty.chain.pages = [[tx]];
+    await dusty.cycle();
+    expect(dusty.store.data.candidates.get(`${TRON}/${tx.txHash}/${USDT_TRON.id}`)?.status).toBe("dust");
+    // the second source (or a later page) reports the real transfer of the same transaction
+    dusty.chain.pages.push([{ ...tx, amount: usdt("10.01") }]);
+    expect(await dusty.cycle()).toMatchObject({ matched: 1 });
+    expect(dusty.store.data.invoices.get(invoice.id)?.status).toBe("completed");
+    expect(dusty.store.data.candidates.get(`${TRON}/${tx.txHash}/${USDT_TRON.id}`)?.status).toBe("verified");
   });
 
   it("quarantines transfers that match no invoice", async () => {

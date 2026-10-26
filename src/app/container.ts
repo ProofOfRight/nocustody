@@ -282,6 +282,19 @@ export function buildContainer(o: ContainerOptions) {
     alerts,
     catalog,
     integrity: o.integrity,
+    retention: ops.retention
+      ? {
+          ...(ops.retention.deliveredWebhooks
+            ? { deliveredWebhooksMs: parseDuration(ops.retention.deliveredWebhooks) }
+            : {}),
+          ...(ops.retention.idempotencyKeys
+            ? { idempotencyKeysMs: parseDuration(ops.retention.idempotencyKeys) }
+            : {}),
+          ...(ops.retention.settledCandidates
+            ? { settledCandidatesMs: parseDuration(ops.retention.settledCandidates) }
+            : {}),
+        }
+      : null,
     maxScannerLagMs,
     secondary,
     reconcileLookbackMs: parseDuration(rc?.lookback ?? "3h"),
@@ -307,6 +320,7 @@ export function buildContainer(o: ContainerOptions) {
     healthMs: 60_000,
     reconcileMs: rc ? parseDuration(rc.interval) : null,
     depegMs: ops.depeg ? parseDuration(ops.depeg.interval) : null,
+    pruneMs: ops.retention ? 3_600_000 : null,
   };
 
   const wh = o.config.raw.webhooks;

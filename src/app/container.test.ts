@@ -46,7 +46,12 @@ describe("composition root", () => {
     try {
       expect(c.workers.map((w) => w.adapter.network)).toEqual(["tron:mainnet"]);
       expect(c.dispatcher).toBeNull();
-      expect(c.monitorIntervals).toEqual({ healthMs: 60_000, reconcileMs: null, depegMs: null });
+      expect(c.monitorIntervals).toEqual({
+        healthMs: 60_000,
+        reconcileMs: null,
+        depegMs: null,
+        pruneMs: null,
+      });
     } finally {
       await c.pool.end();
     }

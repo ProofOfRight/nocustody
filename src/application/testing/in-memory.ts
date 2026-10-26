@@ -36,12 +36,12 @@ interface Data {
   invoices: Map<string, InvoiceState>;
   slots: AmountSlot[];
   memos: Map<string, { invoiceId: string; address: ChainAddress; assetId: string }>;
-  candidates: Map<string, StoredCandidate>;
+  candidates: Map<string, StoredCandidate & { updatedAt: Date }>;
   transfers: Map<string, StoredTransfer>;
   outbox: DomainEvent[];
   outboxRows: OutboxRow[];
   apiKeys: Map<string, ApiKeyRecord & { lastUsedAt: Date | null }>;
-  idempotency: Map<string, { requestSha256: string; invoiceId: string }>;
+  idempotency: Map<string, { requestSha256: string; invoiceId: string; createdAt: Date }>;
   heartbeats: Map<string, Heartbeat>;
   guards: Map<string, { blocked: boolean; reason: string; updatedAt: Date }>;
   cursors: Map<string, string>;
@@ -107,11 +107,12 @@ export class InMemoryStore implements UnitOfWork {
       d().transfers.set(key, { ...cur, ...p });
       return true;
     };
-    const patchCandidate = (network: NetworkId, txHash: string, p: Partial<StoredCandidate>) => {
-      const key = `${network}/${txHash}`;
+    const candidateKey = (c: TransferCandidate) => `${c.network}/${c.txHash}/${c.amount.asset.id}`;
+    const patchCandidate = (c: TransferCandidate, p: Partial<StoredCandidate>) => {
+      const key = candidateKey(c);
       const cur = d().candidates.get(key);
       if (!cur) throw new Error(`no candidate ${key}`);
-      d().candidates.set(key, { ...cur, ...p });
+      d().candidates.set(key, { ...cur, ...p, updatedAt: this.#now() });
     };
     return {
       invoices: {
@@ -191,22 +192,35 @@ export class InMemoryStore implements UnitOfWork {
       },
       candidates: {
         insert: async (c: TransferCandidate, status, reason) => {
-          const key = `${c.network}/${c.txHash}`;
-          if (d().candidates.has(key)) return "duplicate";
-          d().candidates.set(key, { candidate: c, status, attempts: 0, reason, seenAt: this.#now() });
+          const key = candidateKey(c);
+          const cur = d().candidates.get(key);
+          if (cur) {
+            // like the SQL: a "seen" hint re-queues a transaction stored as dust
+            if (cur.status === "dust" && status === "seen") {
+              d().candidates.set(key, { ...cur, candidate: c, status, reason: null, updatedAt: this.#now() });
+              return "inserted";
+            }
+            return "duplicate";
+          }
+          d().candidates.set(key, {
+            candidate: c,
+            status,
+            attempts: 0,
+            reason,
+            seenAt: this.#now(),
+            updatedAt: this.#now(),
+          });
           return "inserted";
         },
         listSeen: async (network: NetworkId, limit) =>
           [...d().candidates.values()]
             .filter((c) => c.candidate.network === network && c.status === "seen")
             .slice(0, limit),
-        markVerified: async (network, txHash) =>
-          patchCandidate(network, txHash, { status: "verified" as CandidateStatus }),
-        markRejected: async (network, txHash, reason) =>
-          patchCandidate(network, txHash, { status: "rejected", reason }),
-        markPending: async (network, txHash, reason) => {
-          const cur = d().candidates.get(`${network}/${txHash}`);
-          patchCandidate(network, txHash, { reason, attempts: (cur?.attempts ?? 0) + 1 });
+        markVerified: async (c) => patchCandidate(c, { status: "verified" as CandidateStatus }),
+        markRejected: async (c, reason) => patchCandidate(c, { status: "rejected", reason }),
+        markPending: async (c, reason) => {
+          const cur = d().candidates.get(candidateKey(c));
+          patchCandidate(c, { reason, attempts: (cur?.attempts ?? 0) + 1 });
         },
         listVerified: async (network, address, from, until) =>
           [...d().candidates.values()]
@@ -219,6 +233,16 @@ export class InMemoryStore implements UnitOfWork {
                 c.candidate.at <= until,
             )
             .map((c) => c.candidate.txHash),
+        pruneSettled: async (before) => {
+          let n = 0;
+          for (const [key, c] of d().candidates) {
+            if ((c.status === "dust" || c.status === "rejected") && c.updatedAt < before) {
+              d().candidates.delete(key);
+              n++;
+            }
+          }
+          return n;
+        },
       },
       transfers: {
         insert: async (t: VerifiedTransfer, status, reason) => {
@@ -282,6 +306,12 @@ export class InMemoryStore implements UnitOfWork {
           if (r) Object.assign(r, { attempts: r.attempts + 1, deadAt: at, lastError: error });
         },
         countDead: async () => d().outboxRows.filter((r) => r.deadAt).length,
+        pruneDelivered: async (before) => {
+          const keep = d().outboxRows.filter((r) => !(r.deliveredAt && r.deliveredAt < before));
+          const n = d().outboxRows.length - keep.length;
+          d().outboxRows = keep;
+          return n;
+        },
         reviveDead: async (now, eventId) => {
           const rows = d().outboxRows.filter((r) => r.deadAt && (!eventId || r.eventId === eventId));
           for (const r of rows) Object.assign(r, { deadAt: null, attempts: 0, nextAttemptAt: now.getTime() });
@@ -336,7 +366,17 @@ export class InMemoryStore implements UnitOfWork {
         find: async (apiKeyId, key) => d().idempotency.get(`${apiKeyId}/${key}`) ?? null,
         insert: async (apiKeyId, key, requestSha256, invoiceId) => {
           if (d().idempotency.has(`${apiKeyId}/${key}`)) throw new Error("duplicate idempotency key");
-          d().idempotency.set(`${apiKeyId}/${key}`, { requestSha256, invoiceId });
+          d().idempotency.set(`${apiKeyId}/${key}`, { requestSha256, invoiceId, createdAt: this.#now() });
+        },
+        prune: async (before) => {
+          let n = 0;
+          for (const [k, v] of d().idempotency) {
+            if (v.createdAt < before) {
+              d().idempotency.delete(k);
+              n++;
+            }
+          }
+          return n;
         },
       },
       cursors: {

@@ -59,7 +59,7 @@ function setup(
   const sent: Alert[] = [];
   const alerts = { send: async (a: Alert) => void sent.push(a) };
   const catalog = new AssetCatalog([o.asset ?? settings()]);
-  const monitor = new Monitor({
+  const monitorDeps = {
     uow: store,
     clock,
     alerts,
@@ -70,7 +70,8 @@ function setup(
     reconcileSettleDelayMs: 10 * MIN,
     depeg: o.peg ? { symbol: "USDT", sources: o.peg, maxDeviationBps: 150 } : null,
     ...(o.integrity ? { integrity: o.integrity } : {}),
-  });
+  };
+  const monitor = new Monitor(monitorDeps);
   const uniqueAmount = new UniqueAmountStrategy();
   let n = 0;
   const create = new CreateInvoice({
@@ -83,7 +84,7 @@ function setup(
     ids: { newId: () => `inv-${++n}` },
     integrity: { check: async () => ({ ok: true }) },
   });
-  return { store, monitor, sent, create, catalog, clock, advance: (ms: number) => (t += ms) };
+  return { store, monitor, monitorDeps, sent, create, catalog, clock, advance: (ms: number) => (t += ms) };
 }
 
 const peg = (name: string, price: string | Error): PegPriceSource => ({
@@ -131,6 +132,32 @@ describe("monitor: health", () => {
     );
     await s.store.run((r) => r.delivery.markDead("1", new Date(T0), "gave up"));
     expect(await s.monitor.checkHealth()).toEqual(["1 webhook event(s) in dead-letter"]);
+  });
+});
+
+describe("monitor: retention", () => {
+  it("prunes only what is configured, never payments or audit rows", async () => {
+    const s = setup();
+    const day = 86_400_000;
+    await s.store.run(async (r) => {
+      await r.outbox.append([{ type: "invoice.paid", aggregateId: "a", occurredAt: new Date(T0), data: {} }]);
+      const [m] = await r.delivery.claim(new Date(T0), 1, 1);
+      if (m) await r.delivery.markDelivered(m.id, new Date(T0));
+      await r.idempotency.insert("k", "x", "h", "inv-1");
+    });
+    s.advance(40 * day);
+    expect(await s.monitor.prune()).toEqual({
+      deliveredWebhooks: 0,
+      idempotencyKeys: 0,
+      settledCandidates: 0,
+    });
+    const m = new Monitor({
+      ...s.monitorDeps,
+      retention: { deliveredWebhooksMs: 30 * day, idempotencyKeysMs: 30 * day },
+    });
+    expect(await m.prune()).toEqual({ deliveredWebhooks: 1, idempotencyKeys: 1, settledCandidates: 0 });
+    expect(s.store.data.outboxRows).toHaveLength(0);
+    expect(s.store.data.outbox).toHaveLength(1); // the domain event list (audit of the test) is untouched
   });
 });
 
@@ -214,7 +241,7 @@ describe("monitor: reconciliation with a second source", () => {
     const c = cand("cc", "10.01", T0 - 30 * MIN);
     await s.store.run(async (r) => {
       await r.candidates.insert(c, "seen", null);
-      await r.candidates.markVerified(TRON, c.txHash);
+      await r.candidates.markVerified(c);
     });
     expect((await s.monitor.reconcile()).notInSecondary).toBe(1);
     expect(s.sent.at(-1)?.key).toBe(`reconcile-unknown:${TRON}:${ADDR.value}`);

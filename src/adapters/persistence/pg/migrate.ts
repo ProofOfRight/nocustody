@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Minimal migration runner: plain .sql files applied in name order, each in its own transaction, recorded with a
 // sha256 checksum. An applied migration whose file changed is an error. Concurrent runs are serialised by an
-// advisory lock.
+// advisory lock. A file whose first lines contain the marker `-- no-transaction` runs statement by statement
+// outside a transaction (needed for CREATE INDEX CONCURRENTLY on a large table); it must be safe to re-run after a
+// failure half way, e.g. `CREATE INDEX CONCURRENTLY IF NOT EXISTS`.
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -40,17 +42,25 @@ export async function migrate(pool: Pool, dir: string = DEFAULT_DIR): Promise<Mi
         result.skipped.push(file);
         continue;
       }
-      await client.query("BEGIN");
-      try {
-        await client.query(sql);
+      if (noTransaction(sql)) {
+        for (const statement of statements(sql)) await client.query(statement);
         await client.query("INSERT INTO schema_migrations (version, checksum) VALUES ($1, $2)", [
           file,
           checksum,
         ]);
-        await client.query("COMMIT");
-      } catch (e) {
-        await client.query("ROLLBACK");
-        throw e;
+      } else {
+        await client.query("BEGIN");
+        try {
+          await client.query(sql);
+          await client.query("INSERT INTO schema_migrations (version, checksum) VALUES ($1, $2)", [
+            file,
+            checksum,
+          ]);
+          await client.query("COMMIT");
+        } catch (e) {
+          await client.query("ROLLBACK");
+          throw e;
+        }
       }
       result.applied.push(file);
     }
@@ -59,4 +69,23 @@ export async function migrate(pool: Pool, dir: string = DEFAULT_DIR): Promise<Mi
     await client.query("SELECT pg_advisory_unlock($1)", [LOCK_KEY]).catch(() => undefined);
     client.release();
   }
+}
+
+/** The marker must appear in the first five lines, so a reader sees it next to the licence header. */
+export function noTransaction(sql: string): boolean {
+  return sql.split("\n", 5).some((l) => /^--\s*no-transaction\b/.test(l.trim()));
+}
+
+/** Statements of a no-transaction file: split on ";" at a line end, comments-only chunks dropped. */
+export function statements(sql: string): string[] {
+  return sql
+    .split(/;\s*\n/)
+    .map((chunk) =>
+      chunk
+        .split("\n")
+        .filter((l) => !/^\s*--/.test(l))
+        .join("\n")
+        .trim(),
+    )
+    .filter((chunk) => chunk.length > 0);
 }

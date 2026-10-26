@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Integration tests against PostgreSQL (TEST_DATABASE_URL, provided by docker compose and CI).
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
@@ -24,7 +24,7 @@ import { TRON, USDT_TRON } from "../../../domain/test-fixtures.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
 import { NoopAmlScreener } from "../../aml/noop.ts";
 import { ManualRateTable } from "../../pricing/manual-table.ts";
-import { migrate } from "./migrate.ts";
+import { migrate, noTransaction, statements } from "./migrate.ts";
 import { PgUnitOfWork } from "./unit-of-work.ts";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -50,6 +50,30 @@ describe("migrations", () => {
 
   it("are idempotent", async () => {
     expect((await migrate(pool)).applied).toEqual([]);
+  });
+
+  it("a file marked -- no-transaction runs statement by statement, so CREATE INDEX CONCURRENTLY works", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mig-"));
+    const src = join(import.meta.dirname, "migrations");
+    for (const f of readdirSync(src)) writeFileSync(join(dir, f), readFileSync(join(src, f)));
+    writeFileSync(
+      join(dir, "0099_concurrent_index.sql"),
+      `-- SPDX-License-Identifier: Apache-2.0
+-- no-transaction
+-- a comment-only chunk is skipped;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS audit_log_actor ON audit_log (actor);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS audit_log_decision ON audit_log (decision);
+`,
+    );
+    expect((await migrate(pool, dir)).applied).toEqual(["0099_concurrent_index.sql"]);
+    const { rows } = await pool.query(
+      "SELECT indexname FROM pg_indexes WHERE tablename = 'audit_log' ORDER BY 1",
+    );
+    expect(rows.map((r) => r.indexname)).toContain("audit_log_actor");
+    expect((await migrate(pool, dir)).applied).toEqual([]); // recorded like any other
+    expect(noTransaction("-- SPDX\n-- no-transaction\nSELECT 1")).toBe(true);
+    expect(noTransaction("SELECT 1; -- no-transaction")).toBe(false);
+    expect(statements("-- c;\nA;\n\nB\n;\n-- tail")).toEqual(["A", "B"]);
   });
 
   it("refuse to run when an applied migration was modified", async () => {
@@ -108,6 +132,21 @@ describe("PostgreSQL repositories", () => {
     await uow.run(async (r) => {
       expect(await r.candidates.insert(c, "seen", null)).toBe("inserted");
       expect(await r.candidates.insert(c, "seen", null)).toBe("duplicate");
+      // per asset: the same transaction can carry a transfer of another configured asset
+      const otherAsset = { ...c, amount: Money.of({ ...USDT_TRON, id: "usdc-tron" }, 5n) };
+      await expect(r.candidates.insert(otherAsset, "seen", null)).resolves.toBe("inserted");
+      // a dust row is re-queued by a later non-dust hint, and only then
+      const dusty = { ...c, txHash: "d".repeat(64), amount: usdt("0.000001") };
+      expect(await r.candidates.insert(dusty, "dust", "dust")).toBe("inserted");
+      expect(await r.candidates.insert(dusty, "dust", "dust")).toBe("duplicate");
+      expect(await r.candidates.insert({ ...dusty, amount: usdt("10.01") }, "seen", null)).toBe("inserted");
+      const requeued = (await r.candidates.listSeen(TRON, 10)).find(
+        (x) => x.candidate.txHash === dusty.txHash,
+      );
+      expect(requeued?.status).toBe("seen");
+      expect(requeued?.candidate.amount.units).toBe(10_010_000n);
+      expect(await r.candidates.insert({ ...dusty, amount: usdt("20") }, "seen", null)).toBe("duplicate");
+      await r.candidates.markRejected(dusty, "test");
       expect(await r.transfers.insert(t, "verified", null)).toBe("inserted");
       expect(await r.transfers.insert(t, "verified", null)).toBe("duplicate");
       expect(await r.transfers.insert({ ...t, ref: txRef(TRON, hash, 1n) }, "verified", null)).toBe(
@@ -232,11 +271,55 @@ describe("PostgreSQL repositories", () => {
     };
     await uow.run(async (r) => {
       await r.candidates.insert(c, "seen", null);
-      await r.candidates.markVerified(TRON, c.txHash);
+      await r.candidates.markVerified(c);
     });
     expect(
       await uow.run((r) => r.candidates.listVerified(TRON, ADDR, new Date(T0.getTime() - 1), T0)),
     ).toEqual([c.txHash]);
+  });
+
+  it("retention: prunes delivered webhooks, idempotency keys and settled candidates older than the cutoff", async () => {
+    const old = new Date(T0.getTime() - 40 * 86_400_000);
+    const key = {
+      id: "0123456789ab",
+      name: "k",
+      secretSha256: "0".repeat(64),
+      scopes: ["invoices:read" as const],
+      revokedAt: null,
+    };
+    await uow.run(async (r) => {
+      await r.outbox.append([
+        { type: "invoice.paid", aggregateId: "a", occurredAt: T0, data: {} },
+        { type: "invoice.paid", aggregateId: "b", occurredAt: T0, data: {} },
+      ]);
+      const [m1, m2] = await r.delivery.claim(T0, 1_000, 10);
+      if (!m1 || !m2) throw new Error("claim");
+      await r.delivery.markDelivered(m1.id, old);
+      await r.delivery.markDelivered(m2.id, T0);
+      await r.apiKeys.insert(key);
+      const c = {
+        network: TRON,
+        txHash: "e".repeat(64),
+        from: "TSender",
+        to: ADDR,
+        amount: usdt("0.000001"),
+        at: old,
+        memo: null,
+      };
+      expect(await r.candidates.insert(c, "dust", "dust")).toBe("inserted");
+    });
+    await pool.query("UPDATE tx_candidates SET updated_at = $1", [old]);
+    await pool.query(
+      "INSERT INTO idempotency_keys (api_key_id, key, request_sha256, invoice_id, created_at) SELECT $1, 'k', 'h', id, $2 FROM invoices LIMIT 0",
+      [key.id, old],
+    );
+    const stats = await uow.run(async (r) => ({
+      webhooks: await r.delivery.pruneDelivered(new Date(T0.getTime() - 30 * 86_400_000)),
+      keys: await r.idempotency.prune(new Date(T0.getTime() - 30 * 86_400_000)),
+      candidates: await r.candidates.pruneSettled(new Date(T0.getTime() - 30 * 86_400_000)),
+    }));
+    expect(stats).toEqual({ webhooks: 1, keys: 0, candidates: 1 });
+    expect((await pool.query("SELECT count(*)::int AS n FROM outbox")).rows[0].n).toBe(1);
   });
 
   it("rolls back state, outbox and cursor together", async () => {
