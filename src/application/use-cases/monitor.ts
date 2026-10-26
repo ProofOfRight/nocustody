@@ -5,7 +5,14 @@ import { isDust } from "../../domain/amount-policy.ts";
 import type { NetworkId } from "../../domain/network.ts";
 import type { Rational } from "../../domain/rational.ts";
 import { type AssetCatalog, watchedAddresses } from "../catalog.ts";
-import type { AlertSink, Clock, PegPriceSource, SecondarySource, UnitOfWork } from "../ports.ts";
+import type {
+  AlertSink,
+  Clock,
+  IntegrityGuard,
+  PegPriceSource,
+  SecondarySource,
+  UnitOfWork,
+} from "../ports.ts";
 
 export interface MonitorDeps {
   readonly uow: UnitOfWork;
@@ -23,6 +30,8 @@ export interface MonitorDeps {
     readonly sources: readonly PegPriceSource[];
     readonly maxDeviationBps: number;
   } | null;
+  /** Re-checked every health cycle, so a tampered config is alerted even when no invoice is being created. */
+  readonly integrity?: IntegrityGuard;
 }
 
 export interface ReconcileStats {
@@ -45,11 +54,22 @@ export class Monitor {
     this.#d = deps;
   }
 
-  /** Heartbeats and dead webhooks: cheap, run every cycle. */
+  /** Pinned config, heartbeats and dead webhooks: cheap, run every cycle. */
   async checkHealth(): Promise<string[]> {
-    const { uow, clock, alerts, maxScannerLagMs } = this.#d;
+    const { uow, clock, alerts, maxScannerLagMs, integrity } = this.#d;
     const now = clock.now().getTime();
     const problems: string[] = [];
+    if (integrity) {
+      const pin = await integrity.check();
+      if (!pin.ok) {
+        problems.push(`pinned config check failed, new invoices are blocked: ${pin.reason}`);
+        await alerts.send({
+          key: "address_pin_violation",
+          severity: "critical",
+          message: problems.at(-1) ?? "",
+        });
+      }
+    }
     const beats = await uow.run((r) => r.heartbeats.list());
     for (const [network, maxLag] of maxScannerLagMs) {
       const hb = beats.find((b) => b.role === `scanner:${network}`);

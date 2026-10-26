@@ -9,7 +9,7 @@ import { TRON, USDT_TRON } from "../domain/test-fixtures.ts";
 import { txRef } from "../domain/tx-ref.ts";
 import { AssetCatalog, type AssetSettings } from "./catalog.ts";
 import { ApplicationError } from "./errors.ts";
-import type { Alert, PegPriceSource, SecondarySource, TransferCandidate } from "./ports.ts";
+import type { Alert, IntegrityGuard, PegPriceSource, SecondarySource, TransferCandidate } from "./ports.ts";
 import { RateService } from "./rates.ts";
 import { UniqueAmountStrategy } from "./strategies/unique-amount.ts";
 import { FakeChain } from "./testing/fake-chain.ts";
@@ -45,7 +45,14 @@ const cand = (hash: string, amount: string, at: number): TransferCandidate => ({
   memo: null,
 });
 
-function setup(o: { peg?: PegPriceSource[]; secondary?: SecondarySource[]; asset?: AssetSettings } = {}) {
+function setup(
+  o: {
+    peg?: PegPriceSource[];
+    secondary?: SecondarySource[];
+    asset?: AssetSettings;
+    integrity?: IntegrityGuard;
+  } = {},
+) {
   let t = T0;
   const clock = { now: () => new Date(t) };
   const store = new InMemoryStore(() => clock.now());
@@ -62,6 +69,7 @@ function setup(o: { peg?: PegPriceSource[]; secondary?: SecondarySource[]; asset
     reconcileLookbackMs: 180 * MIN,
     reconcileSettleDelayMs: 10 * MIN,
     depeg: o.peg ? { symbol: "USDT", sources: o.peg, maxDeviationBps: 150 } : null,
+    ...(o.integrity ? { integrity: o.integrity } : {}),
   });
   const uniqueAmount = new UniqueAmountStrategy();
   let n = 0;
@@ -97,6 +105,22 @@ describe("monitor: health", () => {
     const problems = await s.monitor.checkHealth();
     expect(problems[0]).toContain("HTTP 503");
     expect(s.sent.at(-1)).toMatchObject({ key: `scanner-lag:${TRON}`, severity: "critical" });
+  });
+
+  it("re-checks the pinned config every health cycle and alerts on a violation (not only on invoice creation)", async () => {
+    let ok = true;
+    const s = setup({
+      integrity: {
+        check: async () => (ok ? { ok: true } : { ok: false, reason: "pinned checksum mismatch" }),
+      },
+    });
+    await s.store.run((r) => r.heartbeats.ok(`scanner:${TRON}`, s.clock.now()));
+    expect(await s.monitor.checkHealth()).toEqual([]);
+    ok = false;
+    const problems = await s.monitor.checkHealth();
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("pinned checksum mismatch");
+    expect(s.sent.at(-1)).toMatchObject({ key: "address_pin_violation", severity: "critical" });
   });
 
   it("alerts on dead-lettered webhooks", async () => {
