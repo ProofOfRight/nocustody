@@ -65,7 +65,10 @@ export class TelegramAlertSink implements AlertSink {
   }
 }
 
-/** Sends to every sink; repeats of the same key within the cooldown are dropped; a failing sink does not stop others. */
+/**
+ * Sends to every sink; repeats of the same key within the cooldown are dropped; a failing sink does not stop others.
+ * The cooldown lives in this process: two monitor processes each send their own copy of an alert.
+ */
 export class AlertRouter implements AlertSink {
   readonly #sinks: readonly AlertSink[];
   readonly #cooldownMs: number;
@@ -85,10 +88,17 @@ export class AlertRouter implements AlertSink {
     this.#now = now;
   }
 
+  /** Keys still inside their cooldown (for tests: the map must not grow with uptime). */
+  get tracked(): number {
+    return this.#last.size;
+  }
+
   async send(a: Alert): Promise<void> {
     const t = this.#now();
     const prev = this.#last.get(a.key);
     if (prev !== undefined && t - prev < this.#cooldownMs) return;
+    // Keys like never-final:<tx> are unique per condition: forget the expired ones so memory stays flat for months.
+    for (const [key, at] of this.#last) if (t - at >= this.#cooldownMs) this.#last.delete(key);
     this.#last.set(a.key, t);
     await Promise.all(this.#sinks.map((s) => s.send(a).catch((e: unknown) => this.#onFailure(e))));
   }

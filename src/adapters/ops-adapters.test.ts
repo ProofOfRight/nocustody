@@ -48,6 +48,23 @@ describe("alerts", () => {
     expect(failures).toHaveLength(2);
   });
 
+  it("forgets keys whose cooldown has passed, so the map does not grow with uptime", async () => {
+    let t = 0;
+    const router = new AlertRouter(
+      [{ send: async () => {} }],
+      30_000,
+      () => {},
+      () => t,
+    );
+    for (let i = 0; i < 100; i++) {
+      await router.send({ key: `never-final:tron/tx${i}`, severity: "warning", message: "m" });
+    }
+    expect(router.tracked).toBe(100);
+    t = 30_000;
+    await router.send({ key: "scanner-lag:tron", severity: "critical", message: "m" });
+    expect(router.tracked).toBe(1);
+  });
+
   it("telegram: send-only call, and errors never contain the bot token", async () => {
     const token = `123456:${"A".repeat(35)}`;
     const calls: Array<{ url: string; body: string }> = [];
