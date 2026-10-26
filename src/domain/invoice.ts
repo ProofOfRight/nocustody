@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { type AmountPolicy, classifyAmount } from "./amount-policy.ts";
+import { SLOT_CLOCK_SKEW_MS } from "./amount-slot.ts";
 import { type Asset, sameAsset } from "./asset.ts";
 import type { ChainAddress } from "./chain-address.ts";
 import { DomainError, invariant } from "./errors.ts";
@@ -70,9 +71,6 @@ export interface NewInvoice {
   readonly ttlMs: number;
   readonly graceMs: number;
 }
-
-/** A payment timestamped up to this much before the invoice was created still counts (clock skew). */
-export const PAYMENT_CLOCK_SKEW_MS = 30_000;
 
 const PAYABLE: ReadonlySet<InvoiceStatus> = new Set([
   "awaiting_payment",
@@ -197,7 +195,9 @@ export class Invoice {
     if (!sameAsset(payment.amount.asset, s.asset))
       throw new DomainError("invoice.asset", "payment in another asset");
     const t = payment.at.getTime();
-    if (t < s.createdAt.getTime() - PAYMENT_CLOCK_SKEW_MS) {
+    // An Invalid Date compares false with everything and would pass every window check below.
+    invariant(Number.isFinite(t), "invoice.payment_time", "payment time is not a valid date");
+    if (t < s.createdAt.getTime() - SLOT_CLOCK_SKEW_MS) {
       throw new DomainError("invoice.payment_before_creation", "transfer predates the invoice");
     }
     if (t > s.graceUntil.getTime())
@@ -262,13 +262,14 @@ export class Invoice {
     this.#record("invoice.cancelled", now, {});
   }
 
-  startAmlReview(now: Date): void {
+  /** A payment was credited and compliance has not looked at it yet (the only states `startAmlReview` accepts). */
+  needsAmlReview(): boolean {
     const st = this.#state.status;
-    invariant(
-      st === "paid" || st === "overpaid" || st === "paid_late",
-      "invoice.aml_state",
-      `cannot screen ${st}`,
-    );
+    return st === "paid" || st === "overpaid" || st === "paid_late";
+  }
+
+  startAmlReview(now: Date): void {
+    invariant(this.needsAmlReview(), "invoice.aml_state", `cannot screen ${this.#state.status}`);
     this.#set({ status: "aml_pending" });
     this.#record("invoice.aml_pending", now, {});
   }

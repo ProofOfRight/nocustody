@@ -234,13 +234,14 @@ function repositories(db: PoolClient, assets: AssetResolver): Repositories {
     if (res.rowCount !== 1) throw new Error(`candidate ${network}/${txHash} not found`);
   };
 
-  const setTransfer = async (ref: TxRef, sets: string, params: unknown[]): Promise<void> => {
+  /** Settles a transfer that is still `verified`; false when another worker got there first. */
+  const settleTransfer = async (ref: TxRef, sets: string, params: unknown[]): Promise<boolean> => {
     const res = await db.query(
       `UPDATE observed_transfers SET ${sets}, updated_at = now()
-       WHERE network = $1 AND tx_hash = $2 AND log_index = $3`,
+       WHERE network = $1 AND tx_hash = $2 AND log_index = $3 AND status = 'verified'`,
       [ref.network, ref.txHash, ref.index.toString(), ...params],
     );
-    if (res.rowCount !== 1) throw new Error(`transfer ${ref.network}/${ref.txHash}/${ref.index} not found`);
+    return res.rowCount === 1;
   };
 
   return {
@@ -450,9 +451,9 @@ function repositories(db: PoolClient, assets: AssetResolver): Repositories {
         return rows.map(toTransfer);
       },
       markMatched: (ref: TxRef, invoiceId: string) =>
-        setTransfer(ref, "status = 'matched', invoice_id = $4", [invoiceId]),
+        settleTransfer(ref, "status = 'matched', invoice_id = $4", [invoiceId]),
       markUnmatched: (ref: TxRef, reason: string) =>
-        setTransfer(ref, "status = 'unmatched', reason = $4", [reason]),
+        settleTransfer(ref, "status = 'unmatched', reason = $4", [reason]),
     },
 
     outbox: {

@@ -428,6 +428,28 @@ describe("payment flow", () => {
     expect(s.store.data.transfers.size).toBe(0);
   });
 
+  it("a transfer settled by another worker between list and write is recorded once", async () => {
+    const { invoice } = await s.order("o1");
+    s.clock.advance(MIN);
+    const matched = candidate("w1", "10.01", s.clock.now());
+    const stray = candidate("w2", "10.05", s.clock.now());
+    s.chain.pages = [[matched, stray]];
+    await s.ingest.execute();
+    await s.verify.execute();
+    // Emulate the other worker's commit landing between listVerified and the write: the rows are no longer
+    // "verified" when this worker tries to settle them.
+    for (const c of [matched, stray]) {
+      const key = txRefKey(txRef(TRON, c.txHash, 0n));
+      const cur = s.store.data.transfers.get(key);
+      if (!cur) throw new Error("transfer missing");
+      s.store.data.transfers.set(key, { ...cur, status: c === matched ? "matched" : "unmatched" });
+    }
+    const outboxBefore = s.store.data.outbox.length;
+    expect(await s.settle.execute()).toMatchObject({ matched: 0, unmatched: 0, errors: 0 });
+    expect(s.store.data.outbox.length).toBe(outboxBefore); // no second transfer.unmatched, no second credit
+    expect(s.store.data.invoices.get(invoice.id)?.status).toBe("confirming");
+  });
+
   it("quarantines transfers that match no invoice", async () => {
     await s.order("o1");
     s.clock.advance(MIN);
