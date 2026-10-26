@@ -48,8 +48,9 @@ export function classifyAmount(expected: Money, received: Money, policy: AmountP
   return shortfall <= tolerance ? "under_tolerated" : "under";
 }
 
+/** A zero-value transfer is never a payment (TRON address-poisoning spam sends them), whatever the threshold. */
 export function isDust(amount: Money, policy: AmountPolicy): boolean {
-  return amount.units < policy.dustThresholdUnits;
+  return amount.units === 0n || amount.units < policy.dustThresholdUnits;
 }
 
 /** Unique-amount allocation: base + k·step for k = 1..maxSlots on each address of the pool. */
