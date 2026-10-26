@@ -162,6 +162,42 @@ describe("TON addresses and payloads", () => {
     expect(parseInternalTransfer("not-a-boc")).toBeNull();
     expect(parsePlainComment(comment("hello").toBoc().toString("base64"))).toBe("hello");
     expect(parsePlainComment(null)).toBeNull();
+    // TEP-74 binary comment: op 0 followed by the byte 0xff. UTF-8 decoding turns 0xff into U+FFFD, so the check
+    // must look at the raw byte; the old test stored only 8 bits and never reached that branch.
+    const binary = beginCell().storeUint(0, 32).storeUint(0xff, 8).storeUint(0xabcd, 16).endCell();
+    expect(parsePlainComment(binary.toBoc().toString("base64"))).toBeNull();
+    expect(parseInternalTransfer(transfer((b) => b.storeBit(1).storeRef(binary)))?.comment).toBeNull();
+  });
+
+  it("a comment with control characters is no comment: PostgreSQL refuses U+0000 and the row must still be written", () => {
+    const comment = (text: string) => beginCell().storeUint(0, 32).storeStringTail(text).endCell();
+    const b64 = (c: ReturnType<typeof comment>) => c.toBoc().toString("base64");
+    expect(parsePlainComment(b64(comment("A\u0000B")))).toBeNull();
+    expect(parsePlainComment(b64(comment("\u0000")))).toBeNull();
+    expect(parsePlainComment(b64(comment("INV\u001b[31m")))).toBeNull();
+    expect(parsePlainComment(b64(comment("bad � utf8")))).toBeNull();
+    // Ordinary whitespace is text.
+    expect(parsePlainComment(b64(comment("line one\nline two\ttab\r\n")))).toBe(
+      "line one\nline two\ttab\r\n",
+    );
+    // The same filter applies to a jetton forward payload (inline and by reference).
+    const transfer = (payload: (b: ReturnType<typeof beginCell>) => void) => {
+      const b = beginCell()
+        .storeUint(0x178d4519, 32)
+        .storeUint(0, 64)
+        .storeCoins(5n)
+        .storeAddress(null)
+        .storeAddress(null)
+        .storeCoins(0n);
+      payload(b);
+      return b.endCell().toBoc().toString("base64");
+    };
+    const withNul = comment("INV\u00002345");
+    expect(parseInternalTransfer(transfer((b) => b.storeBit(1).storeRef(withNul)))?.comment).toBeNull();
+    expect(
+      parseInternalTransfer(transfer((b) => b.storeBit(0).storeSlice(withNul.beginParse())))?.comment,
+    ).toBeNull();
+    expect(parseInternalTransfer(transfer((b) => b.storeBit(1).storeRef(withNul)))?.amount).toBe(5n);
   });
 });
 
