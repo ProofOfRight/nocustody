@@ -5,7 +5,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const ROOTS = ["src", "scripts", "test"];
+const ROOTS = ["src", "scripts", "tools", "test"];
 const SPDX = "SPDX-License-Identifier: Apache-2.0";
 
 export const FORBIDDEN: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
