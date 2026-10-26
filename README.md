@@ -41,6 +41,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and rules.
 
 ## Documentation
 
+- [Merchant API and webhooks](docs/api.md) ([OpenAPI](docs/api/openapi.yaml), [PHP example](examples/php/))
 - [Architecture](docs/architecture.md)
 - [Security requirements](docs/security.md) and [threat model](docs/threat-model.md)
 - [Architecture decision records](docs/adr/README.md)
