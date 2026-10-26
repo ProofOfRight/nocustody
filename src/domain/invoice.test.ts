@@ -16,6 +16,7 @@ import { chainAddress } from "./chain-address.ts";
 import { DomainError } from "./errors.ts";
 import { Invoice } from "./invoice.ts";
 import { Money } from "./money.ts";
+import { networkId } from "./network.ts";
 import { TRON, USDT_TRON } from "./test-fixtures.ts";
 
 const T0 = new Date("2026-10-26T12:00:00Z");
@@ -64,7 +65,7 @@ describe("Invoice lifecycle", () => {
     expect(inv.status).toBe("confirming");
     expect(
       inv.applyPayment(
-        { from: "TSender", transferKey: "tx/0", amount: usdt("10.01"), at: at(MIN) },
+        { from: "TSender", to: ADDR, transferKey: "tx/0", amount: usdt("10.01"), at: at(MIN) },
         STRICT_AMOUNT_POLICY,
         at(2 * MIN),
       ),
@@ -79,7 +80,7 @@ describe("Invoice lifecycle", () => {
 
   it("is idempotent per transfer", () => {
     const inv = newInvoice();
-    const p = { from: "TSender", transferKey: "tx/0", amount: usdt("10.01"), at: at(MIN) };
+    const p = { from: "TSender", to: ADDR, transferKey: "tx/0", amount: usdt("10.01"), at: at(MIN) };
     inv.applyPayment(p, STRICT_AMOUNT_POLICY, at(MIN));
     expect(inv.applyPayment(p, STRICT_AMOUNT_POLICY, at(MIN))).toBe("duplicate");
     expect(inv.received().units).toBe(10_010_000n);
@@ -88,13 +89,13 @@ describe("Invoice lifecycle", () => {
   it("underpaid, then topped up to paid", () => {
     const inv = newInvoice();
     inv.applyPayment(
-      { from: "TSender", transferKey: "a", amount: usdt("10"), at: at(MIN) },
+      { from: "TSender", to: ADDR, transferKey: "a", amount: usdt("10"), at: at(MIN) },
       STRICT_AMOUNT_POLICY,
       at(MIN),
     );
     expect(inv.status).toBe("underpaid");
     inv.applyPayment(
-      { from: "TSender", transferKey: "b", amount: usdt("0.01"), at: at(2 * MIN) },
+      { from: "TSender", to: ADDR, transferKey: "b", amount: usdt("0.01"), at: at(2 * MIN) },
       STRICT_AMOUNT_POLICY,
       at(2 * MIN),
     );
@@ -105,14 +106,14 @@ describe("Invoice lifecycle", () => {
     const policy = amountPolicy({ ...STRICT_AMOUNT_POLICY, underpaymentToleranceBps: 100 });
     const strict = newInvoice("100");
     strict.applyPayment(
-      { from: "TSender", transferKey: "a", amount: usdt("99.5"), at: at(MIN) },
+      { from: "TSender", to: ADDR, transferKey: "a", amount: usdt("99.5"), at: at(MIN) },
       STRICT_AMOUNT_POLICY,
       at(MIN),
     );
     expect(strict.status).toBe("underpaid");
     const tolerant = newInvoice("100");
     tolerant.applyPayment(
-      { from: "TSender", transferKey: "a", amount: usdt("99.5"), at: at(MIN) },
+      { from: "TSender", to: ADDR, transferKey: "a", amount: usdt("99.5"), at: at(MIN) },
       policy,
       at(MIN),
     );
@@ -122,7 +123,7 @@ describe("Invoice lifecycle", () => {
   it("overpaid is a separate status", () => {
     const inv = newInvoice();
     inv.applyPayment(
-      { from: "TSender", transferKey: "a", amount: usdt("10.02"), at: at(MIN) },
+      { from: "TSender", to: ADDR, transferKey: "a", amount: usdt("10.02"), at: at(MIN) },
       STRICT_AMOUNT_POLICY,
       at(MIN),
     );
@@ -135,7 +136,7 @@ describe("Invoice lifecycle", () => {
     expect(inv.expire(at(30 * MIN))).toBe(true);
     expect(inv.status).toBe("expired");
     inv.applyPayment(
-      { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(45 * MIN) },
+      { from: "TSender", to: ADDR, transferKey: "a", amount: usdt("10.01"), at: at(45 * MIN) },
       STRICT_AMOUNT_POLICY,
       at(50 * MIN),
     );
@@ -147,7 +148,7 @@ describe("Invoice lifecycle", () => {
     inv.markDetected("tx/0", at(MIN));
     expect(inv.expire(at(31 * MIN))).toBe(true);
     inv.applyPayment(
-      { from: "TSender", transferKey: "tx/0", amount: usdt("10.01"), at: at(MIN) },
+      { from: "TSender", to: ADDR, transferKey: "tx/0", amount: usdt("10.01"), at: at(MIN) },
       STRICT_AMOUNT_POLICY,
       at(40 * MIN),
     );
@@ -161,7 +162,7 @@ describe("Invoice lifecycle", () => {
     expect(
       code(() =>
         inv.applyPayment(
-          { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(45 * MIN) },
+          { from: "TSender", to: ADDR, transferKey: "a", amount: usdt("10.01"), at: at(45 * MIN) },
           policy,
           at(50 * MIN),
         ),
@@ -174,7 +175,7 @@ describe("Invoice lifecycle", () => {
       (ms: number, amount = usdt("10.01")) =>
       () =>
         newInvoice().applyPayment(
-          { from: "TSender", transferKey: "a", amount, at: at(ms) },
+          { from: "TSender", to: ADDR, transferKey: "a", amount, at: at(ms) },
           STRICT_AMOUNT_POLICY,
           at(ms),
         );
@@ -189,13 +190,27 @@ describe("Invoice lifecycle", () => {
     expect(code(pay(MIN, Money.parse(fake, "10.01")))).toBe("invoice.asset");
   });
 
+  it("rejects a payment to another address, even one a strategy matched", () => {
+    const inv = newInvoice();
+    const to = (addr: typeof ADDR) => () =>
+      inv.applyPayment(
+        { from: "TSender", to: addr, transferKey: "a", amount: usdt("10.01"), at: at(MIN) },
+        STRICT_AMOUNT_POLICY,
+        at(MIN),
+      );
+    expect(code(to(ADDR_B))).toBe("invoice.recipient");
+    expect(code(to(chainAddress(networkId("tron:nile"), ADDR.value)))).toBe("invoice.recipient"); // same text, another network
+    expect(inv.status).toBe("awaiting_payment");
+    expect(code(to(ADDR))).toBeUndefined();
+  });
+
   it("cannot be paid after cancellation or completion", () => {
     const inv = newInvoice();
     inv.cancel(at(MIN));
     expect(
       code(() =>
         inv.applyPayment(
-          { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(2 * MIN) },
+          { from: "TSender", to: ADDR, transferKey: "a", amount: usdt("10.01"), at: at(2 * MIN) },
           STRICT_AMOUNT_POLICY,
           at(2 * MIN),
         ),
@@ -206,7 +221,7 @@ describe("Invoice lifecycle", () => {
   it("goes through AML: pending → completed, or hold → manual decision", () => {
     const ok = newInvoice();
     ok.applyPayment(
-      { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(MIN) },
+      { from: "TSender", to: ADDR, transferKey: "a", amount: usdt("10.01"), at: at(MIN) },
       STRICT_AMOUNT_POLICY,
       at(MIN),
     );
@@ -220,7 +235,7 @@ describe("Invoice lifecycle", () => {
 
     const held = newInvoice();
     held.applyPayment(
-      { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(MIN) },
+      { from: "TSender", to: ADDR, transferKey: "a", amount: usdt("10.01"), at: at(MIN) },
       STRICT_AMOUNT_POLICY,
       at(MIN),
     );
@@ -237,7 +252,7 @@ describe("Invoice lifecycle", () => {
     const inv = newInvoice();
     expect(inv.loadedVersion).toBeNull();
     inv.applyPayment(
-      { from: "TSender", transferKey: "a", amount: usdt("10.01"), at: at(MIN) },
+      { from: "TSender", to: ADDR, transferKey: "a", amount: usdt("10.01"), at: at(MIN) },
       STRICT_AMOUNT_POLICY,
       at(MIN),
     );

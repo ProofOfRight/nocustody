@@ -2,7 +2,7 @@
 import { type AmountPolicy, classifyAmount } from "./amount-policy.ts";
 import { EARLY_PAYMENT_TOLERANCE_MS } from "./amount-slot.ts";
 import { type Asset, sameAsset } from "./asset.ts";
-import type { ChainAddress } from "./chain-address.ts";
+import { type ChainAddress, sameAddress } from "./chain-address.ts";
 import { DomainError, invariant } from "./errors.ts";
 import type { DomainEvent, DomainEventType } from "./events.ts";
 import { Money } from "./money.ts";
@@ -49,6 +49,8 @@ export interface PaymentRecord {
   readonly transferKey: string;
   /** Sender as reported by the finalized-state query; screened by AML. */
   readonly from: string;
+  /** Recipient from the finalized-state query; always the invoice's payment address (checked on apply). */
+  readonly to: ChainAddress;
   readonly amount: Money;
   readonly at: Date;
 }
@@ -201,6 +203,9 @@ export class Invoice {
       throw new DomainError("invoice.not_payable", `invoice ${s.id} is ${s.status}`);
     if (!sameAsset(payment.amount.asset, s.asset))
       throw new DomainError("invoice.asset", "payment in another asset");
+    // Strategies match on the recipient already; the aggregate does not rely on every future strategy doing so.
+    if (!sameAddress(payment.to, s.instructions.address))
+      throw new DomainError("invoice.recipient", "payment to another address than the invoice's");
     const t = payment.at.getTime();
     // An Invalid Date compares false with everything and would pass every window check below.
     invariant(Number.isFinite(t), "invoice.payment_time", "payment time is not a valid date");

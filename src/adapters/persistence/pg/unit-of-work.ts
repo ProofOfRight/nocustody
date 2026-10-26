@@ -161,6 +161,9 @@ function repositories(db: PoolClient, assets: AssetResolver, pinned: PinnedAddre
       payments: payments.map((p) => ({
         transferKey: p.transfer_key,
         from: p.sender,
+        // applyPayment admits only payments to the invoice's address (and strategies matched on it before), so the
+        // stored payment address is the recipient of every stored payment.
+        to: chainAddress(network, r.pay_address),
         amount: Money.of(asset, units(p.amount_units)),
         at: p.paid_at,
       })),
