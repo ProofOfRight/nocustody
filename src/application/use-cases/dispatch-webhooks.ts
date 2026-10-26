@@ -12,8 +12,8 @@ export interface DispatchWebhooksDeps {
   readonly sender: WebhookSender;
   readonly clock: Clock;
   readonly batchSize: number;
-  /** How long a claimed message is hidden from other dispatchers while it is being sent. */
-  readonly leaseMs: number;
+  /** Upper bound of one `sender.send` (its overall deadline); the lease of a claimed batch is derived from it. */
+  readonly sendTimeoutMs: number;
   /** After this many failed attempts the message goes to the dead-letter state. */
   readonly maxAttempts: number;
   readonly baseDelayMs: number;
@@ -36,10 +36,18 @@ export class DispatchWebhooks {
     return Math.min(this.#d.maxDelayMs, this.#d.baseDelayMs * 2 ** Math.max(0, attempt - 1));
   }
 
+  /**
+   * How long claimed messages stay hidden from other dispatchers. The batch is sent one message after another, so
+   * the lease must outlive the whole batch, not one send; otherwise a second dispatcher re-claims and double-sends.
+   */
+  get leaseMs(): number {
+    return this.#d.batchSize * this.#d.sendTimeoutMs + 5_000;
+  }
+
   async execute(): Promise<DispatchStats> {
-    const { uow, sender, clock, batchSize, leaseMs, maxAttempts } = this.#d;
+    const { uow, sender, clock, batchSize, maxAttempts } = this.#d;
     const stats: DispatchStats = { delivered: 0, failed: 0, dead: 0 };
-    const claimed = await uow.run((r) => r.delivery.claim(clock.now(), leaseMs, batchSize));
+    const claimed = await uow.run((r) => r.delivery.claim(clock.now(), this.leaseMs, batchSize));
     for (const m of claimed) {
       let result: Awaited<ReturnType<WebhookSender["send"]>>;
       try {

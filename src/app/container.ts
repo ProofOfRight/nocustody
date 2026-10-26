@@ -306,7 +306,7 @@ export function buildContainer(o: ContainerOptions) {
       }),
       clock,
       batchSize: 50,
-      leaseMs: 2 * parseDuration(wh.timeout) + 5_000,
+      sendTimeoutMs: parseDuration(wh.timeout),
       maxAttempts: wh.maxAttempts,
       baseDelayMs: parseDuration(wh.baseDelay),
       maxDelayMs: parseDuration(wh.maxDelay),

@@ -21,7 +21,7 @@ function setup(results: DeliveryResult[]) {
     sender,
     clock: { now: () => new Date(t) },
     batchSize: 10,
-    leaseMs: 60_000,
+    sendTimeoutMs: 6_000,
     maxAttempts: 3,
     baseDelayMs: 30_000,
     maxDelayMs: 3_600_000,
@@ -30,7 +30,7 @@ function setup(results: DeliveryResult[]) {
     store.run((r) =>
       r.outbox.append([{ type: "invoice.paid", aggregateId: "inv-1", occurredAt: new Date(T0), data: {} }]),
     );
-  return { store, dispatch, sent, append, advance: (ms: number) => (t += ms) };
+  return { store, dispatch, sent, append, advance: (ms: number) => (t += ms), now: () => t };
 }
 
 describe("DispatchWebhooks", () => {
@@ -72,13 +72,47 @@ describe("DispatchWebhooks", () => {
       sender: { send: async () => Promise.reject(new Error("socket hang up")) },
       clock: { now: () => new Date(T0) },
       batchSize: 10,
-      leaseMs: 60_000,
+      sendTimeoutMs: 6_000,
       maxAttempts: 3,
       baseDelayMs: 30_000,
       maxDelayMs: 3_600_000,
     });
     expect((await broken.execute()).failed).toBe(1);
     expect(s.store.data.outboxRows[0]?.lastError).toBe("socket hang up");
+  });
+
+  it("the lease outlives a whole batch, so a second dispatcher running meanwhile never re-sends", async () => {
+    // Ten due events, each send takes the sender's full deadline (6 s). A second dispatcher polls while the first
+    // is still half way through its batch. With a lease sized for one send (0.2.1: 2 × timeout + 5 s = 17 s) it
+    // would re-claim the rest of the batch; the lease now covers batchSize × timeout.
+    const s = setup([]);
+    for (let i = 0; i < 10; i++) await s.append();
+    const sentBy: string[] = [];
+    let second: DispatchWebhooks | null = null;
+    const slow = (name: string): WebhookSender => ({
+      send: async (m) => {
+        sentBy.push(`${name}:${m.eventId}`);
+        s.advance(6_000);
+        if (name === "A" && sentBy.length === 4 && second) await second.execute();
+        return { ok: true };
+      },
+    });
+    const deps = {
+      uow: s.store,
+      clock: { now: () => new Date(s.now()) },
+      batchSize: 10,
+      sendTimeoutMs: 6_000,
+      maxAttempts: 3,
+      baseDelayMs: 30_000,
+      maxDelayMs: 3_600_000,
+    };
+    const first = new DispatchWebhooks({ ...deps, sender: slow("A") });
+    second = new DispatchWebhooks({ ...deps, sender: slow("B") });
+    expect(first.leaseMs).toBe(65_000);
+    expect(await first.execute()).toEqual({ delivered: 10, failed: 0, dead: 0 });
+    const ids = sentBy.map((x) => x.split(":")[1]);
+    expect(new Set(ids).size).toBe(ids.length); // every event sent exactly once
+    expect(sentBy.filter((x) => x.startsWith("B:"))).toHaveLength(0);
   });
 
   it("caps the delay", () => {
