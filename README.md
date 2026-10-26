@@ -48,6 +48,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and rules.
 ## Documentation
 
 - [Deployment](docs/deployment.md) and [configuration reference](docs/configuration.md)
+- [Going live on mainnet](docs/going-live.md) (checklist, read-only mainnet check, test payments)
 - [Merchant API and webhooks](docs/api.md) ([OpenAPI](docs/api/openapi.yaml), [PHP example](examples/php/))
 - [Hosted payment page](docs/payment-page.md) (optional)
 - [Operations](docs/operations.md) (monitoring, reconciliation, depeg, AML, canary)

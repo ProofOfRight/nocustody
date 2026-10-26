@@ -4,7 +4,8 @@ The gateway ships as a container image. [deploy/compose.yaml](../deploy/compose.
 PostgreSQL, a one-shot migration and the gateway running all roles in one process.
 
 Before you start: receiving addresses belong to wallets whose keys stay **offline** (a hardware wallet). The
-gateway only watches them. See [security.md](security.md) and [operations.md](operations.md).
+gateway only watches them. See [security.md](security.md) and [operations.md](operations.md). For the first mainnet launch follow
+[going-live.md](going-live.md).
 
 ## Image
 
