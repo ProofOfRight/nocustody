@@ -6,6 +6,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Reused by release.yml: a release is built only from a commit that passes every check.
+  workflow_call:
 
 permissions:
   contents: read
@@ -50,6 +52,20 @@ jobs:
       - name: Audit dependencies
         run: npm audit --audit-level=moderate
       - run: npm run build
+
+  image:
+    # Production image on both release architectures, natively (no emulation), with the example deployment.
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the image and smoke-test deploy/compose.yaml
+        run: sh scripts/smoke-image.sh
 
   dco:
     if: github.event_name == 'pull_request'
