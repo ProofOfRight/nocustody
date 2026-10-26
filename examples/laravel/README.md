@@ -6,7 +6,8 @@ lines marked `YOUR CODE`. The flow:
 1. Checkout: the backend creates an invoice (`POST /v1/invoices`) and redirects the payer to the hosted payment page.
 2. The gateway watches the chain and sends signed webhooks.
 3. The webhook controller verifies the signature, records the event once and queues a job.
-4. The job re-reads the invoice from the API and grants access on `completed`.
+4. The job re-reads the invoice from the API and grants access on `completed`, once.
+5. A scheduled task re-queues events that were recorded but never processed.
 
 | File | Purpose |
 |---|---|
@@ -17,6 +18,7 @@ lines marked `YOUR CODE`. The flow:
 | `app/Jobs/HandleNocustodyEvent.php` | re-reads the invoice and acts on its status |
 | `database/migrations/…_create_nocustody_tables.php` | order ↔ invoice mapping, received events |
 | `routes/nocustody.php` | webhook route (without CSRF) and a checkout route |
+| `routes/nocustody-console.php` | scheduled re-queue of unprocessed events |
 
 ## Setup
 
@@ -30,6 +32,7 @@ NOCUSTODY_WEBHOOK_SECRET=...                       # same value as the gateway's
 ```bash
 php artisan migrate
 php artisan queue:work      # the webhook job runs on the queue
+# cron, every minute:  php artisan schedule:run   (re-queues events the queue lost)
 ```
 
 Point the gateway's `webhooks.url` at `https://<shop>/nocustody/webhook`.
@@ -39,8 +42,11 @@ Point the gateway's `webhooks.url` at `https://<shop>/nocustody/webhook`.
 - **Prices come from your order**, never from the request. Amounts are decimal strings (`"9.99"`), never floats.
 - The order id is the `merchant_order_id` and, prefixed with `order-`, the `Idempotency-Key`: retrying checkout for
   the same order returns the same invoice. Keep order ids to `[A-Za-z0-9_.:-]` and at most 120 characters.
-- **Grant access only in the job**, after `GET /v1/invoices/{id}` says `completed`, and make granting idempotent
-  (the same event can be processed again after a crash).
+- **Grant access only in the job**, after `GET /v1/invoices/{id}` says `completed`, inside the transaction that
+  marks the event processed (the job locks the event row, so a duplicate job does nothing). Keep the grant itself
+  idempotent too, e.g. guarded by the order's state: two events of one invoice are processed separately.
+- An event is never lost between "recorded" and "processed": if queueing fails, the webhook answers 500 and the
+  gateway retries; an event left unprocessed for 10 minutes is queued again by the scheduler.
 - The events `invoice.underpaid`, `invoice.overpaid`, `invoice.paid_late`, `invoice.aml_hold` and
   `transfer.unmatched` need a person: the payer sent something other than the invoice asked for. Decide by the
   **event type**: a paid invoice goes through `aml_pending` to `completed` in the same cycle, so `paid`, `overpaid`
