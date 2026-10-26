@@ -376,6 +376,14 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
         setCandidate(network, txHash, "status = 'rejected', reason = $3", [reason]),
       markPending: (network, txHash, reason) =>
         setCandidate(network, txHash, "attempts = attempts + 1, reason = $3", [reason]),
+      listVerified: async (network: NetworkId, address: ChainAddress, from: Date, until: Date) => {
+        const { rows } = await db.query<{ tx_hash: string }>(
+          `SELECT tx_hash FROM tx_candidates
+           WHERE network = $1 AND recipient = $2 AND status = 'verified' AND block_time BETWEEN $3 AND $4`,
+          [network, address.value, from, until],
+        );
+        return rows.map((r) => r.tx_hash);
+      },
     },
 
     transfers: {
@@ -467,10 +475,73 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
           [id, next, error.slice(0, 500)],
         );
       },
+      countDead: async () => {
+        const { rows } = await db.query<{ n: number }>(
+          "SELECT count(*)::int AS n FROM outbox WHERE dead_at IS NOT NULL",
+        );
+        return rows[0]?.n ?? 0;
+      },
+      reviveDead: async (now: Date, eventId?: string) => {
+        const res = await db.query(
+          `UPDATE outbox SET dead_at = NULL, attempts = 0, next_attempt_at = $1, last_error = NULL
+           WHERE dead_at IS NOT NULL AND ($2::uuid IS NULL OR event_id = $2::uuid)`,
+          [now, eventId ?? null],
+        );
+        return res.rowCount ?? 0;
+      },
       markDead: async (id: string, at: Date, error: string) => {
         await db.query(
           "UPDATE outbox SET attempts = attempts + 1, dead_at = $2, last_error = $3 WHERE id = $1",
           [id, at, error.slice(0, 500)],
+        );
+      },
+    },
+
+    heartbeats: {
+      ok: async (role: string, at: Date) => {
+        await db.query(
+          `INSERT INTO heartbeats (role, last_ok_at) VALUES ($1, $2)
+           ON CONFLICT (role) DO UPDATE SET last_ok_at = EXCLUDED.last_ok_at`,
+          [role, at],
+        );
+      },
+      error: async (role: string, at: Date, error: string) => {
+        await db.query(
+          `INSERT INTO heartbeats (role, last_error_at, last_error) VALUES ($1, $2, $3)
+           ON CONFLICT (role) DO UPDATE SET last_error_at = EXCLUDED.last_error_at, last_error = EXCLUDED.last_error`,
+          [role, at, error.slice(0, 500)],
+        );
+      },
+      list: async () => {
+        const { rows } = await db.query<{
+          role: string;
+          last_ok_at: Date | null;
+          last_error_at: Date | null;
+          last_error: string | null;
+        }>("SELECT role, last_ok_at, last_error_at, last_error FROM heartbeats ORDER BY role");
+        return rows.map((r) => ({
+          role: r.role,
+          lastOkAt: r.last_ok_at,
+          lastErrorAt: r.last_error_at,
+          lastError: r.last_error,
+        }));
+      },
+    },
+
+    guards: {
+      get: async (key: string) => {
+        const { rows } = await db.query<{ blocked: boolean; reason: string; updated_at: Date }>(
+          "SELECT blocked, reason, updated_at FROM guards WHERE key = $1",
+          [key],
+        );
+        const r = rows[0];
+        return r ? { blocked: r.blocked, reason: r.reason, updatedAt: r.updated_at } : null;
+      },
+      set: async (key: string, blocked: boolean, reason: string, at: Date) => {
+        await db.query(
+          `INSERT INTO guards (key, blocked, reason, updated_at) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (key) DO UPDATE SET blocked = EXCLUDED.blocked, reason = EXCLUDED.reason, updated_at = EXCLUDED.updated_at`,
+          [key, blocked, reason.slice(0, 500), at],
         );
       },
     },

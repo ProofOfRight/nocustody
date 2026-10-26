@@ -2,7 +2,7 @@
 import { isDust } from "../../domain/amount-policy.ts";
 import { txRefKey } from "../../domain/tx-ref.ts";
 import { type AssetCatalog, watchedAddresses } from "../catalog.ts";
-import type { ChainAdapter, Clock, UnitOfWork, VerificationResult } from "../ports.ts";
+import type { AlertSink, ChainAdapter, Clock, UnitOfWork, VerificationResult } from "../ports.ts";
 
 export interface VerifyStats {
   final: number;
@@ -18,6 +18,9 @@ export interface VerifyTransfersDeps {
   readonly uow: UnitOfWork;
   readonly clock: Clock;
   readonly batchSize: number;
+  /** A candidate still not final this long after its block time is rejected (dropped or never-final tx). */
+  readonly maxPendingMs?: number;
+  readonly alerts?: AlertSink;
 }
 
 /**
@@ -52,6 +55,19 @@ export class VerifyTransfers {
       await uow.run(async (repos) => {
         const at = clock.now();
         if (result.status === "pending") {
+          const age = at.getTime() - c.at.getTime();
+          if (this.#deps.maxPendingMs !== undefined && age > this.#deps.maxPendingMs) {
+            stats.rejected++;
+            const reason = `not final ${Math.round(age / 60_000)} min after its block time (${result.reason})`;
+            await repos.candidates.markRejected(c.network, c.txHash, reason);
+            await repos.audit.record({ at, actor: "verifier", subject, decision: "rejected", reason });
+            await this.#deps.alerts?.send({
+              key: `never-final:${subject}`,
+              severity: "warning",
+              message: `${subject}: ${reason}`,
+            });
+            return;
+          }
           stats.pending++;
           await repos.candidates.markPending(c.network, c.txHash, result.reason);
           return;

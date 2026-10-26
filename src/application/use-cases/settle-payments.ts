@@ -4,6 +4,7 @@ import type { Invoice } from "../../domain/invoice.ts";
 import type { NetworkId } from "../../domain/network.ts";
 import { txRefKey } from "../../domain/tx-ref.ts";
 import type { AssetCatalog } from "../catalog.ts";
+import { ConcurrencyError } from "../errors.ts";
 import type { AmlScreener, Clock, Repositories, UnitOfWork, VerifiedTransfer } from "../ports.ts";
 import type { StrategyResolver } from "../strategies/strategy.ts";
 
@@ -43,7 +44,13 @@ export class SettlePayments {
     const stats: SettleStats = { matched: 0, unmatched: 0, completed: 0, held: 0, amlDeferred: 0 };
     const verified = await uow.run((r) => r.transfers.listVerified(network, batchSize));
     for (const t of verified) {
-      await uow.run((repos) => this.#settleOne(repos, t.transfer, stats));
+      try {
+        await uow.run((repos) => this.#settleOne(repos, t.transfer, stats));
+      } catch (e) {
+        // Another process changed the invoice between read and write: re-read and apply once more.
+        if (!(e instanceof ConcurrencyError)) throw e;
+        await uow.run((repos) => this.#settleOne(repos, t.transfer, stats));
+      }
     }
     await this.#screen(stats);
     return stats;
@@ -108,7 +115,9 @@ export class SettlePayments {
     for (const inv of pending) {
       const payments = inv.state.payments;
       const verdicts = [];
-      for (const p of payments) {
+      const threshold = this.#deps.catalog.get(inv.state.asset.id).amlThresholdUnits;
+      const belowThreshold = inv.received().units < threshold;
+      for (const p of belowThreshold ? [] : payments) {
         const [txHash = "", index = "0"] = p.transferKey.split("/").slice(-2);
         verdicts.push(
           await aml.screen({
@@ -141,7 +150,12 @@ export class SettlePayments {
           actor: "aml",
           subject: fresh.id,
           decision: fresh.status,
-          reason: hold && hold.verdict === "hold" ? hold.reason : "clear",
+          reason:
+            hold && hold.verdict === "hold"
+              ? hold.reason
+              : belowThreshold
+                ? "below AML threshold, not screened"
+                : "clear",
         });
       });
     }
