@@ -254,6 +254,15 @@ describe("fetchIncoming (indexer candidates)", () => {
     const { fn } = fake({ list: () => fixture("testnet-owner-transactions.json") });
     const res = await adapter(fn).fetchIncoming(GRAM, [owner], null, 50);
     expect(res.candidates.map((c) => c.amount.units)).toEqual([6035n, 7511n, 7511n]);
+    // a transfer whose comment the payer encrypted (op 0x2167da4b) is still a candidate, without memo
+    const list = structuredClone(fixture("testnet-owner-transactions.json"));
+    const plain = list.transactions.find(
+      (t: Json) => t.in_msg?.opcode === null || t.in_msg?.opcode === "0x00000000",
+    );
+    plain.in_msg.opcode = "0x2167da4b";
+    const enc = await adapter(fake({ list: () => list }).fn).fetchIncoming(GRAM, [owner], null, 50);
+    expect(enc.candidates.map((c) => c.amount.units)).toEqual([6035n, 7511n, 7511n]);
+    expect(enc.candidates.some((c) => c.memo === null)).toBe(true);
   });
 
   it("other messages to the jetton-wallet (outgoing transfer, excesses) are not candidates", async () => {
@@ -405,6 +414,16 @@ describe("verify GRAM (native coin)", () => {
           .toString("base64")),
     );
     expect(withMemo.status === "final" && withMemo.transfers[0]?.memo).toBe("AB2C3D4E");
+  });
+
+  it("a transfer with an encrypted comment is a payment without memo, not an invisible one", async () => {
+    const r = await verifyGram((t) => (t.in_msg.opcode = "0x2167da4b"));
+    expect(r.status === "final" && r.transfers.map((x) => [x.amount.units, x.memo])).toEqual([
+      [484_836_197n, null],
+    ]);
+    // a contract message to the wallet (e.g. a jetton notification) is still not GRAM paid to us
+    const other = await verifyGram((t) => (t.in_msg.opcode = "0x7362d09c"));
+    expect(other).toEqual({ status: "final", transfers: [] });
   });
 
   it("the credited amount wins over the message value (indexer hint)", async () => {

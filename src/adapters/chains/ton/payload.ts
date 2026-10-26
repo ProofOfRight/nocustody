@@ -5,6 +5,8 @@ import { Cell, type Slice } from "@ton/core";
 
 export const OP_INTERNAL_TRANSFER = 0x178d4519;
 export const OP_TEXT_COMMENT = 0;
+/** Wallet apps' "encrypt comment" option: a plain coin transfer whose comment the gateway cannot read. */
+export const OP_ENCRYPTED_COMMENT = 0x2167da4b;
 
 const MAX_COMMENT = 1_024;
 
