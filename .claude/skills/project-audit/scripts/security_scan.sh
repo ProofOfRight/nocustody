@@ -99,7 +99,7 @@ awk '/^[[:space:]]+ports:/ { p = 1; next } p && /^[[:space:]]+-/ { print FILENAM
 section "Looks like a secret in tracked files (file:line only; baseline entries keep the file column empty and 'file:line' as the text)"
 { git ls-files | grep -E '(^|/)\.env($|\.)|\.(pem|key|p12)$|id_(rsa|ed25519)' | grep -vE '\.example$'
   git grep -nIiE "(password|passwd|secret|api[_-]?key|token)['\"]?\s*[:=]\s*['\"][A-Za-z0-9+/_=-]{24,}['\"]" \
-      -- . ':!package-lock.json' ':!*.test.ts' ':!examples/**' ':!docs/**' ':!.claude/**' | cut -d: -f1,2; } | verdict secrets
+      -- . ':!package-lock.json' | cut -d: -f1,2; } | verdict secrets
 
 section "Vulnerable dependencies (npm audit; offline — open Dependabot alerts via gh)"
 if docker compose run --rm --no-deps -T dev npm audit --audit-level=moderate 2>&1 | tail -n 30; then
