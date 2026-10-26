@@ -139,12 +139,15 @@ describe("PostgreSQL repositories", () => {
       const dusty = { ...c, txHash: "d".repeat(64), amount: usdt("0.000001") };
       expect(await r.candidates.insert(dusty, "dust", "dust")).toBe("inserted");
       expect(await r.candidates.insert(dusty, "dust", "dust")).toBe("duplicate");
-      expect(await r.candidates.insert({ ...dusty, amount: usdt("10.01") }, "seen", null)).toBe("inserted");
+      expect(
+        await r.candidates.insert({ ...dusty, amount: usdt("10.01"), memo: "ABCD2345" }, "seen", null),
+      ).toBe("inserted");
       const requeued = (await r.candidates.listSeen(TRON, 10)).find(
         (x) => x.candidate.txHash === dusty.txHash,
       );
       expect(requeued?.status).toBe("seen");
       expect(requeued?.candidate.amount.units).toBe(10_010_000n);
+      expect(requeued?.candidate.memo).toBe("ABCD2345"); // the payer's comment is stored with the candidate
       expect(await r.candidates.insert({ ...dusty, amount: usdt("20") }, "seen", null)).toBe("duplicate");
       await r.candidates.markRejected(dusty, "test");
       expect(await r.transfers.insert(t, "verified", null)).toBe("inserted");
