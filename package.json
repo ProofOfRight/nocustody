@@ -1,6 +1,6 @@
 {
   "name": "nocustody",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Self-hosted, non-custodial (watch-only) crypto payment gateway",
   "license": "Apache-2.0",
