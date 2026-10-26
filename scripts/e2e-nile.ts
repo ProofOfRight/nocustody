@@ -11,6 +11,7 @@ import pg from "pg";
 import { migrate } from "../src/adapters/persistence/pg/migrate.ts";
 import { loadConfigFile, parseConfig } from "../src/app/config.ts";
 import { addressValidators, buildContainer, type Container, runCycle } from "../src/app/container.ts";
+import { requireTestDatabase } from "./test-database.ts";
 
 const NILE_USDT = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
 // Recorded payment: 1 USDT to TF34bV549WecfEHpo6gzMFWYrQXeHnK8Jq, solidified (see fixtures/README.md of the adapter).
@@ -33,8 +34,7 @@ async function showInvoice(c: Container, id: string): Promise<string> {
 }
 
 async function replay(): Promise<boolean> {
-  const url = process.env.TEST_DATABASE_URL;
-  if (!url) throw new Error("TEST_DATABASE_URL is required");
+  const url = requireTestDatabase(process.env.TEST_DATABASE_URL);
   const admin = new pg.Pool({ connectionString: url });
   await admin.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
   await migrate(admin);
