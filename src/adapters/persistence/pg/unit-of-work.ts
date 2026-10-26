@@ -391,11 +391,12 @@ function repositories(db: PoolClient, assets: AssetResolver, pinned: PinnedAddre
     candidates: {
       insert: async (c: TransferCandidate, status, reason) => {
         const res = await db.query(
-          `INSERT INTO tx_candidates (network, tx_hash, asset_id, sender, recipient, amount_units, block_time, status, reason)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          `INSERT INTO tx_candidates (network, tx_hash, asset_id, sender, recipient, amount_units, block_time, status,
+             reason, memo)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
            ON CONFLICT (network, tx_hash, asset_id) DO UPDATE
              SET status = 'seen', reason = NULL, amount_units = EXCLUDED.amount_units, sender = EXCLUDED.sender,
-                 updated_at = now()
+                 memo = EXCLUDED.memo, updated_at = now()
              WHERE tx_candidates.status = 'dust' AND EXCLUDED.status = 'seen'`,
           [
             c.network,
@@ -407,6 +408,7 @@ function repositories(db: PoolClient, assets: AssetResolver, pinned: PinnedAddre
             c.at,
             status,
             reason,
+            c.memo,
           ],
         );
         return res.rowCount === 1 ? "inserted" : "duplicate";

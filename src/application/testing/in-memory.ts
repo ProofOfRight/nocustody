@@ -134,7 +134,20 @@ export class InMemoryStore implements UnitOfWork {
           const cur = d().invoices.get(inv.id);
           if (!cur || cur.version !== inv.loadedVersion)
             throw new ConcurrencyError(`invoice ${inv.id} changed`);
-          d().invoices.set(inv.id, inv.state);
+          // Like the SQL: only status, AML reason and version change; payments are only ever added, and read back
+          // ordered by time and key. A change to any other field would be lost on PostgreSQL, so it is lost here too.
+          const s = inv.state;
+          const added = s.payments.filter((p) => !cur.payments.some((q) => q.transferKey === p.transferKey));
+          const payments = [...cur.payments, ...added].sort(
+            (a, b) => a.at.getTime() - b.at.getTime() || (a.transferKey < b.transferKey ? -1 : 1),
+          );
+          d().invoices.set(inv.id, {
+            ...cur,
+            status: s.status,
+            amlReason: s.amlReason,
+            version: s.version,
+            payments,
+          });
         },
         listExpirable: async (now, limit) =>
           [...d().invoices.values()]
@@ -197,7 +210,8 @@ export class InMemoryStore implements UnitOfWork {
           if (cur) {
             // like the SQL: a "seen" hint re-queues a transaction stored as dust
             if (cur.status === "dust" && status === "seen") {
-              d().candidates.set(key, { ...cur, candidate: c, status, reason: null, updatedAt: this.#now() });
+              const candidate = { ...cur.candidate, amount: c.amount, from: c.from, memo: c.memo };
+              d().candidates.set(key, { ...cur, candidate, status, reason: null, updatedAt: this.#now() });
               return "inserted";
             }
             return "duplicate";
