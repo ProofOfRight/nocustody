@@ -2,6 +2,7 @@
 // Composition root: wires config, adapters and use cases. The only place that knows concrete implementations.
 import pg from "pg";
 import { NoopAmlScreener } from "../adapters/aml/noop.ts";
+import { buildApi } from "../adapters/api/server.ts";
 import { TonAdapter } from "../adapters/chains/ton/adapter.ts";
 import { parseTonAddress } from "../adapters/chains/ton/address.ts";
 import { TronAdapter } from "../adapters/chains/tron/adapter.ts";
@@ -10,6 +11,7 @@ import { JsonHttpClient } from "../adapters/http/json-client.ts";
 import { PgUnitOfWork } from "../adapters/persistence/pg/unit-of-work.ts";
 import { ManualRateTable } from "../adapters/pricing/manual-table.ts";
 import { cryptoIds, cryptoMemos, systemClock } from "../adapters/system/system.ts";
+import { HttpWebhookSender } from "../adapters/webhooks/http-sender.ts";
 import { AssetCatalog } from "../application/catalog.ts";
 import type {
   AmlScreener,
@@ -23,8 +25,10 @@ import { MemoStrategy } from "../application/strategies/memo.ts";
 import type { StrategyResolver } from "../application/strategies/strategy.ts";
 import { UniqueAmountStrategy } from "../application/strategies/unique-amount.ts";
 import { CreateInvoice } from "../application/use-cases/create-invoice.ts";
+import { DispatchWebhooks } from "../application/use-cases/dispatch-webhooks.ts";
 import { ExpireInvoices } from "../application/use-cases/expire-invoices.ts";
 import { IngestTransfers } from "../application/use-cases/ingest-transfers.ts";
+import { QuotePrice } from "../application/use-cases/quote-price.ts";
 import { SettlePayments } from "../application/use-cases/settle-payments.ts";
 import { VerifyTransfers } from "../application/use-cases/verify-transfers.ts";
 import { chainAddress } from "../domain/chain-address.ts";
@@ -172,13 +176,63 @@ export function buildContainer(o: ContainerOptions) {
       throw new Error(`asset ${s.asset.id}: no provider configured for ${s.asset.network}`);
     }
   }
+  const quotePrice = new QuotePrice(catalog, o.config.pricing, rates);
+
+  const wh = o.config.raw.webhooks;
+  let dispatcher: DispatchWebhooks | null = null;
+  if (wh) {
+    const secret = env[wh.secretEnv];
+    if (!secret) throw new Error(`webhooks: ${wh.secretEnv} is not set`);
+    dispatcher = new DispatchWebhooks({
+      uow,
+      sender: new HttpWebhookSender({
+        url: wh.url,
+        secret,
+        allowPrivateNetworks: wh.allowPrivateNetworks,
+        allowHttp: wh.allowHttp,
+        timeoutMs: parseDuration(wh.timeout),
+      }),
+      clock,
+      batchSize: 50,
+      leaseMs: 2 * parseDuration(wh.timeout) + 5_000,
+      maxAttempts: wh.maxAttempts,
+      baseDelayMs: parseDuration(wh.baseDelay),
+      maxDelayMs: parseDuration(wh.maxDelay),
+    });
+  }
+
+  const api = (onError: (err: unknown) => void) =>
+    buildApi({
+      uow,
+      catalog,
+      createInvoice,
+      quotePrice,
+      adapters: workers.map((w) => w.adapter),
+      clock,
+      rateLimitPerMinute: o.config.raw.api.rateLimitPerMinute,
+      trustProxy: o.config.raw.api.trustProxy,
+      onError,
+    });
+
   /** Network-level startup checks (e.g. TON jetton-wallet binding); throws if any fails. */
   const verifyStartup = async (): Promise<void> => {
     const problems = (await Promise.all(startupChecks.map((c) => c()))).flat();
     if (problems.length > 0)
       throw new Error(`startup check failed, refusing to run:\n  ${problems.join("\n  ")}`);
   };
-  return { pool, uow, catalog, createInvoice, expireInvoices, workers, clock, verifyStartup };
+  return {
+    pool,
+    uow,
+    catalog,
+    createInvoice,
+    quotePrice,
+    expireInvoices,
+    workers,
+    clock,
+    verifyStartup,
+    dispatcher,
+    api,
+  };
 }
 
 export type Container = ReturnType<typeof buildContainer>;

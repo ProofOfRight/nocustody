@@ -135,6 +135,54 @@ describe("PostgreSQL repositories", () => {
     ).rejects.toThrow("rollback");
   });
 
+  it("outbox delivery: parallel claims never return the same event; leases, failures, dead-letter", async () => {
+    await uow.run((r) =>
+      r.outbox.append(
+        Array.from({ length: 6 }, (_, i) => ({
+          type: "invoice.paid",
+          aggregateId: `inv-${i}`,
+          occurredAt: T0,
+          data: { i },
+        })),
+      ),
+    );
+    const [a, b] = await Promise.all([
+      uow.run((r) => r.delivery.claim(T0, 60_000, 4)),
+      uow.run((r) => r.delivery.claim(T0, 60_000, 4)),
+    ]);
+    const ids = [...(a ?? []), ...(b ?? [])].map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toHaveLength(6);
+    expect(await uow.run((r) => r.delivery.claim(T0, 60_000, 10))).toEqual([]); // all leased
+    const first = a?.[0] ?? b?.[0];
+    if (!first) throw new Error("nothing claimed");
+    expect(first.eventId).toMatch(/^[0-9a-f-]{36}$/);
+    await uow.run((r) => r.delivery.markFailed(first.id, new Date(T0.getTime() + 1_000), "HTTP 503"));
+    const later = await uow.run((r) => r.delivery.claim(new Date(T0.getTime() + 2_000), 60_000, 10));
+    expect(later.map((m) => [m.id, m.attempts])).toEqual([[first.id, 1]]);
+    await uow.run((r) => r.delivery.markDead(first.id, T0, "gave up"));
+    await uow.run((r) => r.delivery.markDelivered(ids[1] ?? "", T0));
+    const { rows } = await pool.query(
+      "SELECT count(*) FILTER (WHERE dead_at IS NOT NULL)::int AS dead, count(*) FILTER (WHERE delivered_at IS NOT NULL)::int AS delivered FROM outbox",
+    );
+    expect(rows[0]).toEqual({ dead: 1, delivered: 1 });
+  });
+
+  it("api keys and idempotency keys", async () => {
+    const key = {
+      id: "0123456789ab",
+      name: "shop",
+      secretSha256: "a".repeat(64),
+      scopes: ["invoices:read" as const],
+      revokedAt: null,
+    };
+    await uow.run((r) => r.apiKeys.insert(key));
+    expect(await uow.run((r) => r.apiKeys.findById(key.id))).toEqual(key);
+    expect(await uow.run((r) => r.apiKeys.revoke(key.id, T0))).toBe(true);
+    expect(await uow.run((r) => r.apiKeys.revoke(key.id, T0))).toBe(false);
+    expect((await uow.run((r) => r.apiKeys.findById(key.id)))?.revokedAt).toEqual(T0);
+  });
+
   it("rolls back state, outbox and cursor together", async () => {
     await expect(
       uow.run(async (r) => {

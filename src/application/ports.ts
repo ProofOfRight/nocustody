@@ -120,6 +120,8 @@ export interface InvoiceRepository {
   update(invoice: Invoice): Promise<void>;
   listExpirable(now: Date, limit: number): Promise<Invoice[]>;
   listByStatus(status: InvoiceStatus, limit: number): Promise<Invoice[]>;
+  /** For the merchant API: newest first, optional status filter and lower bound on creation time. */
+  search(filter: { status?: InvoiceStatus; since?: Date; limit: number }): Promise<Invoice[]>;
 }
 
 export interface SlotRepository {
@@ -191,6 +193,56 @@ export interface OutboxRepository {
   append(events: readonly DomainEvent[]): Promise<void>;
 }
 
+/** An outbox row ready for delivery. */
+export interface OutboxMessage {
+  readonly id: string;
+  readonly eventId: string;
+  readonly type: string;
+  readonly aggregateId: string;
+  readonly occurredAt: Date;
+  readonly payload: Readonly<Record<string, unknown>>;
+  readonly attempts: number;
+}
+
+/** Delivery side of the outbox. `claim` leases due rows (SKIP LOCKED) so parallel dispatchers never double-send. */
+export interface OutboxDelivery {
+  claim(now: Date, leaseMs: number, limit: number): Promise<OutboxMessage[]>;
+  markDelivered(id: string, at: Date): Promise<void>;
+  markFailed(id: string, nextAttemptAt: Date, error: string): Promise<void>;
+  markDead(id: string, at: Date, error: string): Promise<void>;
+}
+
+export type DeliveryResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly error: string; readonly retryable: boolean };
+
+export interface WebhookSender {
+  send(message: OutboxMessage): Promise<DeliveryResult>;
+}
+
+export type ApiScope = "invoices:read" | "invoices:write" | "quotes:read";
+
+export interface ApiKeyRecord {
+  readonly id: string;
+  readonly name: string;
+  readonly secretSha256: string;
+  readonly scopes: readonly ApiScope[];
+  readonly revokedAt: Date | null;
+}
+
+export interface ApiKeyRepository {
+  insert(key: ApiKeyRecord): Promise<void>;
+  findById(id: string): Promise<ApiKeyRecord | null>;
+  list(): Promise<ApiKeyRecord[]>;
+  revoke(id: string, at: Date): Promise<boolean>;
+  touch(id: string, at: Date): Promise<void>;
+}
+
+export interface IdempotencyRepository {
+  find(apiKeyId: string, key: string): Promise<{ requestSha256: string; invoiceId: string } | null>;
+  insert(apiKeyId: string, key: string, requestSha256: string, invoiceId: string): Promise<void>;
+}
+
 export interface CursorRepository {
   get(network: NetworkId, stream: string): Promise<string | null>;
   set(network: NetworkId, stream: string, cursor: string): Promise<void>;
@@ -217,6 +269,9 @@ export interface Repositories {
   readonly candidates: CandidateRepository;
   readonly transfers: TransferRepository;
   readonly outbox: OutboxRepository;
+  readonly delivery: OutboxDelivery;
+  readonly apiKeys: ApiKeyRepository;
+  readonly idempotency: IdempotencyRepository;
   readonly cursors: CursorRepository;
   readonly audit: AuditLog;
 }

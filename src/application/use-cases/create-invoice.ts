@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Asset } from "../../domain/asset.ts";
-import { currency, isIsoCurrency, parseFiat } from "../../domain/currency.ts";
-import { DomainError } from "../../domain/errors.ts";
-import { Invoice, type LockedPrice } from "../../domain/invoice.ts";
-import { Money } from "../../domain/money.ts";
-import { convertToAsset, type ResolvedRate, withMarkup } from "../../domain/pricing.ts";
-import { rationalToDecimal } from "../../domain/rational.ts";
+import { Invoice } from "../../domain/invoice.ts";
 import type { AssetCatalog, PricingSettings } from "../catalog.ts";
 import { ApplicationError } from "../errors.ts";
 import type { Clock, IdGenerator, IntegrityGuard, UnitOfWork } from "../ports.ts";
 import type { RateService } from "../rates.ts";
 import type { StrategyResolver } from "../strategies/strategy.ts";
+import { QuotePrice } from "./quote-price.ts";
 
 export interface CreateInvoiceInput {
   readonly merchantOrderId: string;
@@ -40,7 +35,10 @@ export class CreateInvoice {
     if (!intact.ok) throw new ApplicationError("integrity.pin_violation", intact.reason);
     const settings = catalog.get(input.assetId);
     const now = clock.now();
-    const { base, price } = await this.#price(input, settings.asset, settings.priceSymbol, now);
+    const { base, price } = await new QuotePrice(catalog, this.#deps.pricing, this.#deps.rates).execute(
+      { amount: input.priceAmount, currency: input.priceCurrency, assetId: input.assetId },
+      now,
+    );
     if (base.isZero()) throw new ApplicationError("invoice.zero_amount", "price converts to zero");
 
     return uow.run(async (repos) => {
@@ -85,52 +83,6 @@ export class CreateInvoice {
       });
       return { invoice, created: true };
     });
-  }
-
-  async #price(
-    input: CreateInvoiceInput,
-    asset: Asset,
-    priceSymbol: string,
-    now: Date,
-  ): Promise<{ base: Money; price: LockedPrice | null }> {
-    if (input.priceCurrency === priceSymbol)
-      return { base: Money.parse(asset, input.priceAmount), price: null };
-    if (!isIsoCurrency(input.priceCurrency) || !this.#deps.pricing.currencies.has(input.priceCurrency)) {
-      throw new ApplicationError(
-        "pricing.currency_disabled",
-        `currency ${input.priceCurrency} is not enabled`,
-      );
-    }
-    const fiat = parseFiat(currency(input.priceCurrency), input.priceAmount);
-    let resolved: ResolvedRate;
-    try {
-      resolved = (await this.#deps.rates.resolve(input.priceCurrency, priceSymbol, now)).rate;
-    } catch (e) {
-      if (e instanceof DomainError && e.code === "pricing.no_rate") {
-        throw new ApplicationError(
-          "pricing.no_rate",
-          `no fresh rate ${input.priceCurrency} → ${priceSymbol}`,
-        );
-      }
-      throw e;
-    }
-    const rate = withMarkup(resolved.rate, this.#deps.pricing.markupBps.get(input.priceCurrency) ?? 0);
-    return {
-      base: convertToAsset(fiat, asset, rate),
-      price: {
-        amount: input.priceAmount,
-        currency: input.priceCurrency,
-        rate: `${rate.num}/${rate.den}`,
-        rateSource: [...new Set(resolved.path.map((h) => h.quote.source))].join(","),
-        rateAt: resolved.at,
-        ratePath: [
-          resolved.from,
-          ...resolved.path.map(
-            (h) => `${h.inverted ? h.quote.base : h.quote.quote}@${rationalToDecimal(h.quote.rate, 8)}`,
-          ),
-        ].join(" → "),
-      },
-    };
   }
 }
 

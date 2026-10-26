@@ -96,11 +96,38 @@ const tonSchema = z
   })
   .strict();
 
+const apiSchema = z
+  .object({
+    /** Bind address; expose the API through a TLS reverse proxy, never directly. */
+    host: z.string().default("127.0.0.1"),
+    port: z.number().int().min(1).max(65_535).default(8080),
+    trustProxy: z.boolean().default(false),
+    rateLimitPerMinute: z.number().int().min(1).max(100_000).default(120),
+  })
+  .strict();
+
+const webhookSchema = z
+  .object({
+    url: z.string().url(),
+    secretEnv: envName,
+    /** Allow delivery to private / loopback addresses (merchant on an internal network). */
+    allowPrivateNetworks: z.boolean().default(false),
+    /** Allow plain http (only sensible together with a trusted private network). */
+    allowHttp: z.boolean().default(false),
+    timeout: duration.default("10s"),
+    maxAttempts: z.number().int().min(1).max(100).default(15),
+    baseDelay: duration.default("30s"),
+    maxDelay: duration.default("6h"),
+  })
+  .strict();
+
 export const configSchema = z
   .object({
     database: z.object({ urlEnv: envName.default("DATABASE_URL") }).strict(),
     tron: tronSchema.optional(),
     ton: tonSchema.optional(),
+    api: apiSchema.prefault({}),
+    webhooks: webhookSchema.optional(),
     assets: z.array(assetSchema).min(1),
     pricing: z
       .object({

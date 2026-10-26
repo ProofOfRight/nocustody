@@ -9,6 +9,7 @@ import type { NetworkId } from "../../domain/network.ts";
 import { type TxRef, txRefKey } from "../../domain/tx-ref.ts";
 import { ConcurrencyError } from "../errors.ts";
 import type {
+  ApiKeyRecord,
   AuditEntry,
   CandidateStatus,
   Repositories,
@@ -19,6 +20,17 @@ import type {
   VerifiedTransfer,
 } from "../ports.ts";
 
+interface OutboxRow {
+  id: string;
+  eventId: string;
+  event: DomainEvent;
+  attempts: number;
+  nextAttemptAt: number;
+  deliveredAt: Date | null;
+  deadAt: Date | null;
+  lastError: string | null;
+}
+
 interface Data {
   invoices: Map<string, InvoiceState>;
   slots: AmountSlot[];
@@ -26,6 +38,9 @@ interface Data {
   candidates: Map<string, StoredCandidate>;
   transfers: Map<string, StoredTransfer>;
   outbox: DomainEvent[];
+  outboxRows: OutboxRow[];
+  apiKeys: Map<string, ApiKeyRecord & { lastUsedAt: Date | null }>;
+  idempotency: Map<string, { requestSha256: string; invoiceId: string }>;
   cursors: Map<string, string>;
   audit: AuditEntry[];
 }
@@ -39,6 +54,9 @@ export class InMemoryStore implements UnitOfWork {
     candidates: new Map(),
     transfers: new Map(),
     outbox: [],
+    outboxRows: [],
+    apiKeys: new Map(),
+    idempotency: new Map(),
     cursors: new Map(),
     audit: [],
   };
@@ -51,6 +69,9 @@ export class InMemoryStore implements UnitOfWork {
       candidates: new Map(this.data.candidates),
       transfers: new Map(this.data.transfers),
       outbox: [...this.data.outbox],
+      outboxRows: this.data.outboxRows.map((r) => ({ ...r })),
+      apiKeys: new Map(this.data.apiKeys),
+      idempotency: new Map(this.data.idempotency),
       cursors: new Map(this.data.cursors),
       audit: [...this.data.audit],
     };
@@ -105,6 +126,14 @@ export class InMemoryStore implements UnitOfWork {
                 (s.status === "awaiting_payment" || s.status === "confirming") &&
                 s.expiresAt.getTime() <= now.getTime(),
             )
+            .slice(0, limit)
+            .map((s) => Invoice.restore(s)),
+        search: async ({ status, since, limit }) =>
+          [...d().invoices.values()]
+            .filter(
+              (s) => (!status || s.status === status) && (!since || s.createdAt.getTime() >= since.getTime()),
+            )
+            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
             .slice(0, limit)
             .map((s) => Invoice.restore(s)),
         listByStatus: async (status: InvoiceStatus, limit) =>
@@ -181,6 +210,73 @@ export class InMemoryStore implements UnitOfWork {
       outbox: {
         append: async (events) => {
           d().outbox.push(...events);
+          for (const event of events) {
+            const n = d().outboxRows.length + 1;
+            d().outboxRows.push({
+              id: String(n),
+              eventId: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+              event,
+              attempts: 0,
+              nextAttemptAt: 0,
+              deliveredAt: null,
+              deadAt: null,
+              lastError: null,
+            });
+          }
+        },
+      },
+      delivery: {
+        claim: async (now, leaseMs, limit) => {
+          const due = d()
+            .outboxRows.filter((r) => !r.deliveredAt && !r.deadAt && r.nextAttemptAt <= now.getTime())
+            .slice(0, limit);
+          for (const r of due) r.nextAttemptAt = now.getTime() + leaseMs;
+          return due.map((r) => ({
+            id: r.id,
+            eventId: r.eventId,
+            type: r.event.type,
+            aggregateId: r.event.aggregateId,
+            occurredAt: r.event.occurredAt,
+            payload: r.event.data,
+            attempts: r.attempts,
+          }));
+        },
+        markDelivered: async (id, at) => {
+          const r = d().outboxRows.find((x) => x.id === id);
+          if (r) r.deliveredAt = at;
+        },
+        markFailed: async (id, next, error) => {
+          const r = d().outboxRows.find((x) => x.id === id);
+          if (r)
+            Object.assign(r, { attempts: r.attempts + 1, nextAttemptAt: next.getTime(), lastError: error });
+        },
+        markDead: async (id, at, error) => {
+          const r = d().outboxRows.find((x) => x.id === id);
+          if (r) Object.assign(r, { attempts: r.attempts + 1, deadAt: at, lastError: error });
+        },
+      },
+      apiKeys: {
+        insert: async (k) => {
+          d().apiKeys.set(k.id, { ...k, lastUsedAt: null });
+        },
+        findById: async (id) => d().apiKeys.get(id) ?? null,
+        list: async () => [...d().apiKeys.values()],
+        revoke: async (id, at) => {
+          const k = d().apiKeys.get(id);
+          if (!k || k.revokedAt) return false;
+          d().apiKeys.set(id, { ...k, revokedAt: at });
+          return true;
+        },
+        touch: async (id, at) => {
+          const k = d().apiKeys.get(id);
+          if (k) d().apiKeys.set(id, { ...k, lastUsedAt: at });
+        },
+      },
+      idempotency: {
+        find: async (apiKeyId, key) => d().idempotency.get(`${apiKeyId}/${key}`) ?? null,
+        insert: async (apiKeyId, key, requestSha256, invoiceId) => {
+          if (d().idempotency.has(`${apiKeyId}/${key}`)) throw new Error("duplicate idempotency key");
+          d().idempotency.set(`${apiKeyId}/${key}`, { requestSha256, invoiceId });
         },
       },
       cursors: {
