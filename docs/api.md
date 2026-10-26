@@ -68,4 +68,4 @@ SSRF protection: the endpoint host is resolved and every address is checked; pri
 other special ranges are refused unless `webhooks.allowPrivateNetworks` is `true`. Plain `http` needs
 `webhooks.allowHttp`. Redirects are not followed.
 
-An integration example in PHP is in [examples/php](../examples/php/).
+Integration examples: plain PHP in [examples/php](../examples/php/), Laravel in [examples/laravel](../examples/laravel/).

@@ -41,5 +41,5 @@ e2e-ops:       ## reconciliation heals a missed payment (Nile + TON testnet), de
 e2e-mainnet:   ## read-only: real recent mainnet USDT payments (TRON, TON) through scanner, verifier, settlement
 	$(RUN) npm run e2e:mainnet
 PHP_IMAGE := php:8.4.27-cli-alpine@sha256:d8784155c4d37986be9ddd7a8950df7e78998cc48e35472cd69e2b9371424a65
-php-selftest:  ## PHP example: syntax and webhook signature verification
-	docker run --rm -v "$(CURDIR)/examples/php:/app:ro" -w /app $(PHP_IMAGE) sh -c 'php -l NocustodyClient.php && php -l webhook.php && php selftest.php'
+php-selftest:  ## PHP and Laravel examples: syntax and webhook signature verification
+	docker run --rm -v "$(CURDIR)/examples:/ex:ro" -w /ex $(PHP_IMAGE) sh -c 'for f in $$(find php laravel -name "*.php"); do php -l "$$f" >/dev/null || exit 1; done && php php/selftest.php && php laravel/selftest.php'
