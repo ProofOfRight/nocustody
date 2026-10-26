@@ -47,6 +47,13 @@ describe("source policy", () => {
     expect(checkInvisible("a.md", "x\u{E0041}\u{E0049}")).toHaveLength(2);
     expect(checkInvisible("a.md", "\uFEFFtitle")).toHaveLength(1);
     expect(checkInvisible("a.md", "x\u{E0100}")).toHaveLength(1);
+    // characters that hide code: blank identifier characters, and line separators that end a // comment
+    expect(checkInvisible("a.ts", "const \u3164 = 1; exec(\u3164)")).toHaveLength(2);
+    expect(checkInvisible("a.ts", "const \u115F\u1160\uFFA0 = 1")).toHaveLength(3);
+    expect(checkInvisible("a.ts", "// note\u2028doEvil()")).toEqual([
+      "a.ts:1:8: invisible or bidi character U+2028",
+    ]);
+    expect(checkInvisible("a.ts", "a\u2029b\u034Fc\u180Bd\uFFF9e\u{1D173}f")).toHaveLength(5);
   });
 });
 
