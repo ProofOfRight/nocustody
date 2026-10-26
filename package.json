@@ -28,7 +28,6 @@
   "dependencies": {
     "@ton/core": "0.63.1",
     "@ton/crypto": "3.3.0",
-    "fastify": "5.12.7",
     "pg": "8.23.1",
     "pino": "10.4.0",
     "zod": "4.6.7"

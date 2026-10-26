@@ -2,7 +2,7 @@
 // Composition root: wires config, adapters and use cases. The only place that knows concrete implementations.
 import pg from "pg";
 import { NoopAmlScreener } from "../adapters/aml/noop.ts";
-import { buildApi } from "../adapters/api/server.ts";
+import { ApiServer } from "../adapters/api/server.ts";
 import { TonAdapter } from "../adapters/chains/ton/adapter.ts";
 import { parseTonAddress } from "../adapters/chains/ton/address.ts";
 import { TronAdapter } from "../adapters/chains/tron/adapter.ts";
@@ -202,15 +202,13 @@ export function buildContainer(o: ContainerOptions) {
   }
 
   const api = (onError: (err: unknown) => void) =>
-    buildApi({
+    new ApiServer({
       uow,
-      catalog,
       createInvoice,
       quotePrice,
       adapters: workers.map((w) => w.adapter),
       clock,
       rateLimitPerMinute: o.config.raw.api.rateLimitPerMinute,
-      trustProxy: o.config.raw.api.trustProxy,
       onError,
     });
 

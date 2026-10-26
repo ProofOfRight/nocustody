@@ -216,7 +216,7 @@ async function main(argv: string[]): Promise<void> {
       let api: ReturnType<Container["api"]> | null = null;
       if (roles.has("api")) {
         api = container.api((err) => logger.error({ err }, "api error"));
-        await api.listen({ host: config.raw.api.host, port: config.raw.api.port });
+        await api.listen(config.raw.api.host, config.raw.api.port);
         logger.info({ host: config.raw.api.host, port: config.raw.api.port }, "api listening");
       }
       if (roles.has("worker")) {

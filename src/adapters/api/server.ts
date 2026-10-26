@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Merchant REST API (Fastify). Driving adapter: translates HTTP to use cases; no business logic here.
-// See docs/api.md and docs/api/openapi.yaml.
+// Merchant REST API on node:http (no framework, ADR-0025). Driving adapter: translates HTTP to use cases; no
+// business logic here. See docs/api.md and docs/api/openapi.yaml.
 import { createHash } from "node:crypto";
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { z } from "zod";
-import type { AssetCatalog } from "../../application/catalog.ts";
 import { ApplicationError, ConcurrencyError } from "../../application/errors.ts";
 import type { ApiKeyRecord, ApiScope, ChainAdapter, Clock, UnitOfWork } from "../../application/ports.ts";
 import type { CreateInvoice } from "../../application/use-cases/create-invoice.ts";
@@ -15,15 +15,16 @@ import { authenticate } from "./keys.ts";
 
 export interface ApiDeps {
   readonly uow: UnitOfWork;
-  readonly catalog: AssetCatalog;
   readonly createInvoice: CreateInvoice;
   readonly quotePrice: QuotePrice;
   readonly adapters: readonly ChainAdapter[];
   readonly clock: Clock;
   readonly rateLimitPerMinute: number;
-  readonly trustProxy: boolean;
   readonly onError?: (err: unknown) => void;
 }
+
+/** Request bodies above this size are refused with 413. */
+export const BODY_LIMIT = 16 * 1024;
 
 const STATUSES = [
   "awaiting_payment",
@@ -82,12 +83,6 @@ const APP_ERRORS: Readonly<Record<string, number>> = {
   "integrity.pin_violation": 503,
 };
 
-declare module "fastify" {
-  interface FastifyRequest {
-    apiKey: ApiKeyRecord | null;
-  }
-}
-
 export function invoiceDto(inv: Invoice, adapters: readonly ChainAdapter[]) {
   const s = inv.state;
   const adapter = adapters.find((a) => a.network === s.asset.network);
@@ -132,151 +127,285 @@ export function invoiceDto(inv: Invoice, adapters: readonly ChainAdapter[]) {
   };
 }
 
-export function buildApi(d: ApiDeps): FastifyInstance {
-  const app = Fastify({
-    logger: false,
-    bodyLimit: 16 * 1024,
-    trustProxy: d.trustProxy,
-    return503OnClosing: true,
-  });
-  const buckets = new Map<string, { tokens: number; at: number }>();
+interface Request {
+  readonly method: string;
+  readonly path: string;
+  readonly query: Record<string, string>;
+  readonly headers: IncomingMessage["headers"];
+  readonly body: unknown;
+  readonly params: Record<string, string>;
+  apiKey: ApiKeyRecord | null;
+}
 
-  app.decorateRequest("apiKey", null);
+interface Reply {
+  readonly status: number;
+  readonly body: unknown;
+}
 
-  app.setErrorHandler((err, _req, reply) => {
-    if (err instanceof HttpError)
-      return reply.code(err.status).send({ error: { code: err.code, message: err.message } });
-    if (err instanceof ApplicationError) {
-      return reply
-        .code(APP_ERRORS[err.code] ?? 422)
-        .send({ error: { code: err.code, message: err.message } });
-    }
-    if (err instanceof DomainError)
-      return reply.code(422).send({ error: { code: err.code, message: err.message } });
-    if (err instanceof ConcurrencyError) {
-      return reply.code(409).send({ error: { code: "conflict", message: "concurrent update, retry" } });
-    }
-    const status = (err as { statusCode?: number }).statusCode;
-    if (status && status >= 400 && status < 500) {
-      return reply.code(status).send({ error: { code: "bad_request", message: "malformed request" } });
-    }
-    d.onError?.(err);
-    return reply.code(500).send({ error: { code: "internal", message: "internal error" } });
-  });
-  app.setNotFoundHandler((_req, reply) =>
-    reply.code(404).send({ error: { code: "not_found", message: "not found" } }),
+type Handler = (req: Request) => Promise<Reply>;
+
+interface Route {
+  readonly method: string;
+  readonly pattern: RegExp;
+  readonly params: readonly string[];
+  readonly scope: ApiScope | null;
+  readonly handler: Handler;
+}
+
+const ok = (body: unknown, status = 200): Reply => ({ status, body });
+
+function route(method: string, path: string, scope: ApiScope | null, handler: Handler): Route {
+  const params: string[] = [];
+  const pattern = new RegExp(
+    `^${path.replace(/:([a-z]+)/g, (_m, name: string) => {
+      params.push(name);
+      return "([^/]+)";
+    })}$`,
   );
+  return { method, pattern, params, scope, handler };
+}
 
-  const guard = (scope: ApiScope) => async (req: FastifyRequest) => {
+/** Reads the body up to BODY_LIMIT bytes; JSON only. */
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const type = (req.headers["content-type"] ?? "").split(";")[0]?.trim().toLowerCase();
+  const declared = Number(req.headers["content-length"] ?? "0");
+  if (declared > BODY_LIMIT)
+    throw new HttpError(413, "payload_too_large", `body larger than ${BODY_LIMIT} bytes`);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > BODY_LIMIT)
+      throw new HttpError(413, "payload_too_large", `body larger than ${BODY_LIMIT} bytes`);
+    chunks.push(chunk as Buffer);
+  }
+  if (size === 0) return undefined;
+  if (type !== "application/json") throw new HttpError(415, "unsupported_media_type", "use application/json");
+  try {
+    // Prototype pollution is not possible: parsed values are only read through strict zod schemas.
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new HttpError(400, "invalid_json", "body is not valid JSON");
+  }
+}
+
+function parseQuery(search: URLSearchParams): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of search) {
+    if (Object.hasOwn(out, k))
+      throw new HttpError(400, "invalid_request", `query parameter ${k} given twice`);
+    out[k] = v;
+  }
+  return out;
+}
+
+export class ApiServer {
+  readonly server: Server;
+  readonly #d: ApiDeps;
+  readonly #routes: readonly Route[];
+  readonly #buckets = new Map<string, { tokens: number; at: number }>();
+
+  constructor(d: ApiDeps) {
+    this.#d = d;
+    this.#routes = this.#buildRoutes();
+    this.server = createServer(
+      { requestTimeout: 15_000, headersTimeout: 10_000, keepAliveTimeout: 5_000 },
+      (req, res) => {
+        void this.#handle(req, res);
+      },
+    );
+    this.server.maxHeadersCount = 50;
+  }
+
+  async listen(host: string, port: number): Promise<AddressInfo> {
+    await new Promise<void>((resolve, reject) => {
+      this.server.once("error", reject);
+      this.server.listen(port, host, () => resolve());
+    });
+    return this.server.address() as AddressInfo;
+  }
+
+  async close(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this.server.close(() => resolve());
+      this.server.closeIdleConnections();
+    });
+  }
+
+  async #handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let reply: Reply;
+    try {
+      reply = await this.#dispatch(req);
+    } catch (err) {
+      reply = this.#error(err);
+    }
+    const body = JSON.stringify(reply.body);
+    res.writeHead(reply.status, {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": Buffer.byteLength(body),
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    });
+    res.end(body);
+  }
+
+  async #dispatch(raw: IncomingMessage): Promise<Reply> {
+    const url = new URL(raw.url ?? "/", "http://localhost");
+    const method = raw.method ?? "GET";
+    let found: { route: Route; match: RegExpExecArray } | null = null;
+    let pathKnown = false;
+    for (const r of this.#routes) {
+      const match = r.pattern.exec(url.pathname);
+      if (!match) continue;
+      pathKnown = true;
+      if (r.method === method) {
+        found = { route: r, match };
+        break;
+      }
+    }
+    if (!found) {
+      if (pathKnown) throw new HttpError(405, "method_not_allowed", "method not allowed");
+      throw new HttpError(404, "not_found", "not found");
+    }
+    const params: Record<string, string> = {};
+    found.route.params.forEach((name, i) => {
+      params[name] = decodeURIComponent(found.match[i + 1] ?? "");
+    });
+    const req: Request = {
+      method,
+      path: url.pathname,
+      query: parseQuery(url.searchParams),
+      headers: raw.headers,
+      body: method === "POST" ? await readJson(raw) : undefined,
+      params,
+      apiKey: null,
+    };
+    if (found.route.scope) req.apiKey = await this.#authorize(req, found.route.scope);
+    return found.route.handler(req);
+  }
+
+  async #authorize(req: Request, scope: ApiScope): Promise<ApiKeyRecord> {
     const header = req.headers.authorization ?? "";
     const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-    const key = token ? await d.uow.run((r) => authenticate(token, r.apiKeys)) : null;
+    const key = token ? await this.#d.uow.run((r) => authenticate(token, r.apiKeys)) : null;
     if (!key) throw new HttpError(401, "unauthorized", "missing or invalid API key");
     if (!key.scopes.includes(scope)) throw new HttpError(403, "forbidden", `the key lacks scope ${scope}`);
     // Token bucket per key.
+    const limit = this.#d.rateLimitPerMinute;
     const now = Date.now();
-    const b = buckets.get(key.id) ?? { tokens: d.rateLimitPerMinute, at: now };
-    b.tokens = Math.min(d.rateLimitPerMinute, b.tokens + ((now - b.at) / 60_000) * d.rateLimitPerMinute);
+    const b = this.#buckets.get(key.id) ?? { tokens: limit, at: now };
+    b.tokens = Math.min(limit, b.tokens + ((now - b.at) / 60_000) * limit);
     b.at = now;
     if (b.tokens < 1) throw new HttpError(429, "rate_limited", "too many requests");
     b.tokens -= 1;
-    buckets.set(key.id, b);
-    req.apiKey = key;
-  };
+    this.#buckets.set(key.id, b);
+    return key;
+  }
 
-  const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
-    const r = schema.safeParse(value);
-    if (!r.success) {
-      const i = r.error.issues[0];
-      throw new HttpError(400, "invalid_request", `${i?.path.join(".") || "body"}: ${i?.message}`);
-    }
-    return r.data;
-  };
+  #error(err: unknown): Reply {
+    const fail = (status: number, code: string, message: string) => ({
+      status,
+      body: { error: { code, message } },
+    });
+    if (err instanceof HttpError) return fail(err.status, err.code, err.message);
+    if (err instanceof ApplicationError) return fail(APP_ERRORS[err.code] ?? 422, err.code, err.message);
+    if (err instanceof DomainError) return fail(422, err.code, err.message);
+    if (err instanceof ConcurrencyError) return fail(409, "conflict", "concurrent update, retry");
+    this.#d.onError?.(err);
+    return fail(500, "internal", "internal error");
+  }
 
-  app.get("/health", async () => ({ status: "ok" }));
-
-  app.post(
-    "/v1/invoices",
-    { preHandler: guard("invoices:write") },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const key = req.apiKey as ApiKeyRecord;
-      const idem = req.headers["idempotency-key"];
-      if (typeof idem !== "string" || !IDEMPOTENCY_KEY.test(idem)) {
-        throw new HttpError(
-          400,
-          "idempotency_key_required",
-          "Idempotency-Key header (1-128 of [A-Za-z0-9_.:-]) is required",
-        );
+  #buildRoutes(): Route[] {
+    const d = this.#d;
+    const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
+      const r = schema.safeParse(value);
+      if (!r.success) {
+        const i = r.error.issues[0];
+        throw new HttpError(400, "invalid_request", `${i?.path.join(".") || "body"}: ${i?.message}`);
       }
-      const body = parse(createSchema, req.body);
-      const requestSha256 = createHash("sha256").update(JSON.stringify(body)).digest("hex");
-      const replayed = await d.uow.run(async (r) => {
-        const prev = await r.idempotency.find(key.id, idem);
-        if (!prev) return null;
-        if (prev.requestSha256 !== requestSha256) {
+      return r.data;
+    };
+
+    return [
+      route("GET", "/health", null, async () => ok({ status: "ok" })),
+
+      route("POST", "/v1/invoices", "invoices:write", async (req) => {
+        const key = req.apiKey as ApiKeyRecord;
+        const idem = req.headers["idempotency-key"];
+        if (typeof idem !== "string" || !IDEMPOTENCY_KEY.test(idem)) {
           throw new HttpError(
-            422,
-            "idempotency_mismatch",
-            "Idempotency-Key was used with a different request",
+            400,
+            "idempotency_key_required",
+            "Idempotency-Key header (1-128 of [A-Za-z0-9_.:-]) is required",
           );
         }
-        return r.invoices.findById(prev.invoiceId);
-      });
-      if (replayed) return reply.code(200).send(invoiceDto(replayed, d.adapters));
-
-      const { invoice, created } = await d.createInvoice.execute({
-        merchantOrderId: body.merchant_order_id,
-        priceAmount: body.price.amount,
-        priceCurrency: body.price.currency,
-        assetId: body.asset,
-      });
-      await d.uow
-        .run((r) => r.idempotency.insert(key.id, idem, requestSha256, invoice.id))
-        .catch(() => undefined); // a concurrent request with the same key stored it first; the invoice is the same
-      return reply.code(created ? 201 : 200).send(invoiceDto(invoice, d.adapters));
-    },
-  );
-
-  app.get("/v1/invoices/:id", { preHandler: guard("invoices:read") }, async (req: FastifyRequest) => {
-    const { id } = req.params as { id: string };
-    if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new HttpError(404, "not_found", "invoice not found");
-    const inv = await d.uow.run((r) => r.invoices.findById(id));
-    if (!inv) throw new HttpError(404, "not_found", "invoice not found");
-    return invoiceDto(inv, d.adapters);
-  });
-
-  app.get("/v1/invoices", { preHandler: guard("invoices:read") }, async (req: FastifyRequest) => {
-    const q = parse(listSchema, req.query);
-    const list = await d.uow.run((r) =>
-      r.invoices.search({
-        limit: q.limit,
-        ...(q.status ? { status: q.status } : {}),
-        ...(q.since ? { since: new Date(q.since) } : {}),
-      }),
-    );
-    return { data: list.map((i) => invoiceDto(i, d.adapters)) };
-  });
-
-  app.get("/v1/quotes", { preHandler: guard("quotes:read") }, async (req: FastifyRequest) => {
-    const q = parse(quoteSchema, req.query);
-    const quote = await d.quotePrice.execute(
-      { amount: q.amount, currency: q.currency, assetId: q.asset },
-      d.clock.now(),
-    );
-    return {
-      asset: quote.asset.id,
-      amount: quote.base.toDecimalString(),
-      price: quote.price
-        ? {
-            amount: quote.price.amount,
-            currency: quote.price.currency,
-            rate: quote.price.rate,
-            rate_path: quote.price.ratePath,
+        const body = parse(createSchema, req.body);
+        const requestSha256 = createHash("sha256").update(JSON.stringify(body)).digest("hex");
+        const replayed = await d.uow.run(async (r) => {
+          const prev = await r.idempotency.find(key.id, idem);
+          if (!prev) return null;
+          if (prev.requestSha256 !== requestSha256) {
+            throw new HttpError(
+              422,
+              "idempotency_mismatch",
+              "Idempotency-Key was used with a different request",
+            );
           }
-        : null,
-      note: "indicative: the invoice locks its own rate and may add a unique-amount step",
-    };
-  });
+          return r.invoices.findById(prev.invoiceId);
+        });
+        if (replayed) return ok(invoiceDto(replayed, d.adapters));
+        const { invoice, created } = await d.createInvoice.execute({
+          merchantOrderId: body.merchant_order_id,
+          priceAmount: body.price.amount,
+          priceCurrency: body.price.currency,
+          assetId: body.asset,
+        });
+        await d.uow
+          .run((r) => r.idempotency.insert(key.id, idem, requestSha256, invoice.id))
+          .catch(() => undefined); // a concurrent request with the same key stored it first; the invoice is the same
+        return ok(invoiceDto(invoice, d.adapters), created ? 201 : 200);
+      }),
 
-  return app;
+      route("GET", "/v1/invoices/:id", "invoices:read", async (req) => {
+        const id = req.params.id ?? "";
+        if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new HttpError(404, "not_found", "invoice not found");
+        const inv = await d.uow.run((r) => r.invoices.findById(id));
+        if (!inv) throw new HttpError(404, "not_found", "invoice not found");
+        return ok(invoiceDto(inv, d.adapters));
+      }),
+
+      route("GET", "/v1/invoices", "invoices:read", async (req) => {
+        const q = parse(listSchema, req.query);
+        const list = await d.uow.run((r) =>
+          r.invoices.search({
+            limit: q.limit,
+            ...(q.status ? { status: q.status } : {}),
+            ...(q.since ? { since: new Date(q.since) } : {}),
+          }),
+        );
+        return ok({ data: list.map((i) => invoiceDto(i, d.adapters)) });
+      }),
+
+      route("GET", "/v1/quotes", "quotes:read", async (req) => {
+        const q = parse(quoteSchema, req.query);
+        const quote = await d.quotePrice.execute(
+          { amount: q.amount, currency: q.currency, assetId: q.asset },
+          d.clock.now(),
+        );
+        return ok({
+          asset: quote.asset.id,
+          amount: quote.base.toDecimalString(),
+          price: quote.price
+            ? {
+                amount: quote.price.amount,
+                currency: quote.price.currency,
+                rate: quote.price.rate,
+                rate_path: quote.price.ratePath,
+              }
+            : null,
+          note: "indicative: the invoice locks its own rate and may add a unique-amount step",
+        });
+      }),
+    ];
+  }
 }
