@@ -15,7 +15,7 @@ import { UniqueAmountStrategy } from "./strategies/unique-amount.ts";
 import { FakeChain } from "./testing/fake-chain.ts";
 import { InMemoryStore } from "./testing/in-memory.ts";
 import { CreateInvoice } from "./use-cases/create-invoice.ts";
-import { deviationBps, Monitor } from "./use-cases/monitor.ts";
+import { deviationBps, exceedsDeviation, Monitor } from "./use-cases/monitor.ts";
 import { ResolveAmlHold } from "./use-cases/resolve-aml-hold.ts";
 import { SettlePayments } from "./use-cases/settle-payments.ts";
 import { VerifyTransfers } from "./use-cases/verify-transfers.ts";
@@ -139,6 +139,18 @@ describe("monitor: depeg protection", () => {
     expect(deviationBps(rationalFromDecimal("0.9986"))).toBe(14);
     expect(deviationBps(rational(1n))).toBe(0);
     expect(deviationBps(rationalFromDecimal("1.03"))).toBe(300);
+    // the decision is exact, not on the floored number: 150.9 bps is over a 150 bps limit
+    expect(exceedsDeviation(rationalFromDecimal("1.01509"), 150)).toBe(true);
+    expect(exceedsDeviation(rationalFromDecimal("0.98491"), 150)).toBe(true);
+    expect(exceedsDeviation(rationalFromDecimal("1.0150"), 150)).toBe(false);
+    expect(exceedsDeviation(rationalFromDecimal("0.985"), 150)).toBe(false);
+  });
+
+  it("blocks on a deviation just over the limit that the floored basis points would hide", async () => {
+    const s = setup({ peg: [peg("kraken", "1.01509")] });
+    expect((await s.monitor.checkDepeg())?.blocked).toBe(true);
+    const fine = setup({ peg: [peg("kraken", "1.0150")] });
+    expect((await fine.monitor.checkDepeg())?.blocked).toBe(false);
   });
 
   it("blocks new invoices while the price is off the peg and unblocks when it returns", async () => {

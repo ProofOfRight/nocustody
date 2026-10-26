@@ -41,10 +41,16 @@ export interface ReconcileStats {
   errors: number;
 }
 
-/** |x − 1| in basis points, for a price quoted in units of the peg. */
+/** |x − 1| in basis points, rounded down: for alert texts only, the decision is `exceedsDeviation`. */
 export function deviationBps(price: Rational): number {
   const diff = price.num > price.den ? price.num - price.den : price.den - price.num;
   return Number((diff * 10_000n) / price.den);
+}
+
+/** Exact: |x − 1| > maxBps / 10 000, without rounding (150.9 bps is over a 150 bps limit). */
+export function exceedsDeviation(price: Rational, maxBps: number): boolean {
+  const diff = price.num > price.den ? price.num - price.den : price.den - price.num;
+  return diff * 10_000n > BigInt(maxBps) * price.den;
 }
 
 export class Monitor {
@@ -101,22 +107,27 @@ export class Monitor {
   async checkDepeg(): Promise<{ blocked: boolean; reason: string } | null> {
     const { uow, clock, alerts, depeg } = this.#d;
     if (!depeg) return null;
-    const prices: Array<{ name: string; bps: number }> = [];
+    const prices: Array<{ name: string; bps: number; over: boolean }> = [];
     const failures: string[] = [];
     for (const s of depeg.sources) {
       try {
-        prices.push({ name: s.name, bps: deviationBps(await s.price()) });
+        const price = await s.price();
+        prices.push({
+          name: s.name,
+          bps: deviationBps(price),
+          over: exceedsDeviation(price, depeg.maxDeviationBps),
+        });
       } catch (e) {
         failures.push(`${s.name}: ${e instanceof Error ? e.message : e}`);
       }
     }
-    const worst = prices.reduce((m, p) => (p.bps > m.bps ? p : m), { name: "-", bps: 0 });
+    const worst = prices.reduce((m, p) => (p.bps > m.bps ? p : m), { name: "-", bps: 0, over: false });
     let blocked = false;
     let reason = `${depeg.symbol}/USD within ${depeg.maxDeviationBps} bps (${prices.map((p) => `${p.name} ${p.bps}`).join(", ")})`;
     if (prices.length === 0) {
       blocked = true;
       reason = `no ${depeg.symbol}/USD price source reachable: ${failures.join("; ")}`;
-    } else if (worst.bps > depeg.maxDeviationBps) {
+    } else if (prices.some((p) => p.over)) {
       blocked = true;
       reason = `${depeg.symbol}/USD deviates ${worst.bps} bps at ${worst.name} (limit ${depeg.maxDeviationBps})`;
     }
