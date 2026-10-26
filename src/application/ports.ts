@@ -179,7 +179,16 @@ export interface InvoiceRepository {
   listExpirable(now: Date, limit: number): Promise<Invoice[]>;
   listByStatus(status: InvoiceStatus, limit: number): Promise<Invoice[]>;
   /** For the merchant API: newest first, optional status filter and lower bound on creation time. */
-  search(filter: { status?: InvoiceStatus; since?: Date; limit: number }): Promise<Invoice[]>;
+  /**
+   * Newest first (created_at descending, then id ascending). `before` is the last invoice of the previous page:
+   * the result starts strictly after it in that order (keyset pagination, stable while new invoices arrive).
+   */
+  search(filter: {
+    status?: InvoiceStatus;
+    since?: Date;
+    before?: { readonly createdAt: Date; readonly id: string };
+    limit: number;
+  }): Promise<Invoice[]>;
 }
 
 export interface SlotRepository {

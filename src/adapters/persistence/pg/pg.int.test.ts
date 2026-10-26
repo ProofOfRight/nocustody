@@ -18,7 +18,7 @@ import { VerifyTransfers } from "../../../application/use-cases/verify-transfers
 import { STRICT_AMOUNT_POLICY, uniqueAmountPolicy } from "../../../domain/amount-policy.ts";
 import { amountSlot } from "../../../domain/amount-slot.ts";
 import { chainAddress } from "../../../domain/chain-address.ts";
-import { INVOICE_STATUSES } from "../../../domain/invoice.ts";
+import { INVOICE_STATUSES, Invoice } from "../../../domain/invoice.ts";
 import { Money } from "../../../domain/money.ts";
 import { TRON, USDT_TRON } from "../../../domain/test-fixtures.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
@@ -363,6 +363,38 @@ describe("PostgreSQL repositories", () => {
     await expect(pinnedUow.run((r) => r.invoices.findById(invoice.id))).rejects.toMatchObject({
       code: "invoice.address_unpinned",
     });
+  });
+
+  it("search pages newest first by (created_at, id) and continues strictly after `before`", async () => {
+    const at = [T0, T0, T0, new Date(T0.getTime() + MIN)];
+    await uow.run(async (r) => {
+      for (const [i, createdAt] of at.entries()) {
+        const id = `inv-${"dcba"[i]}`;
+        await r.invoices.insert(
+          Invoice.create(
+            {
+              id,
+              merchantOrderId: `o-${id}`,
+              instructions: { address: ADDR, amount: usdt("10"), memo: null },
+              price: null,
+              ttlMs: 30 * MIN,
+              graceMs: 60 * MIN,
+            },
+            createdAt,
+          ),
+        );
+      }
+    });
+    const ids = (list: Invoice[]) => list.map((x) => x.id);
+    const first = await uow.run((r) => r.invoices.search({ limit: 2 }));
+    expect(ids(first)).toEqual(["inv-a", "inv-b"]); // newest first, then id ascending among equal times
+    const last = first.at(-1);
+    if (!last) throw new Error("empty page");
+    const before = { createdAt: last.state.createdAt, id: last.id };
+    expect(ids(await uow.run((r) => r.invoices.search({ limit: 2, before })))).toEqual(["inv-c", "inv-d"]);
+    expect(
+      ids(await uow.run((r) => r.invoices.search({ limit: 9, before: { createdAt: T0, id: "inv-d" } }))),
+    ).toEqual([]);
   });
 
   it("rolls back state, outbox and cursor together", async () => {
