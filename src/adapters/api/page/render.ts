@@ -14,7 +14,21 @@ export interface PageView {
   readonly memo: string | null;
   readonly uri: string | null;
   readonly expiresAt: string;
+  readonly graceUntil: string;
   readonly statusUrl: string;
+  /**
+   * Whether a payment sent now can still be credited to this invoice. When false the page shows the status only:
+   * after `graceUntil` the (address, amount) pair may belong to a newer invoice, so a payer who follows an old link
+   * must not see an address, amount or QR code to pay.
+   */
+  readonly payable: boolean;
+}
+
+const PAYABLE_STATUSES = new Set(["awaiting_payment", "confirming", "underpaid", "expired"]);
+
+/** The server-side half of `PageView.payable`: payable status and still inside the grace period. */
+export function isPayable(status: string, graceUntil: Date, now: Date): boolean {
+  return PAYABLE_STATUSES.has(status) && now.getTime() <= graceUntil.getTime();
 }
 
 const esc = (s: string) =>
@@ -66,19 +80,23 @@ const SCRIPT = `
 (function(){
   var d = JSON.parse(document.getElementById("page-data").textContent);
   var statusEl = document.getElementById("status"), timerEl = document.getElementById("timer");
-  var FINAL = {paid:1,overpaid:1,paid_late:1,completed:1,aml_pending:1,aml_hold:1,rejected:1,cancelled:1,underpaid:1};
+  // Stop polling on a final status, or once the grace period is over (an expired invoice stays "expired" forever).
+  // "underpaid" is not final: a top-up with the same memo completes the invoice.
+  var FINAL = {paid:1,overpaid:1,paid_late:1,completed:1,aml_pending:1,aml_hold:1,rejected:1,cancelled:1};
   var OK = {paid:1,overpaid:1,paid_late:1,completed:1,aml_pending:1};
+  function finished(s){ return FINAL[s] || Date.now() > Date.parse(d.graceUntil); }
   function show(s){
     statusEl.textContent = d.statusText[s] || s;
     statusEl.className = "status " + (OK[s] ? "ok" : (s === "awaiting_payment" || s === "confirming") ? "" : s === "expired" ? "warn" : "err");
   }
   function tick(){
+    if (!timerEl) return;
     var left = Math.max(0, Math.floor((Date.parse(d.expiresAt) - Date.now()) / 1000));
     timerEl.textContent = Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0");
   }
   var poll = function(){
     fetch(d.statusUrl, {cache: "no-store", credentials: "omit"}).then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(j){ if (!j) return; d.status = j.status; show(j.status); if (FINAL[j.status]) clearInterval(handle); })
+      .then(function(j){ if (!j) return; d.status = j.status; show(j.status); if (finished(j.status)) clearInterval(handle); })
       .catch(function(){});
   };
   document.querySelectorAll("button[data-copy]").forEach(function(b){
@@ -90,7 +108,7 @@ const SCRIPT = `
   });
   show(d.status); tick(); setInterval(tick, 1000);
   var handle = setInterval(poll, 10000);
-  if (FINAL[d.status]) clearInterval(handle);
+  if (finished(d.status)) clearInterval(handle);
 })();
 `;
 
@@ -117,7 +135,9 @@ export function renderPaymentPage(v: PageView, lang: Lang, nonce: string): strin
 <body>
 <main>
 <h1>${esc(t.title)}</h1>
-<div class="muted">${esc(t.send)}</div>
+${
+  v.payable
+    ? `<div class="muted">${esc(t.send)}</div>
 <div class="amount"><span id="amount" class="value">${esc(v.amount)}</span> ${esc(v.assetSymbol)}</div>
 <button type="button" data-copy="amount">${esc(t.copy)}</button>
 <p class="muted">${esc(t.exactly)}</p>
@@ -126,14 +146,17 @@ export function renderPaymentPage(v: PageView, lang: Lang, nonce: string): strin
 ${field("address", t.toAddress, v.address)}
 ${v.memo ? `${field("memo", t.memo, v.memo)}<p class="warning">${esc(t.memoWarning)}</p>` : ""}
 <div class="qr">${qrSvg(qrPayload, esc(t.qr))}</div>
-${v.uri ? `<p><a class="btn" href="${esc(v.uri)}" rel="noopener noreferrer">${esc(t.openWallet)}</a></p>` : ""}
-<div class="status" id="status" role="status" aria-live="polite"></div>
-<div class="muted">${esc(t.timeLeft)}: <span id="timer" class="value"></span></div>
+${v.uri ? `<p><a class="btn" href="${esc(v.uri)}" rel="noopener noreferrer">${esc(t.openWallet)}</a></p>` : ""}`
+    : ""
+}
+<div class="status" id="status" role="status" aria-live="polite">${esc(t.status[v.status] ?? v.status)}</div>
+${v.payable ? `<div class="muted">${esc(t.timeLeft)}: <span id="timer" class="value"></span></div>` : ""}
 <nav>${langs}</nav>
 </main>
 <script type="application/json" id="page-data">${jsonForHtml({
     status: v.status,
     expiresAt: v.expiresAt,
+    graceUntil: v.graceUntil,
     statusUrl: v.statusUrl,
     statusText: t.status,
     copied: t.copied,

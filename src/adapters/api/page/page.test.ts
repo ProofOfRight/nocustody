@@ -3,7 +3,7 @@ import jsqrImport from "jsqr";
 import { describe, expect, it } from "vitest";
 import { LANGUAGES, MESSAGES, pickLanguage } from "./i18n.ts";
 import { qrMatrix } from "./qr.ts";
-import { contentSecurityPolicy, type PageView, renderPaymentPage } from "./render.ts";
+import { contentSecurityPolicy, isPayable, type PageView, renderPaymentPage } from "./render.ts";
 
 // jsqr is a CommonJS bundle with a default export; normalise the interop shape.
 type Decoder = (data: Uint8ClampedArray, width: number, height: number) => { data: string } | null;
@@ -40,7 +40,9 @@ const view: PageView = {
   memo: "AB2C3D4E",
   uri: "ton://transfer/UQAya8rx8lLKnjRY_nM0hWav6AX3xbQDOSdyYLyy_IdisFZt?jetton=EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs&amount=10010000&text=AB2C3D4E",
   expiresAt: "2026-10-26T12:30:00.000Z",
+  graceUntil: "2026-10-26T13:30:00.000Z",
   statusUrl: "/pay/0b9e6a4e-6f2a-4c1e-9d55-1f0c6b8f1a11/status",
+  payable: true,
 };
 
 describe("QR code", () => {
@@ -115,6 +117,48 @@ describe("payment page", () => {
     const en = renderPaymentPage(view, "en", "n");
     expect(en).toContain('dir="ltr"');
     for (const l of LANGUAGES) expect(en).toContain(`href="?lang=${encodeURIComponent(l)}"`);
+  });
+
+  it("an invoice that can no longer be paid shows its status only: no amount, address, memo, QR or wallet link", () => {
+    for (const status of ["expired", "cancelled", "completed", "rejected", "paid"]) {
+      const html = renderPaymentPage({ ...view, status, payable: false }, "en", "n");
+      expect(html, status).not.toContain(view.address);
+      expect(html, status).not.toContain(">10.010000<");
+      expect(html, status).not.toContain(">AB2C3D4E<");
+      expect(html, status).not.toContain("<svg");
+      expect(html, status).not.toContain('href="ton://');
+      expect(html, status).toContain(MESSAGES.en.status[status] ?? "MISSING");
+    }
+    // the status is rendered server side, so it is visible without JavaScript
+    expect(renderPaymentPage(view, "en", "n")).toContain(">Waiting for your payment<");
+  });
+
+  it("payable: payable statuses inside the grace period only", () => {
+    const grace = new Date("2026-10-26T13:30:00Z");
+    const before = new Date("2026-10-26T13:00:00Z");
+    const after = new Date("2026-10-26T13:30:01Z");
+    for (const s of ["awaiting_payment", "confirming", "underpaid", "expired"]) {
+      expect(isPayable(s, grace, before), s).toBe(true);
+      expect(isPayable(s, grace, after), s).toBe(false);
+    }
+    for (const s of [
+      "paid",
+      "overpaid",
+      "paid_late",
+      "cancelled",
+      "aml_pending",
+      "aml_hold",
+      "completed",
+      "rejected",
+    ])
+      expect(isPayable(s, grace, before), s).toBe(false);
+  });
+
+  it("the page script polls until the grace period ends and treats underpaid as still open", () => {
+    const html = renderPaymentPage(view, "en", "n");
+    expect(html).toContain('"graceUntil":"2026-10-26T13:30:00.000Z"');
+    expect(html).toMatch(/Date\.parse\(d\.graceUntil\)/);
+    expect(html).not.toMatch(/FINAL = \{[^}]*underpaid/);
   });
 
   it("TRON (no wallet URI): the QR carries the address and there is no wallet button", () => {

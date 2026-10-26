@@ -398,6 +398,33 @@ describe("hosted payment page", () => {
     expect(again.headers.get("content-security-policy")).not.toBe(csp); // fresh nonce per response
   });
 
+  it("after the grace period the page shows the status only, never an address a newer invoice may own", async () => {
+    const { app, create, store } = await setup({ page: true });
+    const inv = (await create()).json();
+    // move the invoice past its grace period in the store (the server's clock is fixed at T0)
+    const state = store.data.invoices.get(inv.id);
+    if (!state) throw new Error("invoice missing");
+    store.data.invoices.set(inv.id, {
+      ...state,
+      status: "expired",
+      expiresAt: new Date(T0.getTime() - 7_200_000),
+      graceUntil: new Date(T0.getTime() - 3_600_000),
+    });
+    const r = await app.inject({ url: inv.payment.page });
+    expect(r.statusCode).toBe(200);
+    expect(r.body).not.toContain(inv.payment.address);
+    expect(r.body).not.toContain("<svg");
+    expect(r.body).toContain("This invoice has expired");
+    // still inside grace: the address is shown (a late payment is credited as paid_late)
+    store.data.invoices.set(inv.id, {
+      ...state,
+      status: "expired",
+      expiresAt: new Date(T0.getTime() - 60_000),
+      graceUntil: new Date(T0.getTime() + 3_600_000),
+    });
+    expect((await app.inject({ url: inv.payment.page })).body).toContain(inv.payment.address);
+  });
+
   it("public status reveals only status, received amount and deadlines", async () => {
     const { app, create } = await setup({ page: true });
     const id = (await create()).json().id;
