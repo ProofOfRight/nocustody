@@ -1,7 +1,8 @@
 # Releasing
 
 For maintainers. Decisions: [ADR-0028](adr/0028-container-image.md) (image),
-[ADR-0029](adr/0029-release-provenance.md) (provenance, SBOM).
+[ADR-0029](adr/0029-release-provenance.md) (provenance, SBOM), [ADR-0033](adr/0033-release-isolated-signing.md)
+(signing isolated from the build).
 
 ## One-time repository setup
 
@@ -26,9 +27,11 @@ For maintainers. Decisions: [ADR-0028](adr/0028-container-image.md) (image),
    git push origin vX.Y.Z
    ```
 
-4. The [release workflow](../.github/workflows/release.yml) runs the full CI, checks that the tag matches
-   `package.json` and the changelog, builds and pushes `linux/amd64` + `linux/arm64`, attests build provenance and
-   the SPDX SBOM for the image digest, and creates the GitHub release with the SBOM and the verification command.
+4. The [release workflow](../.github/workflows/release.yml) runs the full CI, then three jobs: `build` (waits for
+   the `release` environment approval; checks that the tag matches `package.json` and the changelog, builds and
+   pushes `linux/amd64` + `linux/arm64`, smoke-tests the pushed digest, generates the SPDX SBOM), `attest` (signs
+   build provenance and the SBOM for that digest; the only job with an OIDC token, and it runs no repository code)
+   and `publish` (the GitHub release with the SBOM and the verification command).
 5. Verify the published image the way operators do ([deployment.md](deployment.md#verify-the-image)), and rebuild
    it locally to compare digests (below).
 6. Add the donation addresses to the release notes (`gh release edit vX.Y.Z --notes-file ...`), copied from your

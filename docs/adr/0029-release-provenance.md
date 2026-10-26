@@ -28,7 +28,9 @@ its release workflow, without trusting the registry or a maintainer's laptop.
 - Builds are reproducible (`SOURCE_DATE_EPOCH` = commit time, `rewrite-timestamp=true`, see
   [ADR-0028](0028-container-image.md)): anyone can rebuild a tag and compare the image digest.
 - Third-party code in the release path is limited to GitHub-owned actions pinned by commit SHA (`checkout`,
-  `setup-node`, `attest`); Docker and the GitHub release use the runner's CLIs.
+  `setup-node`, `attest`, and since [ADR-0033](0033-release-isolated-signing.md) `upload-artifact` /
+  `download-artifact`); Docker and the GitHub release use the runner's CLIs. Signing runs in its own job
+  (ADR-0033).
 
 ## Consequences
 
