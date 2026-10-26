@@ -1,7 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# Smoke test of the production image with the example deployment (deploy/compose.yaml): migrations, all roles,
-# API key from the CLI, an invoice over HTTP, the payment page, and the hardening (non-root, read-only, no shell).
+# Smoke test of the production image with the example deployment (deploy/compose.yaml): migrations, the runtime
+# database role, all roles, API key from the CLI, an invoice over HTTP, the payment page, and the hardening
+# (non-root, read-only, no shell, no DDL and append-only history for the gateway's database role).
 # Usage: sh scripts/smoke-image.sh [image]   (default: builds nocustody:smoke). Host needs Docker and curl.
 set -eu
 IMAGE=${1:-}
@@ -45,10 +46,13 @@ cat >"$DIR/config.json" <<'EOF'
 }
 EOF
 chmod 644 "$DIR/config.json"
+cp deploy/db-roles.sql "$DIR/"
+APP_PW=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
 cat >"$DIR/.env" <<EOF
 NOCUSTODY_IMAGE=$IMAGE
 NOCUSTODY_PORT=$PORT
 POSTGRES_PASSWORD=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+NOCUSTODY_DB_PASSWORD=$APP_PW
 LOG_LEVEL=warn
 EOF
 # The same command as in docs/deployment.md.
@@ -64,6 +68,17 @@ $COMPOSE exec -T gateway /bin/sh -c true >/dev/null 2>&1 && fail "image contains
 $COMPOSE exec -T gateway /usr/local/bin/node -e "require('fs').writeFileSync('/app/x', '')" >/dev/null 2>&1 &&
   fail "application directory is writable"
 echo "ok   non-root, read-only root filesystem, no shell"
+
+$COMPOSE exec -T gateway /usr/local/bin/node -e \
+  "process.exit(process.env.POSTGRES_PASSWORD === '' && process.env.DATABASE_URL.startsWith('postgres://nocustody_app:') ? 0 : 1)" ||
+  fail "gateway runs with the owner's database credentials"
+APP_PSQL="psql -X -q -v ON_ERROR_STOP=1 postgres://nocustody_app:$APP_PW@localhost/nocustody"
+$COMPOSE exec -T postgres $APP_PSQL -c "SELECT count(*) FROM audit_log" >/dev/null 2>&1 || fail "runtime role cannot read"
+for sql in "DELETE FROM audit_log" "UPDATE invoice_payments SET sender = sender" "DELETE FROM observed_transfers" \
+  "CREATE TABLE smoke (x int)" "DROP TABLE invoices"; do
+  $COMPOSE exec -T postgres $APP_PSQL -c "$sql" >/dev/null 2>&1 && fail "runtime role may: $sql"
+done
+echo "ok   gateway uses the runtime role: no DDL, payment history append-only"
 
 TOKEN=$($COMPOSE exec -T gateway /usr/local/bin/node /app/dist/app/cli.js apikey:create --name smoke \
   --scopes invoices:read,invoices:write | sed -n 's/.*"token": "\([^"]*\)".*/\1/p')
