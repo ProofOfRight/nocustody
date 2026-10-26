@@ -293,10 +293,11 @@ async function main(argv: string[]): Promise<void> {
         else loop("dispatcher", 2_000, () => dispatcher.execute());
       }
       if (roles.has("monitor")) {
-        const { healthMs, reconcileMs, depegMs } = container.monitorIntervals;
+        const { healthMs, reconcileMs, depegMs, pruneMs } = container.monitorIntervals;
         loop("monitor:health", healthMs, () => container.monitor.checkHealth());
         if (reconcileMs) loop("monitor:reconcile", reconcileMs, () => container.monitor.reconcile());
         if (depegMs) loop("monitor:depeg", depegMs, () => container.monitor.checkDepeg());
+        if (pruneMs) loop("monitor:prune", pruneMs, () => container.monitor.prune());
       }
       // SIGTERM/SIGINT: finish the current cycle of every loop, then close; a sleeping loop wakes at once.
       process.on("SIGINT", () => stop.abort());

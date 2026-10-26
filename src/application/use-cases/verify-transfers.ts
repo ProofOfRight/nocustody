@@ -94,7 +94,7 @@ export class VerifyTransfers {
         return;
       }
       stats.pending++;
-      await repos.candidates.markPending(c.network, c.txHash, result.reason);
+      await repos.candidates.markPending(c, result.reason);
       return;
     }
     // Defence in depth: the adapter decides finality and parses the chain, but what it returns must still be a
@@ -115,7 +115,7 @@ export class VerifyTransfers {
             : null;
     if (reason !== null) {
       stats.rejected++;
-      await repos.candidates.markRejected(c.network, c.txHash, reason);
+      await repos.candidates.markRejected(c, reason);
       await repos.audit.record({ at, actor: "verifier", subject, decision: "rejected", reason });
       return;
     }
@@ -139,7 +139,7 @@ export class VerifyTransfers {
         },
       });
     }
-    await repos.candidates.markVerified(c.network, c.txHash);
+    await repos.candidates.markVerified(c);
   }
 
   /** No decision this cycle: record the reason (attempts + 1), or reject the candidate once it is too old. */
@@ -148,7 +148,7 @@ export class VerifyTransfers {
     await this.#deps.uow.run(async (repos) => {
       const at = this.#deps.clock.now();
       if (this.#tooOld(stored, at)) await this.#giveUp(repos, stored, at, reason, stats);
-      else await repos.candidates.markPending(c.network, c.txHash, reason);
+      else await repos.candidates.markPending(c, reason);
     });
   }
 
@@ -171,7 +171,7 @@ export class VerifyTransfers {
     const age = at.getTime() - c.at.getTime();
     stats.rejected++;
     const reason = `not final ${Math.round(age / 60_000)} min after its block time (${why})`;
-    await repos.candidates.markRejected(c.network, c.txHash, reason);
+    await repos.candidates.markRejected(c, reason);
     await repos.audit.record({ at, actor: "verifier", subject, decision: "rejected", reason });
     await this.#deps.alerts?.send({
       key: `never-final:${subject}`,

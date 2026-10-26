@@ -221,17 +221,14 @@ function repositories(db: PoolClient, assets: AssetResolver): Repositories {
     };
   };
 
-  const setCandidate = async (
-    network: NetworkId,
-    txHash: string,
-    sets: string,
-    params: unknown[],
-  ): Promise<void> => {
+  const setCandidate = async (c: TransferCandidate, sets: string, params: unknown[]): Promise<void> => {
     const res = await db.query(
-      `UPDATE tx_candidates SET ${sets}, updated_at = now() WHERE network = $1 AND tx_hash = $2`,
-      [network, txHash, ...params],
+      `UPDATE tx_candidates SET ${sets}, updated_at = now()
+       WHERE network = $1 AND tx_hash = $2 AND asset_id = $3`,
+      [c.network, c.txHash, c.amount.asset.id, ...params],
     );
-    if (res.rowCount !== 1) throw new Error(`candidate ${network}/${txHash} not found`);
+    if (res.rowCount !== 1)
+      throw new Error(`candidate ${c.network}/${c.txHash} (${c.amount.asset.id}) not found`);
   };
 
   /** Settles a transfer that is still `verified`; false when another worker got there first. */
@@ -379,7 +376,11 @@ function repositories(db: PoolClient, assets: AssetResolver): Repositories {
       insert: async (c: TransferCandidate, status, reason) => {
         const res = await db.query(
           `INSERT INTO tx_candidates (network, tx_hash, asset_id, sender, recipient, amount_units, block_time, status, reason)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (network, tx_hash) DO NOTHING`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (network, tx_hash, asset_id) DO UPDATE
+             SET status = 'seen', reason = NULL, amount_units = EXCLUDED.amount_units, sender = EXCLUDED.sender,
+                 updated_at = now()
+             WHERE tx_candidates.status = 'dust' AND EXCLUDED.status = 'seen'`,
           [
             c.network,
             c.txHash,
@@ -403,12 +404,9 @@ function repositories(db: PoolClient, assets: AssetResolver): Repositories {
         );
         return rows.map(toCandidate);
       },
-      markVerified: (network, txHash) =>
-        setCandidate(network, txHash, "status = 'verified', reason = NULL", []),
-      markRejected: (network, txHash, reason) =>
-        setCandidate(network, txHash, "status = 'rejected', reason = $3", [reason]),
-      markPending: (network, txHash, reason) =>
-        setCandidate(network, txHash, "attempts = attempts + 1, reason = $3", [reason]),
+      markVerified: (c) => setCandidate(c, "status = 'verified', reason = NULL", []),
+      markRejected: (c, reason) => setCandidate(c, "status = 'rejected', reason = $4", [reason]),
+      markPending: (c, reason) => setCandidate(c, "attempts = attempts + 1, reason = $4", [reason]),
       listVerified: async (network: NetworkId, address: ChainAddress, from: Date, until: Date) => {
         const { rows } = await db.query<{ tx_hash: string }>(
           `SELECT tx_hash FROM tx_candidates
@@ -416,6 +414,13 @@ function repositories(db: PoolClient, assets: AssetResolver): Repositories {
           [network, address.value, from, until],
         );
         return rows.map((r) => r.tx_hash);
+      },
+      pruneSettled: async (before: Date) => {
+        const res = await db.query(
+          "DELETE FROM tx_candidates WHERE status IN ('dust', 'rejected') AND updated_at < $1",
+          [before],
+        );
+        return res.rowCount ?? 0;
       },
     },
 
@@ -527,6 +532,13 @@ function repositories(db: PoolClient, assets: AssetResolver): Repositories {
           "UPDATE outbox SET attempts = attempts + 1, dead_at = $2, last_error = $3 WHERE id = $1",
           [id, at, error.slice(0, 500)],
         );
+      },
+      pruneDelivered: async (before: Date) => {
+        const res = await db.query(
+          "DELETE FROM outbox WHERE delivered_at IS NOT NULL AND delivered_at < $1",
+          [before],
+        );
+        return res.rowCount ?? 0;
       },
     },
 
@@ -647,6 +659,10 @@ function repositories(db: PoolClient, assets: AssetResolver): Repositories {
           "INSERT INTO idempotency_keys (api_key_id, key, request_sha256, invoice_id) VALUES ($1, $2, $3, $4)",
           [apiKeyId, key, requestSha256, invoiceId],
         );
+      },
+      prune: async (before: Date) => {
+        const res = await db.query("DELETE FROM idempotency_keys WHERE created_at < $1", [before]);
+        return res.rowCount ?? 0;
       },
     },
 

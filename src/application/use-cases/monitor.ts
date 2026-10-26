@@ -32,6 +32,18 @@ export interface MonitorDeps {
   } | null;
   /** Re-checked every health cycle, so a tampered config is alerted even when no invoice is being created. */
   readonly integrity?: IntegrityGuard;
+  /** Retention of operational rows (ops.retention); null keeps everything forever. Payments and audit are never pruned. */
+  readonly retention?: {
+    readonly deliveredWebhooksMs?: number;
+    readonly idempotencyKeysMs?: number;
+    readonly settledCandidatesMs?: number;
+  } | null;
+}
+
+export interface PruneStats {
+  deliveredWebhooks: number;
+  idempotencyKeys: number;
+  settledCandidates: number;
 }
 
 export interface ReconcileStats {
@@ -98,6 +110,31 @@ export class Monitor {
       await alerts.send({ key: "webhooks-dead", severity: "warning", message: problems.at(-1) ?? "" });
     }
     return problems;
+  }
+
+  /** Deletes operational rows past their configured retention; invoices, payments, transfers and audit stay. */
+  async prune(): Promise<PruneStats> {
+    const { uow, clock, retention } = this.#d;
+    const stats: PruneStats = { deliveredWebhooks: 0, idempotencyKeys: 0, settledCandidates: 0 };
+    if (!retention) return stats;
+    const now = clock.now().getTime();
+    const before = (ms: number) => new Date(now - ms);
+    if (retention.deliveredWebhooksMs !== undefined) {
+      stats.deliveredWebhooks = await uow.run((r) =>
+        r.delivery.pruneDelivered(before(retention.deliveredWebhooksMs ?? 0)),
+      );
+    }
+    if (retention.idempotencyKeysMs !== undefined) {
+      stats.idempotencyKeys = await uow.run((r) =>
+        r.idempotency.prune(before(retention.idempotencyKeysMs ?? 0)),
+      );
+    }
+    if (retention.settledCandidatesMs !== undefined) {
+      stats.settledCandidates = await uow.run((r) =>
+        r.candidates.pruneSettled(before(retention.settledCandidatesMs ?? 0)),
+      );
+    }
+    return stats;
   }
 
   /**

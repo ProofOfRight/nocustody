@@ -197,18 +197,26 @@ export interface StoredCandidate {
 }
 
 export interface CandidateRepository {
-  /** Idempotent by (network, tx_hash). */
+  /**
+   * Idempotent by (network, tx_hash, asset). A "seen" hint for a transaction stored as "dust" re-queues it (the hint
+   * was wrong or a smaller transfer of the same transaction came first) and counts as "inserted"; anything else about
+   * a known transaction is a "duplicate".
+   */
   insert(
     candidate: TransferCandidate,
     status: "seen" | "dust",
     reason: string | null,
   ): Promise<"inserted" | "duplicate">;
+  /** Oldest block time first, so a backlog never starves an older payment. */
   listSeen(network: NetworkId, limit: number): Promise<StoredCandidate[]>;
-  markVerified(network: NetworkId, txHash: string): Promise<void>;
-  markRejected(network: NetworkId, txHash: string, reason: string): Promise<void>;
-  markPending(network: NetworkId, txHash: string, reason: string): Promise<void>;
+  markVerified(candidate: TransferCandidate): Promise<void>;
+  markRejected(candidate: TransferCandidate, reason: string): Promise<void>;
+  /** No decision this cycle: attempts + 1, status unchanged. */
+  markPending(candidate: TransferCandidate, reason: string): Promise<void>;
   /** Hashes of candidates to `address` with block time in [from, until] that the verifier accepted. */
   listVerified(network: NetworkId, address: ChainAddress, from: Date, until: Date): Promise<string[]>;
+  /** Deletes dust and rejected candidates last touched before `before`; returns how many. */
+  pruneSettled(before: Date): Promise<number>;
 }
 
 export const TRANSFER_STATUSES = ["verified", "dust", "matched", "unmatched"] as const;
@@ -264,6 +272,8 @@ export interface OutboxDelivery {
   countDead(): Promise<number>;
   /** Puts dead-lettered events back into delivery (all, or one event id). Returns how many. */
   reviveDead(now: Date, eventId?: string): Promise<number>;
+  /** Deletes events delivered before `before` (retention); returns how many. */
+  pruneDelivered(before: Date): Promise<number>;
 }
 
 export interface Heartbeat {
@@ -314,6 +324,8 @@ export interface ApiKeyRepository {
 export interface IdempotencyRepository {
   find(apiKeyId: string, key: string): Promise<{ requestSha256: string; invoiceId: string } | null>;
   insert(apiKeyId: string, key: string, requestSha256: string, invoiceId: string): Promise<void>;
+  /** Deletes keys recorded before `before` (retention); returns how many. */
+  prune(before: Date): Promise<number>;
 }
 
 export interface CursorRepository {

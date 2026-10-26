@@ -182,6 +182,18 @@ const opsSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * Retention of operational rows, off by default (kept forever). Invoices, payments, verified transfers and the
+     * audit log are never pruned.
+     */
+    retention: z
+      .object({
+        deliveredWebhooks: duration.optional(),
+        idempotencyKeys: duration.optional(),
+        settledCandidates: duration.optional(),
+      })
+      .strict()
+      .optional(),
     aml: z
       .object({
         provider: z.enum(["noop", "blocklist"]).default("noop"),
