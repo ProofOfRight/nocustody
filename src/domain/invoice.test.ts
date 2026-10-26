@@ -263,6 +263,9 @@ describe("amount policies", () => {
     const policy = amountPolicy({ ...STRICT_AMOUNT_POLICY, dustThresholdUnits: 100_000n });
     expect(isDust(usdt("0.09"), policy)).toBe(true);
     expect(isDust(usdt("0.1"), policy)).toBe(false);
+    // zero is dust even with the default threshold "0": poisoning bots send 0-value transfers
+    expect(isDust(usdt("0"), STRICT_AMOUNT_POLICY)).toBe(true);
+    expect(isDust(usdt("0.000001"), STRICT_AMOUNT_POLICY)).toBe(false);
   });
 
   it("generates distinct slot amounts strictly above the base", () => {
