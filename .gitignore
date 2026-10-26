@@ -7,4 +7,6 @@ coverage/
 # Internal working docs (separate local git repo), not part of the public project
 internal-docs/
 CLAUDE.local.md
+# Personal Claude Code settings (permissions, auto mode rules)
+.claude/settings.local.json
 .cache/
