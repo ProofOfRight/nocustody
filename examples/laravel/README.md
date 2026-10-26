@@ -41,8 +41,10 @@ Point the gateway's `webhooks.url` at `https://<shop>/nocustody/webhook`.
   the same order returns the same invoice. Keep order ids to `[A-Za-z0-9_.:-]` and at most 120 characters.
 - **Grant access only in the job**, after `GET /v1/invoices/{id}` says `completed`, and make granting idempotent
   (the same event can be processed again after a crash).
-- `underpaid`, `overpaid`, `paid_late`, `aml_hold` and `transfer.unmatched` need a person: the payer sent something
-  other than the invoice asked for. Refunds are manual, from the merchant's own wallet.
+- The events `invoice.underpaid`, `invoice.overpaid`, `invoice.paid_late`, `invoice.aml_hold` and
+  `transfer.unmatched` need a person: the payer sent something other than the invoice asked for. Decide by the
+  **event type**: a paid invoice goes through `aml_pending` to `completed` in the same cycle, so `paid`, `overpaid`
+  and `paid_late` are not statuses you will read back. Refunds are manual, from the merchant's own wallet.
 - Without the hosted page, show the payer `payment.address_display`, the exact `payment.amount` and, on TON,
   `payment.memo` from the invoice ([docs/api.md](../../docs/api.md)).
 - The plain-PHP example in [examples/php](../php/) has the same signature check without Laravel.
