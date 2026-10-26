@@ -37,6 +37,26 @@ The first command proves the image was built by the release workflow of this rep
 prints the verified SBOM. Builds are reproducible: you can also rebuild the tag and compare digests
 ([releasing.md](releasing.md#reproducing-a-release-build)).
 
+`gh` reports success with exit code 0; when its output is not a terminal it prints nothing.
+
+### When Sigstore is unreachable
+
+`gh` downloads the Sigstore trusted root from `tuf-repo-cdn.sigstore.dev` before verifying. If that host is blocked
+on your network, verification fails with `public good verifier is not available`. The signatures and the
+transparency log proofs are inside the attestations, so the check can run offline with the trusted root that Sigstore
+publishes in its [root-signing](https://github.com/sigstore/root-signing) repository:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sigstore/root-signing/main/targets/trusted_root.json | jq -c . > trusted_root.jsonl
+gh attestation verify oci://$IMAGE --repo ProofOfRight/nocustody \
+  --signer-workflow ProofOfRight/nocustody/.github/workflows/release.yml --source-ref refs/tags/v0.1.0 \
+  --custom-trusted-root trusted_root.jsonl
+```
+
+Add `--custom-trusted-root trusted_root.jsonl` to the SBOM command the same way. A file fetched like this is not
+checked through Sigstore's TUF metadata: you rely on GitHub serving the `sigstore/root-signing` repository. Fetch a
+fresh copy for each verification, since the trusted root changes when Sigstore rotates keys.
+
 ## First start
 
 1. Copy `deploy/compose.yaml` and `deploy/.env.example` into a directory on the server, rename the second one to
