@@ -100,6 +100,10 @@ describe("TRON addresses", () => {
     );
   });
 
+  it("names its network for payers", () => {
+    expect(adapter(fakeFetch(() => ({ json: {} })).fn).displayName).toBe("TRON Nile testnet");
+  });
+
   it("rejects bad checksums, wrong prefixes and malformed input", () => {
     const tampered = `${OURS.slice(0, -1)}${OURS.endsWith("q") ? "r" : "q"}`;
     expect(() => parseTronAddress(tampered)).toThrow("checksum");

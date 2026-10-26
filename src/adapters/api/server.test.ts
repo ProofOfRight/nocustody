@@ -434,6 +434,7 @@ describe("hosted payment page", () => {
     expect(nonce).toBeTruthy();
     expect(r.body).toContain(`<script nonce="${nonce}">`);
     expect(r.body).toContain('dir="rtl"');
+    expect(r.body).toContain("Fake tron:mainnet"); // the network's name comes from its adapter
     expect(r.headers.get("x-frame-options")).toBe("DENY");
     const again = await app.inject({ url: inv.payment.page });
     expect(again.headers.get("content-security-policy")).not.toBe(csp); // fresh nonce per response

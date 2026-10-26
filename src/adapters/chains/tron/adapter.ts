@@ -37,13 +37,21 @@ export interface TronAdapterOptions {
 /** Cursor: last seen block timestamp (ms) per receiving address. */
 type Cursor = TimeCursor;
 
+const DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  "tron:mainnet": "TRON (TRC-20)",
+  "tron:nile": "TRON Nile testnet",
+  "tron:shasta": "TRON Shasta testnet",
+};
+
 export class TronAdapter implements ChainAdapter {
   readonly network: NetworkId;
+  readonly displayName: string;
   readonly #o: TronAdapterOptions;
 
   constructor(o: TronAdapterOptions) {
     if (!o.network.startsWith("tron:")) throw new Error(`not a TRON network: ${o.network}`);
     this.network = o.network;
+    this.displayName = DISPLAY_NAMES[o.network] ?? `TRON ${o.network.slice("tron:".length)}`;
     this.#o = o;
   }
 
