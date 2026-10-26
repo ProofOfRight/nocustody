@@ -169,7 +169,7 @@ describe("monitor: reconciliation with a second source", () => {
     expect(
       [...s.store.data.candidates.values()].map((c) => [c.candidate.txHash.slice(0, 2), c.status]),
     ).toEqual([["aa", "seen"]]);
-    expect(s.sent.at(-1)?.key).toBe(`reconcile-missed:${TRON}`);
+    expect(s.sent.at(-1)?.key).toBe(`reconcile-missed:${TRON}:${ADDR.value}`);
     expect((await s.monitor.reconcile()).missedByPrimary).toBe(0); // idempotent
   });
 
@@ -181,7 +181,7 @@ describe("monitor: reconciliation with a second source", () => {
       await r.candidates.markVerified(TRON, c.txHash);
     });
     expect((await s.monitor.reconcile()).notInSecondary).toBe(1);
-    expect(s.sent.at(-1)?.key).toBe(`reconcile-unknown:${TRON}`);
+    expect(s.sent.at(-1)?.key).toBe(`reconcile-unknown:${TRON}:${ADDR.value}`);
   });
 
   it("a failing second source is an alert, not a crash", async () => {

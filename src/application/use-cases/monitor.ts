@@ -180,7 +180,7 @@ export class Monitor {
           stats.missedByPrimary += missed.length;
           if (missed.length > 0) {
             await alerts.send({
-              key: `reconcile-missed:${source.network}`,
+              key: `reconcile-missed:${source.network}:${address.value}`,
               severity: "warning",
               message: `${missed.length} transfer(s) to ${address.value} missed by the primary indexer were queued for verification (${source.name})`,
             });
@@ -191,7 +191,7 @@ export class Monitor {
           stats.notInSecondary += unknown.length;
           if (unknown.length > 0) {
             await alerts.send({
-              key: `reconcile-unknown:${source.network}`,
+              key: `reconcile-unknown:${source.network}:${address.value}`,
               severity: "warning",
               message: `${unknown.length} verified transfer(s) to ${address.value} are unknown to ${source.name}: ${unknown.slice(0, 3).join(", ")}`,
             });
