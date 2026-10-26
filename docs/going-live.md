@@ -37,6 +37,8 @@ Every external host is configured explicitly; nothing else is contacted ([securi
 
 ## 3. Configuration
 
+- [ ] The server's clock is synchronised (NTP). A transfer whose block time is more than 5 s before the invoice was
+      created is quarantined, not credited ([ADR-0030](adr/0030-early-payment-tolerance.md)).
 - [ ] `startFrom` is the go-live time (scanning starts there when there is no cursor yet).
 - [ ] `amounts`: `step` and `maxSlots` give `maxSlots` parallel invoices per address and base price; add addresses
       for more. `dustThreshold` ignores tiny transfers (address poisoning).

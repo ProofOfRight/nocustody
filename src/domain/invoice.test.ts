@@ -180,7 +180,9 @@ describe("Invoice lifecycle", () => {
         );
     expect(code(pay(91 * MIN))).toBe("invoice.payment_after_grace");
     expect(code(pay(-MIN))).toBe("invoice.payment_before_creation");
-    expect(code(pay(-10_000))).toBeUndefined(); // within clock skew
+    expect(code(pay(-4_000))).toBeUndefined(); // within the early-payment tolerance (clock skew)
+    // but not a transfer that landed well before the invoice existed (ADR-0030: it may be someone else's money)
+    expect(code(pay(-10_000))).toBe("invoice.payment_before_creation");
     // An Invalid Date compares false with every bound and would otherwise be accepted as paid on time.
     expect(code(pay(Number.NaN))).toBe("invoice.payment_time");
     const fake = defineAsset({ ...USDT_TRON, id: "fake", contract: "TFakeContract1111111111111111111111" });

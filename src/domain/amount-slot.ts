@@ -5,11 +5,18 @@ import { invariant } from "./errors.ts";
 import type { Money } from "./money.ts";
 
 /**
- * Clock skew between the chain's block time and this server, used by the slot window and by `Invoice.applyPayment`
- * alike: a transfer timestamped up to this much before the slot (invoice) opened still counts, and a new slot for the
- * same pair may open only this long after the previous one closed. One constant, so the two checks cannot drift.
+ * Margin between two slots of the same (address, amount) pair: a new slot may open only this long after the previous
+ * one closed, so their acceptance windows never touch even with clock skew. Mirrored by `lock_until` in PostgreSQL.
  */
 export const SLOT_CLOCK_SKEW_MS = 30_000;
+
+/**
+ * How much earlier than the slot (invoice) opened a transfer's block time may be and still count. This covers only
+ * the gateway's clock running ahead of the chain; a human needs seconds to pay after seeing an invoice. It is kept
+ * small on purpose: a transfer that landed before an invoice existed must not be claimed by an invoice opened right
+ * after it with the same amount (docs/adr/0030-early-payment-tolerance.md).
+ */
+export const EARLY_PAYMENT_TOLERANCE_MS = 5_000;
 
 /**
  * Reservation of the pair (address, amount) for one invoice during [from, until], where until = expires_at + grace.
@@ -39,7 +46,7 @@ export function blocksNewSlot(existing: AmountSlot, from: Date): boolean {
 
 export function slotCovers(slot: AmountSlot, at: Date): boolean {
   const t = at.getTime();
-  return t >= slot.from.getTime() - SLOT_CLOCK_SKEW_MS && t <= slot.until.getTime();
+  return t >= slot.from.getTime() - EARLY_PAYMENT_TOLERANCE_MS && t <= slot.until.getTime();
 }
 
 export interface TransferFacts {

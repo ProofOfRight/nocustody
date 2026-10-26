@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { type AmountPolicy, classifyAmount } from "./amount-policy.ts";
-import { SLOT_CLOCK_SKEW_MS } from "./amount-slot.ts";
+import { EARLY_PAYMENT_TOLERANCE_MS } from "./amount-slot.ts";
 import { type Asset, sameAsset } from "./asset.ts";
 import type { ChainAddress } from "./chain-address.ts";
 import { DomainError, invariant } from "./errors.ts";
@@ -204,7 +204,7 @@ export class Invoice {
     const t = payment.at.getTime();
     // An Invalid Date compares false with everything and would pass every window check below.
     invariant(Number.isFinite(t), "invoice.payment_time", "payment time is not a valid date");
-    if (t < s.createdAt.getTime() - SLOT_CLOCK_SKEW_MS) {
+    if (t < s.createdAt.getTime() - EARLY_PAYMENT_TOLERANCE_MS) {
       throw new DomainError("invoice.payment_before_creation", "transfer predates the invoice");
     }
     if (t > s.graceUntil.getTime())
