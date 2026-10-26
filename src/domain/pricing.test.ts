@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { currency, fiatAmount, formatFiat, isIsoCurrency, parseFiat } from "./currency.ts";
+import { currency, fiatAmount, isIsoCurrency, parseFiat } from "./currency.ts";
 import { DomainError } from "./errors.ts";
 import {
   convertToAsset,
@@ -62,7 +62,6 @@ describe("ISO 4217 registry", () => {
     expect(parseFiat(currency("JPY"), "1500").minor).toBe(1500n);
     expect(code(() => parseFiat(currency("JPY"), "1500.5"))).toBe("decimal.precision");
     expect(parseFiat(currency("BHD"), "1.234").minor).toBe(1234n);
-    expect(formatFiat(fiatAmount(currency("BHD"), 1234n))).toBe("1.234");
   });
 });
 

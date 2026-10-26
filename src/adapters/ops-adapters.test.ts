@@ -12,7 +12,7 @@ import { friendlyTon, parseTonAddress } from "./chains/ton/address.ts";
 import { TonapiSource } from "./chains/ton/tonapi.ts";
 import { parseTronAddress } from "./chains/tron/address.ts";
 import { TronscanSource } from "./chains/tron/tronscan.ts";
-import { type FetchFn, JsonHttpClient } from "./http/json-client.ts";
+import { type FetchFn, JsonHttpClient, ProviderError } from "./http/json-client.ts";
 import { CoinbaseUsdtUsd, KrakenUsdtUsd } from "./pricing/peg-sources.ts";
 
 const read = (p: string) => JSON.parse(readFileSync(new URL(p, import.meta.url), "utf8"));
@@ -99,7 +99,7 @@ describe("USDT/USD sources (recorded)", () => {
   it("an unexpected answer is an error, not a price", async () => {
     await expect(
       new KrakenUsdtUsd(client({ error: ["EQuery:Unknown asset pair"], result: {} })).price(),
-    ).rejects.toThrow();
+    ).rejects.toThrow(ProviderError);
   });
 });
 

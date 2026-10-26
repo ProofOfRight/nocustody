@@ -57,10 +57,6 @@ export class JsonHttpClient {
     };
   }
 
-  get origin(): string {
-    return this.#base.origin;
-  }
-
   async get<T>(path: string, query: Record<string, string>, schema: z.ZodType<T>): Promise<T> {
     const url = new URL(path, this.#base);
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
