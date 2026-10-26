@@ -7,13 +7,13 @@ import { newApiKey } from "../src/adapters/api/keys.ts";
 import { migrate } from "../src/adapters/persistence/pg/migrate.ts";
 import { parseConfig } from "../src/app/config.ts";
 import { addressValidators, buildContainer, runCycle } from "../src/app/container.ts";
+import { requireTestDatabase } from "./test-database.ts";
 
 const REPLAY = { to: "TF34bV549WecfEHpo6gzMFWYrQXeHnK8Jq", blockTime: 1792970475000 };
-const url = process.env.TEST_DATABASE_URL;
+const url = requireTestDatabase(process.env.TEST_DATABASE_URL);
 const webhookUrl = process.env.E2E_WEBHOOK_URL;
 const secret = process.env.E2E_WEBHOOK_SECRET;
-if (!url || !webhookUrl || !secret)
-  throw new Error("TEST_DATABASE_URL, E2E_WEBHOOK_URL and E2E_WEBHOOK_SECRET are required");
+if (!webhookUrl || !secret) throw new Error("E2E_WEBHOOK_URL and E2E_WEBHOOK_SECRET are required");
 
 const admin = new pg.Pool({ connectionString: url });
 await admin.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");

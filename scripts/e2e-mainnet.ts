@@ -11,6 +11,7 @@ import { tronAddressFromHex } from "../src/adapters/chains/tron/address.ts";
 import { migrate } from "../src/adapters/persistence/pg/migrate.ts";
 import { parseConfig } from "../src/app/config.ts";
 import { addressValidators, buildContainer, runCycle } from "../src/app/container.ts";
+import { requireTestDatabase } from "./test-database.ts";
 
 const TRON_USDT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 const TON_USDT = "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs";
@@ -224,8 +225,7 @@ async function replay(p: Pick, url: string): Promise<boolean> {
   }
 }
 
-const url = process.env.TEST_DATABASE_URL;
-if (!url) throw new Error("TEST_DATABASE_URL is required");
+const url = requireTestDatabase(process.env.TEST_DATABASE_URL);
 const only = process.env.E2E_NETWORK; // "tron" | "ton" | undefined (both)
 const results: boolean[] = [];
 if (only !== "ton") results.push(await replay(await pickTron(), url));
