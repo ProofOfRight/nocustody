@@ -131,6 +131,7 @@ try {
     for (let i = 0; i < 3; i++) {
       await w.verify.execute();
       await w.settle.execute();
+      await w.screen.execute();
     }
   }
   const status = async (id: string) => (await c.uow.run((r) => r.invoices.findById(id)))?.status;

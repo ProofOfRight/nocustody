@@ -19,6 +19,7 @@ import { InMemoryStore } from "./testing/in-memory.ts";
 import { CreateInvoice } from "./use-cases/create-invoice.ts";
 import { ExpireInvoices } from "./use-cases/expire-invoices.ts";
 import { IngestTransfers } from "./use-cases/ingest-transfers.ts";
+import { ScreenPayments } from "./use-cases/screen-payments.ts";
 import { SettlePayments } from "./use-cases/settle-payments.ts";
 import { VerifyTransfers } from "./use-cases/verify-transfers.ts";
 
@@ -153,16 +154,18 @@ function setup(
     network: TRON,
     catalog,
     strategies,
-    aml,
     uow: store,
     clock,
     batchSize: 50,
   });
+  const screen = new ScreenPayments({ catalog, aml, uow: store, clock, batchSize: 50 });
   const expire = new ExpireInvoices({ uow: store, clock, batchSize: 50 });
   const cycle = async () => {
     await ingest.execute();
     await verify.execute();
-    return settle.execute();
+    const settled = await settle.execute();
+    const screened = await screen.execute();
+    return { ...settled, ...screened, errors: settled.errors + screened.errors };
   };
   const order = (id: string, amount = "10", cur = "USD") =>
     create.execute({ merchantOrderId: id, priceAmount: amount, priceCurrency: cur, assetId: "usdt-tron" });
@@ -175,6 +178,7 @@ function setup(
     ingest,
     verify,
     settle,
+    screen,
     expire,
     cycle,
     order,
@@ -671,6 +675,7 @@ describe("payment flow", () => {
     s.clock.advance(120 * MIN); // provider outage: verification only after grace
     await s.verify.execute();
     await s.settle.execute();
+    await s.screen.execute();
     expect(s.store.data.invoices.get(invoice.id)?.status).toBe("completed");
     expect(s.store.data.outbox.some((e) => e.type === "invoice.paid_late")).toBe(true);
   });
@@ -687,10 +692,10 @@ describe("payment flow", () => {
     s.clock.advance(MIN);
     s.chain.pages = [[candidate("ii", "10.01", s.clock.now())]];
     s.aml.verdict = { verdict: "unavailable", reason: "timeout" };
-    expect(await s.cycle()).toMatchObject({ amlDeferred: 1 });
+    expect(await s.cycle()).toMatchObject({ deferred: 1 });
     expect(s.store.data.invoices.get(invoice.id)?.status).toBe("aml_pending");
     s.aml.verdict = { verdict: "hold", reason: "high risk" };
-    expect(await s.settle.execute()).toMatchObject({ held: 1 });
+    expect(await s.screen.execute()).toMatchObject({ held: 1 });
     expect(s.store.data.invoices.get(invoice.id)?.status).toBe("aml_hold");
   });
 

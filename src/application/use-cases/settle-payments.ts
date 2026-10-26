@@ -2,35 +2,32 @@
 import { DomainError } from "../../domain/errors.ts";
 import type { Invoice } from "../../domain/invoice.ts";
 import type { NetworkId } from "../../domain/network.ts";
-import { parseTxRefKey, txRefKey } from "../../domain/tx-ref.ts";
+import { txRefKey } from "../../domain/tx-ref.ts";
 import type { AssetCatalog } from "../catalog.ts";
 import { ConcurrencyError } from "../errors.ts";
-import type { AmlScreener, Clock, Repositories, UnitOfWork, VerifiedTransfer } from "../ports.ts";
+import type { Clock, Repositories, UnitOfWork, VerifiedTransfer } from "../ports.ts";
 import type { StrategyResolver } from "../strategies/strategy.ts";
 
 export interface SettleStats {
   matched: number;
   unmatched: number;
-  completed: number;
-  held: number;
-  amlDeferred: number;
-  /** Transfers or screenings that failed with an unexpected error; left as they are and retried next cycle. */
+  /** Transfers that failed with an unexpected error; left as they are and retried next cycle. */
   errors: number;
 }
 
 /**
  * Settlement (MatchPayment): match verified transfers to invoices, apply amount policies, change status and write
- * outbox events in one transaction per transfer; then run AML screening for invoices awaiting it.
+ * outbox events in one transaction per transfer. A credited invoice goes to aml_pending; ScreenPayments takes it
+ * from there.
  */
 export interface SettlePaymentsDeps {
   readonly network: NetworkId;
   readonly catalog: AssetCatalog;
   readonly strategies: StrategyResolver;
-  readonly aml: AmlScreener;
   readonly uow: UnitOfWork;
   readonly clock: Clock;
   readonly batchSize: number;
-  /** Called for an unexpected error on one transfer or invoice; the batch goes on with the next one. */
+  /** Called for an unexpected error on one transfer; the batch goes on with the next one. */
   readonly onError?: (subject: string, error: unknown) => void;
 }
 
@@ -43,7 +40,7 @@ export class SettlePayments {
 
   async execute(): Promise<SettleStats> {
     const { network, uow, batchSize } = this.#deps;
-    const stats: SettleStats = { matched: 0, unmatched: 0, completed: 0, held: 0, amlDeferred: 0, errors: 0 };
+    const stats: SettleStats = { matched: 0, unmatched: 0, errors: 0 };
     const verified = await uow.run((r) => r.transfers.listVerified(network, batchSize));
     for (const t of verified) {
       try {
@@ -60,7 +57,6 @@ export class SettlePayments {
         this.#deps.onError?.(txRefKey(t.transfer.ref), e);
       }
     }
-    await this.#screen(stats);
     return stats;
   }
 
@@ -116,64 +112,6 @@ export class SettlePayments {
       data: { invoiceId: invoice.id, amount: v.amount.toDecimalString(), by: m.by, memo: v.memo },
     });
     stats.matched++;
-  }
-
-  async #screen(stats: SettleStats): Promise<void> {
-    const { aml, uow, clock, batchSize } = this.#deps;
-    const pending = await uow.run((r) => r.invoices.listByStatus("aml_pending", batchSize));
-    for (const inv of pending) {
-      const payments = inv.state.payments;
-      const verdicts = [];
-      const threshold = this.#deps.catalog.get(inv.state.asset.id).amlThresholdUnits;
-      const belowThreshold = inv.received().units < threshold;
-      try {
-        for (const p of belowThreshold ? [] : payments) {
-          verdicts.push(
-            await aml.screen({
-              network: inv.state.asset.network,
-              from: p.from,
-              txRef: parseTxRefKey(p.transferKey),
-              amount: p.amount,
-            }),
-          );
-        }
-      } catch (e) {
-        // A throwing screener is "unavailable" for this invoice: it stays aml_pending and is retried next cycle.
-        stats.errors++;
-        this.#deps.onError?.(inv.id, e);
-        continue;
-      }
-      const hold = verdicts.find((v) => v.verdict === "hold");
-      if (!hold && verdicts.some((v) => v.verdict === "unavailable")) {
-        stats.amlDeferred++;
-        continue; // stays aml_pending; retried next cycle
-      }
-      await uow.run(async (repos) => {
-        const fresh = await repos.invoices.findById(inv.id);
-        if (fresh?.status !== "aml_pending") return;
-        const now = clock.now();
-        if (hold && hold.verdict === "hold") {
-          fresh.placeAmlHold(hold.reason, now);
-          stats.held++;
-        } else {
-          fresh.amlCleared(now);
-          stats.completed++;
-        }
-        await this.#save(repos, fresh);
-        await repos.audit.record({
-          at: now,
-          actor: "aml",
-          subject: fresh.id,
-          decision: fresh.status,
-          reason:
-            hold && hold.verdict === "hold"
-              ? hold.reason
-              : belowThreshold
-                ? "below AML threshold, not screened"
-                : "clear",
-        });
-      });
-    }
   }
 
   async #save(repos: Repositories, invoice: Invoice): Promise<void> {
