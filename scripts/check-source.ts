@@ -21,11 +21,15 @@ export const FORBIDDEN: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
 // invisible formatting characters, bidi controls (Trojan Source, CVE-2021-42574), Unicode tags ("ASCII smuggling")
 // and variation selectors used to smuggle bytes. U+FE0F (emoji presentation) is allowed.
 // Variation selectors are a separate class: they combine with the preceding character.
+// Also: Hangul fillers (U+115F, U+1160, U+3164, U+FFA0 — blank glyphs that are valid identifier characters), the
+// combining grapheme joiner, Khmer and Mongolian format characters, interlinear annotation marks, musical format
+// characters, and the LINE/PARAGRAPH SEPARATORs U+2028/U+2029, which end a JavaScript line comment while most
+// editors show them as part of it.
 export const INVISIBLE =
-  /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\u{E0000}-\u{E007F}]|[\uFE00-\uFE0E\u{E0100}-\u{E01EF}]/gu;
+  /[\u00AD\u061C\u115F\u1160\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\u3164\uFEFF\uFFA0\uFFF9-\uFFFB\u{1D173}-\u{1D17A}\u{E0000}-\u{E007F}]|[\u034F\u17B4\u17B5\u180B-\u180F\uFE00-\uFE0E\u{E0100}-\u{E01EF}]/gu;
 
 const TEXT_FILE =
-  /\.(ts|mjs|js|json|md|ya?ml|sql)$|(^|\/)(CODEOWNERS|Makefile|LICENSE|NOTICE|\.gitignore|\.npmrc)$/;
+  /\.(ts|mjs|js|json|md|ya?ml|sql|sh|php|py|tsv|txt|example)$|(^|\/)(CODEOWNERS|Makefile|Dockerfile|LICENSE|NOTICE|\.gitignore|\.npmrc|\.dockerignore|\.env\.example)$/;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "coverage", ".cache", "internal-docs"]);
 
 function* walk(dir: string): Generator<string> {
