@@ -100,6 +100,7 @@ export class TronAdapter implements ChainAdapter {
             to: address,
             amount: Money.of(asset, BigInt(row.value)),
             at: new Date(row.block_timestamp),
+            memo: null,
           });
         }
         if (!res.meta.fingerprint || res.data.length === 0) break;
@@ -146,6 +147,7 @@ export class TronAdapter implements ChainAdapter {
         to,
         amount: Money.of(asset, BigInt(`0x${data}`)),
         at: new Date(info.blockTimeStamp),
+        memo: null,
       });
     }
     return { status: "final", transfers };

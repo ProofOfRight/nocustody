@@ -71,6 +71,7 @@ const candidate: TransferCandidate = {
   to: ADDR,
   amount: Money.of(USDT, 1_000_000n),
   at: new Date(1792970475000),
+  memo: null,
 };
 
 /** The recorded receipt with modifications. */

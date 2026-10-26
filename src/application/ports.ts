@@ -19,6 +19,11 @@ export interface IntegrityGuard {
   check(): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }>;
 }
 
+/** Generates payment memos (node:crypto). */
+export interface MemoGenerator {
+  newMemo(): string;
+}
+
 export interface IdGenerator {
   /** Unguessable identifier (node:crypto). */
   newId(): string;
@@ -35,6 +40,8 @@ export interface TransferCandidate {
   readonly to: ChainAddress;
   readonly amount: Money;
   readonly at: Date;
+  /** Text comment attached by the payer (TON), or null. */
+  readonly memo: string | null;
 }
 
 /** One transfer confirmed by a finalized-state query; `ref.index` is the real log index / lt. */
@@ -44,6 +51,7 @@ export interface VerifiedTransfer {
   readonly to: ChainAddress;
   readonly amount: Money;
   readonly at: Date;
+  readonly memo: string | null;
 }
 
 export type VerificationResult =
@@ -121,6 +129,21 @@ export interface SlotRepository {
   findCandidates(address: ChainAddress, amount: Money, at: Date): Promise<AmountSlot[]>;
 }
 
+export interface MemoRepository {
+  /** Reserves a memo for an invoice forever; false if the memo is already taken on this network. */
+  tryInsert(
+    network: NetworkId,
+    memo: string,
+    invoiceId: string,
+    address: ChainAddress,
+    assetId: string,
+  ): Promise<boolean>;
+  find(
+    network: NetworkId,
+    memo: string,
+  ): Promise<{ invoiceId: string; address: ChainAddress; assetId: string } | null>;
+}
+
 export type CandidateStatus = "seen" | "dust" | "verified" | "rejected";
 
 export interface StoredCandidate {
@@ -190,6 +213,7 @@ export interface AuditLog {
 export interface Repositories {
   readonly invoices: InvoiceRepository;
   readonly slots: SlotRepository;
+  readonly memos: MemoRepository;
   readonly candidates: CandidateRepository;
   readonly transfers: TransferRepository;
   readonly outbox: OutboxRepository;

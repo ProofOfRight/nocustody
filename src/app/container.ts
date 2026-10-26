@@ -7,10 +7,12 @@ import { parseTronAddress } from "../adapters/chains/tron/address.ts";
 import { TronHttpClient } from "../adapters/chains/tron/http.ts";
 import { PgUnitOfWork } from "../adapters/persistence/pg/unit-of-work.ts";
 import { ManualRateTable } from "../adapters/pricing/manual-table.ts";
-import { cryptoIds, systemClock } from "../adapters/system/system.ts";
+import { cryptoIds, cryptoMemos, systemClock } from "../adapters/system/system.ts";
 import { AssetCatalog } from "../application/catalog.ts";
 import type { AmlScreener, ChainAdapter, Clock, IntegrityGuard } from "../application/ports.ts";
 import { RateService } from "../application/rates.ts";
+import { MemoStrategy } from "../application/strategies/memo.ts";
+import type { StrategyResolver } from "../application/strategies/strategy.ts";
 import { UniqueAmountStrategy } from "../application/strategies/unique-amount.ts";
 import { CreateInvoice } from "../application/use-cases/create-invoice.ts";
 import { ExpireInvoices } from "../application/use-cases/expire-invoices.ts";
@@ -53,7 +55,9 @@ export function buildContainer(o: ContainerOptions) {
     if (!a) throw new Error(`asset ${id} is stored in the database but not configured`);
     return a;
   });
-  const strategy = new UniqueAmountStrategy();
+  const uniqueAmount = new UniqueAmountStrategy();
+  const memo = new MemoStrategy(cryptoMemos);
+  const strategies: StrategyResolver = (s) => (s.strategy === "memo" ? memo : uniqueAmount);
   const rates = new RateService([new ManualRateTable(o.config.manualRates)]);
   const aml = o.aml ?? new NoopAmlScreener();
 
@@ -62,7 +66,7 @@ export function buildContainer(o: ContainerOptions) {
     catalog,
     pricing: o.config.pricing,
     rates,
-    strategy,
+    strategies,
     clock,
     ids: cryptoIds,
     integrity: o.integrity,
@@ -91,12 +95,12 @@ export function buildContainer(o: ContainerOptions) {
     }
     workers.push({
       adapter,
-      ingest: new IngestTransfers({ adapter, catalog, strategy, uow, clock, pageSize: 200, maxPages: 5 }),
+      ingest: new IngestTransfers({ adapter, catalog, strategies, uow, clock, pageSize: 200, maxPages: 5 }),
       verify: new VerifyTransfers({ adapter, catalog, uow, clock, batchSize: 100 }),
       settle: new SettlePayments({
         network: adapter.network,
         catalog,
-        strategy,
+        strategies,
         aml,
         uow,
         clock,

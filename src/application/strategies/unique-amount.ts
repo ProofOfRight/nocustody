@@ -1,32 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 import { candidateAmounts } from "../../domain/amount-policy.ts";
-import { type AmountSlot, amountSlot, matchSlot, type TransferFacts } from "../../domain/amount-slot.ts";
+import { type AmountSlot, amountSlot, matchSlot } from "../../domain/amount-slot.ts";
 import type { PaymentInstructions } from "../../domain/invoice.ts";
-import type { Money } from "../../domain/money.ts";
-import type { AssetSettings } from "../catalog.ts";
 import { ApplicationError } from "../errors.ts";
-import type { SlotRepository } from "../ports.ts";
+import type { Repositories } from "../ports.ts";
+import type { AllocationRequest, MatchFacts, PaymentInstructionStrategy, StrategyMatch } from "./strategy.ts";
 
-export interface AllocationRequest {
-  readonly invoiceId: string;
-  readonly settings: AssetSettings;
-  readonly base: Money;
-  readonly from: Date;
-  readonly until: Date;
+/** First free (address, base + k·step) slot on the active addresses, or null when all are taken. */
+export async function allocateAmountSlot(
+  req: AllocationRequest,
+  repos: Repositories,
+): Promise<{ instructions: PaymentInstructions; slot: AmountSlot } | null> {
+  const amounts = candidateAmounts(req.base, req.settings.uniqueAmount);
+  for (const { address, status } of req.settings.addresses) {
+    if (status !== "active") continue;
+    for (const amount of amounts) {
+      const slot = amountSlot({
+        invoiceId: req.invoiceId,
+        address,
+        amount,
+        from: req.from,
+        until: req.until,
+      });
+      if (await repos.slots.tryInsert(slot)) return { instructions: { address, amount, memo: null }, slot };
+    }
+  }
+  return null;
 }
 
-export type StrategyMatch =
-  | { readonly kind: "matched"; readonly invoiceId: string }
-  | { readonly kind: "unmatched"; readonly reason: string };
-
-/** Pluggable way to tell payments apart (unique amount, memo, xpub derivation, reference key). */
-export interface PaymentInstructionStrategy {
-  allocate(
-    req: AllocationRequest,
-    slots: SlotRepository,
-  ): Promise<{ instructions: PaymentInstructions; slot: AmountSlot }>;
-  /** Matches by (address, amount, block time); callers pass verified facts for crediting. */
-  match(transfer: TransferFacts, slots: SlotRepository): Promise<StrategyMatch>;
+/** Exact (address, amount) match within the slot window at the transfer's block time. */
+export async function matchAmountSlot(facts: MatchFacts, repos: Repositories): Promise<StrategyMatch> {
+  const candidates = await repos.slots.findCandidates(facts.to, facts.amount, facts.at);
+  const m = matchSlot(facts, candidates);
+  return m.kind === "matched"
+    ? { kind: "matched", invoiceId: m.slot.invoiceId, by: "amount" }
+    : { kind: "unmatched", reason: m.reason };
 }
 
 /**
@@ -34,32 +42,17 @@ export interface PaymentInstructionStrategy {
  * (address, amount) within the slot window at the transfer's block time; anything else is unmatched.
  */
 export class UniqueAmountStrategy implements PaymentInstructionStrategy {
-  async allocate(
-    req: AllocationRequest,
-    slots: SlotRepository,
-  ): Promise<{ instructions: PaymentInstructions; slot: AmountSlot }> {
-    const amounts = candidateAmounts(req.base, req.settings.uniqueAmount);
-    for (const { address, status } of req.settings.addresses) {
-      if (status !== "active") continue;
-      for (const amount of amounts) {
-        const slot = amountSlot({
-          invoiceId: req.invoiceId,
-          address,
-          amount,
-          from: req.from,
-          until: req.until,
-        });
-        if (await slots.tryInsert(slot)) return { instructions: { address, amount, memo: null }, slot };
-      }
-    }
-    throw new ApplicationError("allocation.no_free_slot", `no free amount slot for ${req.settings.asset.id}`);
+  async allocate(req: AllocationRequest, repos: Repositories) {
+    const r = await allocateAmountSlot(req, repos);
+    if (!r)
+      throw new ApplicationError(
+        "allocation.no_free_slot",
+        `no free amount slot for ${req.settings.asset.id}`,
+      );
+    return r;
   }
 
-  async match(transfer: TransferFacts, slots: SlotRepository): Promise<StrategyMatch> {
-    const candidates = await slots.findCandidates(transfer.to, transfer.amount, transfer.at);
-    const m = matchSlot(transfer, candidates);
-    return m.kind === "matched"
-      ? { kind: "matched", invoiceId: m.slot.invoiceId }
-      : { kind: "unmatched", reason: m.reason };
+  match(facts: MatchFacts, repos: Repositories): Promise<StrategyMatch> {
+    return matchAmountSlot(facts, repos);
   }
 }

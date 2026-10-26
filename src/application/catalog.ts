@@ -16,6 +16,8 @@ export interface ReceivingAddress {
 export interface AssetSettings {
   readonly asset: Asset;
   readonly priceSymbol: PriceSymbol;
+  /** How payments are told apart: unique amount per address, or memo (comment) with unique amount as fallback. */
+  readonly strategy: "unique-amount" | "memo";
   readonly addresses: readonly ReceivingAddress[];
   readonly amountPolicy: AmountPolicy;
   readonly uniqueAmount: UniqueAmountPolicy;

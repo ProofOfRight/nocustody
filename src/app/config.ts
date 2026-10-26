@@ -38,6 +38,7 @@ const assetSchema = z
     decimals: z.number().int().min(0).max(36),
     symbol: z.string().min(1).max(16),
     priceSymbol: z.string().regex(/^[A-Z][A-Z0-9]{1,9}$/),
+    strategy: z.enum(["unique-amount", "memo"]).default("unique-amount"),
     addresses: z
       .array(z.object({ address: z.string().min(1), status: z.enum(["active", "draining"]) }).strict())
       .min(1),
@@ -154,6 +155,7 @@ export function parseConfig(json: unknown, validators: AddressValidators): Confi
     return {
       asset,
       priceSymbol: a.priceSymbol,
+      strategy: a.strategy,
       addresses,
       amountPolicy: amountPolicy({
         underpaymentToleranceUnits: parseDecimal(a.amounts.underpaymentTolerance, a.decimals),

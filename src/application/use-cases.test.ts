@@ -12,6 +12,7 @@ import { AssetCatalog, type AssetSettings } from "./catalog.ts";
 import { ApplicationError } from "./errors.ts";
 import type { AmlScreener, AmlVerdict, Clock, RateProvider, TransferCandidate } from "./ports.ts";
 import { RateService } from "./rates.ts";
+import { MemoStrategy } from "./strategies/memo.ts";
 import { UniqueAmountStrategy } from "./strategies/unique-amount.ts";
 import { FakeChain } from "./testing/fake-chain.ts";
 import { InMemoryStore } from "./testing/in-memory.ts";
@@ -45,7 +46,15 @@ class ScriptedAml implements AmlScreener {
 }
 
 function candidate(hash: string, amount: string, at: Date, to = ADDR_A): TransferCandidate {
-  return { network: TRON, txHash: hash.padEnd(64, "0"), from: "TSenderX", to, amount: usdt(amount), at };
+  return {
+    network: TRON,
+    txHash: hash.padEnd(64, "0"),
+    from: "TSenderX",
+    to,
+    amount: usdt(amount),
+    at,
+    memo: null,
+  };
 }
 
 const verified = (c: TransferCandidate, index: bigint, amount: string, to = ADDR_A) => ({
@@ -54,12 +63,14 @@ const verified = (c: TransferCandidate, index: bigint, amount: string, to = ADDR
   to,
   amount: usdt(amount),
   at: c.at,
+  memo: c.memo,
 });
 
 function settings(over: Partial<AssetSettings> = {}): AssetSettings {
   return {
     asset: USDT_TRON,
     priceSymbol: "USDT",
+    strategy: "unique-amount",
     addresses: [{ address: ADDR_A, status: "active" }],
     amountPolicy: STRICT_AMOUNT_POLICY,
     uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 99 }),
@@ -80,13 +91,16 @@ const manual = (rates: Array<[string, string, string]>, ageMs = 0, maxAgeMs = 60
     })),
   );
 
-function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[] } = {}) {
+function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[]; memos?: string[] } = {}) {
   const store = new InMemoryStore();
   const clock = new FakeClock();
   const chain = new FakeChain(TRON);
   const aml = new ScriptedAml();
   const catalog = new AssetCatalog(opts.assets ?? [settings()]);
-  const strategy = new UniqueAmountStrategy();
+  const uniqueAmount = new UniqueAmountStrategy();
+  const memoQueue = [...(opts.memos ?? [])];
+  const memo = new MemoStrategy({ newMemo: () => memoQueue.shift() ?? "ZZZZ9999" });
+  const strategies = (s: AssetSettings) => (s.strategy === "memo" ? memo : uniqueAmount);
   const integrity = {
     ok: true,
     check: async () =>
@@ -106,7 +120,7 @@ function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[] } = 
         ]),
       ],
     ),
-    strategy,
+    strategies,
     clock,
     ids: { newId: () => `inv-${++n}` },
     integrity,
@@ -114,7 +128,7 @@ function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[] } = 
   const ingest = new IngestTransfers({
     adapter: chain,
     catalog,
-    strategy,
+    strategies,
     uow: store,
     clock,
     pageSize: 2,
@@ -124,7 +138,7 @@ function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[] } = 
   const settle = new SettlePayments({
     network: TRON,
     catalog,
-    strategy,
+    strategies,
     aml,
     uow: store,
     clock,
@@ -437,5 +451,94 @@ describe("payment flow", () => {
       ],
     ];
     expect(await s.ingest.execute()).toMatchObject({ ignored: 2, inserted: 0 });
+  });
+});
+
+describe("memo strategy (one wallet, comment identifies the invoice)", () => {
+  const memoAsset = (over: Partial<AssetSettings> = {}) => settings({ strategy: "memo", ...over });
+  const withMemo = (c: TransferCandidate, memo: string | null): TransferCandidate => ({ ...c, memo });
+
+  it("allocates a unique memo plus a fallback unique amount; memos are never reused", async () => {
+    const s = setup({ assets: [memoAsset()], memos: ["AAAA2222", "AAAA2222", "BBBB3333"] });
+    const a = await s.order("o1");
+    const b = await s.order("o2"); // first candidate collides, the next one is used
+    expect(a.invoice.state.instructions).toMatchObject({ memo: "AAAA2222" });
+    expect(a.invoice.state.instructions.amount.toDecimalString()).toBe("10.010000");
+    expect(b.invoice.state.instructions.memo).toBe("BBBB3333");
+    expect(b.invoice.state.instructions.amount.toDecimalString()).toBe("10.020000");
+  });
+
+  it("issues memo-only invoices when amount slots are exhausted", async () => {
+    const s = setup({
+      assets: [memoAsset({ uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 1 }) })],
+      memos: ["AAAA2222", "BBBB3333"],
+    });
+    await s.order("o1");
+    const b = await s.order("o2");
+    expect(b.invoice.state.instructions.memo).toBe("BBBB3333");
+    expect(b.invoice.state.instructions.amount.toDecimalString()).toBe("10.000000"); // base price, no slot
+  });
+
+  it("matches by memo regardless of case and surrounding spaces", async () => {
+    const s = setup({ assets: [memoAsset()], memos: ["AAAA2222"] });
+    const { invoice } = await s.order("o1");
+    s.clock.advance(MIN);
+    s.chain.pages = [[withMemo(candidate("m1", "10.01", s.clock.now()), "  aaaa2222 ")]];
+    expect(await s.cycle()).toMatchObject({ matched: 1, completed: 1 });
+    expect(s.store.data.invoices.get(invoice.id)?.status).toBe("completed");
+    expect(s.store.data.audit.find((a) => a.decision === "matched")?.data?.by).toBe("memo");
+  });
+
+  it("with a memo the amount may differ: underpaid, then topped up with the same memo", async () => {
+    const s = setup({ assets: [memoAsset()], memos: ["AAAA2222"] });
+    const { invoice } = await s.order("o1");
+    s.clock.advance(MIN);
+    s.chain.pages = [[withMemo(candidate("m2", "10", s.clock.now()), "AAAA2222")]];
+    await s.cycle();
+    expect(s.store.data.invoices.get(invoice.id)?.status).toBe("underpaid");
+    s.chain.pages = [...s.chain.pages, [withMemo(candidate("m3", "0.01", s.clock.now()), "AAAA2222")]];
+    await s.cycle();
+    expect(s.store.data.invoices.get(invoice.id)?.status).toBe("completed");
+  });
+
+  it("a payer who forgot the memo is matched by the unique amount", async () => {
+    const s = setup({ assets: [memoAsset()], memos: ["AAAA2222"] });
+    const { invoice } = await s.order("o1");
+    s.clock.advance(MIN);
+    s.chain.pages = [[withMemo(candidate("m4", "10.01", s.clock.now()), null)]];
+    await s.cycle();
+    expect(s.store.data.invoices.get(invoice.id)?.status).toBe("completed");
+    expect(s.store.data.audit.find((a) => a.decision === "matched")?.data?.by).toBe("amount");
+  });
+
+  it("an unknown memo with a non-matching amount is quarantined; free text never matches", async () => {
+    const s = setup({ assets: [memoAsset()], memos: ["AAAA2222"] });
+    await s.order("o1");
+    s.clock.advance(MIN);
+    s.chain.pages = [
+      [
+        withMemo(candidate("m5", "3", s.clock.now()), "ZZZZ8888"),
+        withMemo(candidate("m6", "3", s.clock.now()), "thanks for the coffee, AAAA2222"),
+      ],
+    ];
+    expect(await s.cycle()).toMatchObject({ unmatched: 2, matched: 0 });
+  });
+
+  it("a memo only matches payments to its own address", async () => {
+    const s = setup({
+      assets: [
+        memoAsset({
+          addresses: [
+            { address: ADDR_A, status: "active" },
+            { address: ADDR_B, status: "draining" },
+          ],
+        }),
+      ],
+      memos: ["AAAA2222"],
+    });
+    await s.order("o1");
+    s.clock.advance(MIN);
+    s.chain.pages = [[withMemo(candidate("m7", "5", s.clock.now(), ADDR_B), "AAAA2222")]];
+    expect(await s.cycle()).toMatchObject({ unmatched: 1 });
   });
 });

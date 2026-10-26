@@ -89,8 +89,23 @@ describe("PostgreSQL repositories", () => {
 
   it("stores each candidate tx once and each transfer once: UNIQUE(network, tx_hash, log_index)", async () => {
     const hash = "a".repeat(64);
-    const c = { network: TRON, txHash: hash, from: "TSender", to: ADDR, amount: usdt("10.01"), at: T0 };
-    const t = { ref: txRef(TRON, hash, 0n), from: "TSender", to: ADDR, amount: usdt("10.01"), at: T0 };
+    const c = {
+      network: TRON,
+      txHash: hash,
+      from: "TSender",
+      to: ADDR,
+      amount: usdt("10.01"),
+      at: T0,
+      memo: null,
+    };
+    const t = {
+      ref: txRef(TRON, hash, 0n),
+      from: "TSender",
+      to: ADDR,
+      amount: usdt("10.01"),
+      at: T0,
+      memo: "ABCD2345",
+    };
     await uow.run(async (r) => {
       expect(await r.candidates.insert(c, "seen", null)).toBe("inserted");
       expect(await r.candidates.insert(c, "seen", null)).toBe("duplicate");
@@ -102,6 +117,22 @@ describe("PostgreSQL repositories", () => {
     });
     const { rows } = await pool.query("SELECT count(*)::int AS n FROM observed_transfers");
     expect(rows[0].n).toBe(2);
+  });
+
+  it("memos are unique per network forever", async () => {
+    await expect(
+      uow.run(async (r) => {
+        expect(await r.memos.tryInsert(TRON, "ABCD2345", "inv-a", ADDR, "usdt-tron")).toBe(true);
+        expect(await r.memos.tryInsert(TRON, "ABCD2345", "inv-b", ADDR, "usdt-tron")).toBe(false);
+        expect(await r.memos.find(TRON, "ABCD2345")).toEqual({
+          invoiceId: "inv-a",
+          address: ADDR,
+          assetId: "usdt-tron",
+        });
+        expect(await r.memos.find(TRON, "NOPE2345")).toBeNull();
+        throw new Error("rollback"); // deferred FK to invoices
+      }),
+    ).rejects.toThrow("rollback");
   });
 
   it("rolls back state, outbox and cursor together", async () => {
@@ -125,6 +156,7 @@ describe("PostgreSQL repositories", () => {
       {
         asset: USDT_TRON,
         priceSymbol: "USDT",
+        strategy: "unique-amount",
         addresses: [{ address: ADDR, status: "active" }],
         amountPolicy: STRICT_AMOUNT_POLICY,
         uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 99 }),
@@ -132,7 +164,8 @@ describe("PostgreSQL repositories", () => {
         graceMs: 60 * MIN,
       },
     ]);
-    const strategy = new UniqueAmountStrategy();
+    const uniqueAmount = new UniqueAmountStrategy();
+    const strategies = () => uniqueAmount;
     const chain = new FakeChain(TRON);
     let n = 0;
     const create = new CreateInvoice({
@@ -142,7 +175,7 @@ describe("PostgreSQL repositories", () => {
       rates: new RateService([
         new ManualRateTable([{ base: "USD", quote: "USDT", rate: "1", setAt: T0, maxAgeMs: 60 * MIN }]),
       ]),
-      strategy,
+      strategies,
       clock,
       ids: { newId: () => `00000000-0000-4000-8000-00000000000${++n}` },
       integrity: { check: async () => ({ ok: true }) },
@@ -179,13 +212,14 @@ describe("PostgreSQL repositories", () => {
       to: ADDR,
       amount: usdt("10.01"),
       at: clock.now(),
+      memo: null,
     };
     chain.pages = [[c]];
     chain.verdicts.set(c.txHash, { status: "final", transfers: [{ ...c, ref: txRef(TRON, c.txHash, 3n) }] });
     await new IngestTransfers({
       adapter: chain,
       catalog,
-      strategy,
+      strategies,
       uow,
       clock,
       pageSize: 10,
@@ -195,7 +229,7 @@ describe("PostgreSQL repositories", () => {
     const stats = await new SettlePayments({
       network: TRON,
       catalog,
-      strategy,
+      strategies,
       aml: new NoopAmlScreener(),
       uow,
       clock,
@@ -223,11 +257,13 @@ describe("PostgreSQL repositories", () => {
   });
 
   it("detects concurrent modification of an invoice", async () => {
-    const strategy = new UniqueAmountStrategy();
+    const uniqueAmount = new UniqueAmountStrategy();
+    const strategies = () => uniqueAmount;
     const catalog = new AssetCatalog([
       {
         asset: USDT_TRON,
         priceSymbol: "USDT",
+        strategy: "unique-amount",
         addresses: [{ address: ADDR, status: "active" }],
         amountPolicy: STRICT_AMOUNT_POLICY,
         uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 9 }),
@@ -241,7 +277,7 @@ describe("PostgreSQL repositories", () => {
       catalog,
       pricing: { currencies: new Set(), markupBps: new Map() },
       rates: new RateService([]),
-      strategy,
+      strategies,
       clock,
       ids: { newId: () => "inv-x" },
       integrity: { check: async () => ({ ok: true }) },
