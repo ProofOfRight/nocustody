@@ -187,6 +187,7 @@ async function replay(p: Pick, url: string): Promise<boolean> {
     config,
     databaseUrl: url,
     integrity: noIntegrityCheck,
+    slotStart: () => 0, // replays pay one recorded amount: the first slot, not a random one
     clock: { now: () => new Date(p.timeMs - 2 * 60_000) },
   });
   try {
