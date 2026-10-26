@@ -11,7 +11,13 @@ import { PgUnitOfWork } from "../adapters/persistence/pg/unit-of-work.ts";
 import { ManualRateTable } from "../adapters/pricing/manual-table.ts";
 import { cryptoIds, cryptoMemos, systemClock } from "../adapters/system/system.ts";
 import { AssetCatalog } from "../application/catalog.ts";
-import type { AmlScreener, ChainAdapter, Clock, IntegrityGuard } from "../application/ports.ts";
+import type {
+  AmlScreener,
+  ChainAdapter,
+  Clock,
+  IntegrityGuard,
+  MemoGenerator,
+} from "../application/ports.ts";
 import { RateService } from "../application/rates.ts";
 import { MemoStrategy } from "../application/strategies/memo.ts";
 import type { StrategyResolver } from "../application/strategies/strategy.ts";
@@ -37,6 +43,8 @@ export interface ContainerOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly clock?: Clock;
   readonly aml?: AmlScreener;
+  /** Test harnesses only; production uses node:crypto. */
+  readonly memos?: MemoGenerator;
 }
 
 export interface NetworkWorker {
@@ -59,7 +67,7 @@ export function buildContainer(o: ContainerOptions) {
     return a;
   });
   const uniqueAmount = new UniqueAmountStrategy();
-  const memo = new MemoStrategy(cryptoMemos);
+  const memo = new MemoStrategy(o.memos ?? cryptoMemos);
   const strategies: StrategyResolver = (s) => (s.strategy === "memo" ? memo : uniqueAmount);
   const rates = new RateService([new ManualRateTable(o.config.manualRates)]);
   const aml = o.aml ?? new NoopAmlScreener();
