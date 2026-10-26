@@ -13,7 +13,7 @@ const message: OutboxMessage = {
   type: "invoice.paid",
   aggregateId: "inv-1",
   occurredAt: new Date("2026-10-26T12:00:00Z"),
-  payload: { amount: "10.010000" },
+  payload: { amount: "10.010000", transferKey: "tron:nile/abc/0" },
   attempts: 0,
 };
 
@@ -64,7 +64,7 @@ describe("webhook sender", () => {
       id: message.eventId,
       type: "invoice.paid",
       created_at: "2026-10-26T12:00:00.000Z",
-      data: { amount: "10.010000", object_id: "inv-1" },
+      data: { amount: "10.010000", transfer_key: "tron:nile/abc/0", object_id: "inv-1" },
     });
     expect(JSON.stringify(r)).not.toContain(SECRET);
   });

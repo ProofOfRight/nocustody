@@ -419,7 +419,8 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
       append: async (events: readonly DomainEvent[]) => {
         for (const e of events) {
           await db.query(
-            "INSERT INTO outbox (type, aggregate_id, occurred_at, payload) VALUES ($1, $2, $3, $4)",
+            // next_attempt_at uses the application clock like the dispatcher does (no mix of DB and app time).
+            "INSERT INTO outbox (type, aggregate_id, occurred_at, payload, next_attempt_at) VALUES ($1, $2, $3, $4, $3)",
             [e.type, e.aggregateId, e.occurredAt, JSON.stringify(e.data)],
           );
         }
