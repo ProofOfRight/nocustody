@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -115,5 +116,14 @@ describe("webhook sender", () => {
     expect(() => sender({ allowHttp: false })).toThrow("https");
     expect(() => sender({ url: "https://u:p@merchant.example/h" })).toThrow("credentials");
     expect(() => sender({ secret: "short" })).toThrow("32");
+  });
+});
+
+describe("shared signature vector (examples/php/test-vector.json)", () => {
+  it("the PHP example and the gateway agree on the signature", () => {
+    const v = JSON.parse(
+      readFileSync(new URL("../../../examples/php/test-vector.json", import.meta.url), "utf8"),
+    );
+    expect(signWebhook(v.secret, v.timestamp, v.eventId, v.body)).toBe(v.signature);
   });
 });

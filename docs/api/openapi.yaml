@@ -1,0 +1,220 @@
+openapi: 3.1.0
+info:
+  title: nocustody merchant API
+  version: 0.1.0-dev
+  description: |
+    Self-hosted, watch-only crypto payment gateway. Amounts are decimal strings, never JSON numbers.
+    Authentication: `Authorization: Bearer nck_<id>_<secret>` (create keys with `node src/app/cli.ts apikey:create`).
+    Webhooks: see docs/api.md.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: http://127.0.0.1:8080
+    description: Default bind address; publish only through a TLS reverse proxy.
+security:
+  - bearer: []
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: Running
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { const: ok } } }
+  /v1/invoices:
+    post:
+      summary: Create an invoice (scope invoices:write)
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,128}$" }
+          description: Same key + same body returns the same invoice; same key + different body is 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateInvoice" }
+      responses:
+        "201":
+          {
+            description: Created,
+            content: { application/json: { schema: { $ref: "#/components/schemas/Invoice" } } },
+          }
+        "200":
+          {
+            description: Already exists (same idempotency key or merchant_order_id),
+            content: { application/json: { schema: { $ref: "#/components/schemas/Invoice" } } },
+          }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    get:
+      summary: List invoices, newest first (scope invoices:read)
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/Status" } }
+        - {
+            name: since,
+            in: query,
+            schema: { type: string, format: date-time },
+            description: created_at >= since,
+          }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        "200":
+          description: Invoices
+          content:
+            application/json:
+              schema:
+                {
+                  type: object,
+                  properties: { data: { type: array, items: { $ref: "#/components/schemas/Invoice" } } },
+                }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/invoices/{id}:
+    get:
+      summary: Get an invoice (scope invoices:read)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          {
+            description: Invoice,
+            content: { application/json: { schema: { $ref: "#/components/schemas/Invoice" } } },
+          }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/quotes:
+    get:
+      summary: Indicative conversion of a price into an asset, without creating an invoice (scope quotes:read)
+      parameters:
+        - { name: amount, in: query, required: true, schema: { $ref: "#/components/schemas/Decimal" } }
+        - { name: currency, in: query, required: true, schema: { type: string, example: JPY } }
+        - { name: asset, in: query, required: true, schema: { type: string, example: usdt-tron } }
+      responses:
+        "200":
+          description: Quote
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asset: { type: string }
+                  amount: { $ref: "#/components/schemas/Decimal" }
+                  price: { type: [object, "null"] }
+                  note: { type: string }
+        "503": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code:
+                    type: string
+                    description: |
+                      Stable machine code, e.g. unauthorized, forbidden, invalid_request, idempotency_key_required,
+                      idempotency_mismatch, rate_limited, not_found, asset.unknown, pricing.currency_disabled,
+                      pricing.no_rate, allocation.no_free_slot, integrity.pin_violation, decimal.precision, internal.
+                  message: { type: string }
+  schemas:
+    Decimal: { type: string, pattern: "^(0|[1-9]\\d*)(\\.\\d+)?$", example: "10.50" }
+    Status:
+      type: string
+      enum:
+        [
+          awaiting_payment,
+          confirming,
+          paid,
+          underpaid,
+          overpaid,
+          paid_late,
+          expired,
+          cancelled,
+          aml_pending,
+          aml_hold,
+          completed,
+          rejected,
+        ]
+    CreateInvoice:
+      type: object
+      additionalProperties: false
+      required: [merchant_order_id, price, asset]
+      properties:
+        merchant_order_id: { type: string, minLength: 1, maxLength: 128 }
+        price:
+          type: object
+          additionalProperties: false
+          required: [amount, currency]
+          properties:
+            amount: { $ref: "#/components/schemas/Decimal" }
+            currency:
+              {
+                type: string,
+                description: "ISO 4217 code enabled in config, or the asset's price symbol (e.g. USDT)",
+              }
+        asset: { type: string, example: usdt-tron }
+    Invoice:
+      type: object
+      properties:
+        id: { type: string }
+        merchant_order_id: { type: string }
+        status: { $ref: "#/components/schemas/Status" }
+        asset:
+          type: object
+          properties:
+            id: { type: string }
+            network: { type: string, example: "tron:mainnet" }
+            symbol: { type: string }
+            decimals: { type: integer }
+            contract: { type: [string, "null"] }
+        payment:
+          type: object
+          description: Show exactly these to the payer. The amount must be paid exactly; on TON include the memo as comment.
+          properties:
+            address: { type: string }
+            amount: { $ref: "#/components/schemas/Decimal" }
+            amount_units: { type: string, description: Amount in minimal units }
+            memo: { type: [string, "null"] }
+            uri:
+              { type: [string, "null"], description: "Wallet deep link (ton://transfer/...) where supported" }
+        price:
+          type: [object, "null"]
+          properties:
+            amount: { $ref: "#/components/schemas/Decimal" }
+            currency: { type: string }
+            rate: { type: string, description: Locked rate as a fraction "num/den" }
+            rate_source: { type: string }
+            rate_at: { type: string, format: date-time }
+            rate_path: { type: string }
+        received: { $ref: "#/components/schemas/Decimal" }
+        payments:
+          type: array
+          items:
+            type: object
+            properties:
+              transfer: { type: string, description: "network/tx_hash/index" }
+              from: { type: string }
+              amount: { $ref: "#/components/schemas/Decimal" }
+              at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        grace_until: { type: string, format: date-time }
