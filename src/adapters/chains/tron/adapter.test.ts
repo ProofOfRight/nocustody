@@ -123,6 +123,7 @@ describe("fetchIncoming (indexer candidates)", () => {
       min_timestamp: String(new Date("2026-10-01T00:00:00Z").getTime()),
     });
     expect(res.candidates).toHaveLength(2);
+    expect(res.more).toBe(false); // no fingerprint: nothing left to read
     expect(res.candidates[0]).toMatchObject({ txHash: TX, from: "TSEFaG9p9vYyLT6oUspvgvWgUiCao2nzds" });
     expect(res.candidates[0]?.amount.units).toBe(1_000_000n);
     expect(JSON.parse(res.next)).toEqual({ [OURS]: 1792970475000 });
@@ -160,7 +161,7 @@ describe("fetchIncoming (indexer candidates)", () => {
     }));
     const a = adapter(fn);
     const first = await a.fetchIncoming(USDT, [ADDR], JSON.stringify({ [ADDR.value]: S }), 2);
-    expect(first.exhausted).toBe(true);
+    expect(first.more).toBe(true);
     expect(calls).toHaveLength(10);
     expect(JSON.parse(first.next)).toEqual({ [ADDR.value]: S, [`${ADDR.value}#tight`]: 1 });
     await a.fetchIncoming(USDT, [ADDR], first.next, 2);

@@ -230,6 +230,7 @@ describe("fetchIncoming (indexer candidates)", () => {
     ]);
     expect(res.candidates[0]?.txHash).toBe(candidate.txHash);
     expect(JSON.parse(res.next)).toEqual({ [JETTON_WALLET]: 1792966132 });
+    expect(res.more).toBe(false); // a short page: the account is read up to the indexer's head
   });
 
   it("jetton: a payment sent with forward_ton_amount = 0 (no notification to the owner) is still found", async () => {
@@ -309,7 +310,7 @@ describe("fetchIncoming (indexer candidates)", () => {
     const a = adapter(fn);
     // page size 2 × 10 pages = 20 rows per scan, all at S−100: the cursor cannot move
     const first = await a.fetchIncoming(USDT, [owner], JSON.stringify({ [JETTON_WALLET]: S }), 2);
-    expect(first.exhausted).toBe(true);
+    expect(first.more).toBe(true);
     expect(calls).toHaveLength(10);
     expect(JSON.parse(first.next)).toEqual({ [JETTON_WALLET]: S, [`${JETTON_WALLET}#tight`]: 1 });
     // tight scan: starts exactly at the cursor, no overlap; still stuck → remember how far it read

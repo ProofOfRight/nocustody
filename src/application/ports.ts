@@ -67,10 +67,11 @@ export interface FetchResult {
   /** Opaque adapter-defined cursor to persist after the candidates are stored. */
   readonly next: string;
   /**
-   * The scan read its whole page budget for at least one account: more transactions arrived than one cycle reads,
-   * so the scanner lags behind the chain (the cursor still advances; the application alerts the operator).
+   * The adapter stopped at its page budget with rows still unread for at least one account; fetching again from
+   * `next` continues. False means every account was read up to the indexer's head. Never inferred from the
+   * number of candidates: filtering and de-duplication make that number unrelated to the rows read.
    */
-  readonly exhausted?: boolean;
+  readonly more: boolean;
 }
 
 /** Chain adapter. See CONTRIBUTING.md, "Network adapter checklist". */
@@ -79,7 +80,11 @@ export interface ChainAdapter {
   supports(asset: Asset): boolean;
   /** Validates and normalises an address; throws on invalid input. */
   validateAddress(raw: string): ChainAddress;
-  /** Candidates from an indexer for incoming transfers of `asset` to `addresses`, starting at `cursor`. */
+  /**
+   * Candidates from an indexer for incoming transfers of `asset` to `addresses`, starting at `cursor`. `limit` is
+   * the number of rows per indexer request (an adapter may cap it at its provider's maximum), not a bound on the
+   * candidates returned; the adapter pages within its own budget and reports what is left in `more`.
+   */
   fetchIncoming(
     asset: Asset,
     addresses: readonly ChainAddress[],
