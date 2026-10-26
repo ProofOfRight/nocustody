@@ -2,3 +2,80 @@
 # Tab-separated columns: section · file (empty for lines without a file, e.g. route tables) · line text without
 # the line number (whitespace collapsed) · why it is fine · review date.
 # The script prints such candidates as "reviewed", others as "NEW", entries without a candidate as "stale" (delete).
+http	scripts/e2e-api.ts	const res = await fetch(`${base}/v1/invoices`, {	e2e / replay script against public testnet or mainnet providers, not production code	2026-10-26
+http	scripts/e2e-api.ts	(await (await fetch(`${base}/v1/invoices/${invoice.id}`, { headers })).json()) as { status: string }	e2e / replay script against public testnet or mainnet providers, not production code	2026-10-26
+http	scripts/e2e-mainnet.ts	const res = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });	e2e / replay script against public testnet or mainnet providers, not production code	2026-10-26
+http	src/adapters/alerts/sinks.ts	this.#fetch = o.fetch ?? ((u, i) => fetch(u, i));	Telegram sink uses fetch directly by design: the bot token is in the URL path and JsonHttpClient puts the path into error texts; own timeout, redirect: error, no parse mode	2026-10-26
+http	src/adapters/alerts/sinks.ts	res = await this.#fetch(`https://api.telegram.org/bot${this.#token}/sendMessage`, {	Telegram sink uses fetch directly by design: the bot token is in the URL path and JsonHttpClient puts the path into error texts; own timeout, redirect: error, no parse mode	2026-10-26
+http	src/adapters/api/page/render.ts	fetch(d.statusUrl, {cache: "no-store", credentials: "omit"}).then(function(r){ return r.ok ? r.json() : null; })	browser-side script of the payment page polls its own status route (same origin, CSP connect-src self)	2026-10-26
+hosts	scripts/e2e-api.ts	apiUrl: "https://nile.trongrid.io",	testnet or mainnet host of an e2e replay script; the gateway itself takes hosts from config	2026-10-26
+hosts	scripts/e2e-mainnet.ts	const TRONGRID = "https://api.trongrid.io";	testnet or mainnet host of an e2e replay script; the gateway itself takes hosts from config	2026-10-26
+hosts	scripts/e2e-mainnet.ts	const TONCENTER = "https://toncenter.com";	testnet or mainnet host of an e2e replay script; the gateway itself takes hosts from config	2026-10-26
+hosts	scripts/e2e-nile.ts	apiUrl: "https://nile.trongrid.io",	testnet or mainnet host of an e2e replay script; the gateway itself takes hosts from config	2026-10-26
+hosts	scripts/e2e-ops.ts	tron: { network: "tron:nile", apiUrl: "https://nile.trongrid.io", startFrom: "2026-10-25T00:00:00Z" },	testnet or mainnet host of an e2e replay script; the gateway itself takes hosts from config	2026-10-26
+hosts	scripts/e2e-ops.ts	apiUrl: "https://testnet.toncenter.com",	testnet or mainnet host of an e2e replay script; the gateway itself takes hosts from config	2026-10-26
+hosts	scripts/e2e-ops.ts	tron: { apiUrl: "https://nileapi.tronscan.org" },	testnet or mainnet host of an e2e replay script; the gateway itself takes hosts from config	2026-10-26
+hosts	scripts/e2e-ops.ts	ton: { apiUrl: "https://testnet.tonapi.io" },	testnet or mainnet host of an e2e replay script; the gateway itself takes hosts from config	2026-10-26
+hosts	scripts/e2e-ton.ts	apiUrl: "https://testnet.toncenter.com",	testnet or mainnet host of an e2e replay script; the gateway itself takes hosts from config	2026-10-26
+hosts	scripts/sbom.ts	const repository = `https://github.com/${process.env.GITHUB_REPOSITORY ?? "ProofOfRight/nocustody"}`;	testnet or mainnet host of an e2e replay script; the gateway itself takes hosts from config	2026-10-26
+hosts	scripts/smoke-image.sh	"tron": { "network": "tron:nile", "apiUrl": "https://nile.trongrid.io", "startFrom": "2026-10-25T00:00:00Z",	testnet or mainnet host of an e2e replay script; the gateway itself takes hosts from config	2026-10-26
+hosts	src/adapters/alerts/sinks.ts	res = await this.#fetch(`https://api.telegram.org/bot${this.#token}/sendMessage`, {	api.telegram.org, documented in docs/operations.md (External hosts), used only when ops.alerts.telegram is configured	2026-10-26
+hosts	src/adapters/api/page/qr.ts	return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" shape-rendering="crispEdges" role="img" aria-label="${label}"><rect width="${n}" height="${n}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;	SVG XML namespace, not a network call	2026-10-26
+hosts	src/app/container.ts	return new KrakenUsdtUsd(exchange("https://api.kraken.com"));	Kraken / Coinbase peg sources, documented in docs/operations.md, used only when ops.depeg is configured	2026-10-26
+hosts	src/app/container.ts	return new CoinbaseUsdtUsd(exchange("https://api.exchange.coinbase.com"));	Kraken / Coinbase peg sources, documented in docs/operations.md, used only when ops.depeg is configured	2026-10-26
+hosts	tools/canary.ts	// CANARY_API_URL=https://pay.example.org CANARY_API_KEY=nck_... \	usage example in the header comment	2026-10-26
+numbers	src/adapters/api/page/i18n.ts	return { tag, q: qv ? Number(qv.slice(2)) : 1 };	Accept-Language quality value, not money	2026-10-26
+numbers	src/adapters/api/page/render.ts	var left = Math.max(0, Math.floor((Date.parse(d.expiresAt) - Date.now()) / 1000));	countdown seconds in the browser, not money	2026-10-26
+numbers	src/adapters/api/page/render.ts	timerEl.textContent = Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0");	countdown seconds in the browser, not money	2026-10-26
+numbers	src/adapters/api/server.ts	const declared = Number(req.headers["content-length"] ?? "0");	byte count of a request or response, not money	2026-10-26
+numbers	src/adapters/chains/ton/adapter.ts	Math.ceil(this.#o.overlapMs / 1000),	time in seconds or minutes for cursors, alert texts and candidate age, never an amount	2026-10-26
+numbers	src/adapters/chains/ton/adapter.ts	Math.floor(this.#o.startFrom.getTime() / 1000),	time in seconds or minutes for cursors, alert texts and candidate age, never an amount	2026-10-26
+numbers	src/adapters/chains/ton/tonapi.ts	const fromUtime = Math.floor(from.getTime() / 1000);	time in seconds or minutes for cursors, alert texts and candidate age, never an amount	2026-10-26
+numbers	src/adapters/chains/tron/address.ts	out = ALPHABET[Number(n % 58n)] + out;	base58 digit index, bounded by 58	2026-10-26
+numbers	src/adapters/http/json-client.ts	await this.#o.sleep(cap / 2 + randomInt(Math.max(1, Math.floor(cap / 2))));	backoff jitter in milliseconds	2026-10-26
+numbers	src/adapters/http/json-client.ts	const declared = Number(res.headers.get("content-length") ?? "0");	byte count of a request or response, not money	2026-10-26
+numbers	src/adapters/persistence/pg/unit-of-work.ts	.sort((a, b) => Number(BigInt(a.id) - BigInt(b.id)))	sort key of outbox ids within one claimed batch	2026-10-26
+numbers	src/adapters/webhooks/http-sender.ts	const timestamp = String(Math.floor((this.#o.now?.() ?? new Date()).getTime() / 1000));	time in seconds or minutes for cursors, alert texts and candidate age, never an amount	2026-10-26
+numbers	src/app/duration.ts	return Number(m[1]) * unit;	duration digits (bounded by the regex), not money	2026-10-26
+numbers	src/application/strategies/unique-amount.ts	const offset = Math.min(Math.max(0, Math.floor(start(all.length))), Math.max(0, all.length - 1));	slot index, bounded by maxSlots	2026-10-26
+numbers	src/application/use-cases/create-invoice.ts	`${symbol} depeg reading is ${Math.round(age / 60_000)} min old (is the monitor running?)`,	time in seconds or minutes for cursors, alert texts and candidate age, never an amount	2026-10-26
+numbers	src/application/use-cases/monitor.ts	return Number((diff * 10_000n) / price.den);	basis points for alert texts only; the block decision is exact (exceedsDeviation)	2026-10-26
+numbers	src/application/use-cases/monitor.ts	const age = last ? `${Math.round((now - last) / 1000)} s ago` : "never";	time in seconds or minutes for cursors, alert texts and candidate age, never an amount	2026-10-26
+numbers	src/application/use-cases/monitor.ts	const age = last ? `${Math.round((now - last) / 1000)} s ago` : "never";	time in seconds or minutes for cursors, alert texts and candidate age, never an amount	2026-10-26
+numbers	src/application/use-cases/monitor.ts	problems.push(`a webhook event has been due for ${Math.round((now - oldest.getTime()) / 1000)} s`);	time in seconds or minutes for cursors, alert texts and candidate age, never an amount	2026-10-26
+numbers	src/application/use-cases/verify-transfers.ts	const reason = `not final ${Math.round(age / 60_000)} min after its block time (${why})`;	time in seconds or minutes for cursors, alert texts and candidate age, never an amount	2026-10-26
+numbers	src/domain/decimal.ts	* Parses a non-negative decimal string into an integer number of `scale`-th units ("10.01", 2 → 1001n).	doc comment	2026-10-26
+jsonparse	src/adapters/api/page/render.ts	var d = JSON.parse(document.getElementById("page-data").textContent);	browser side: the JSON was embedded by the server itself	2026-10-26
+jsonparse	src/adapters/api/server.ts	return JSON.parse(Buffer.concat(chunks).toString("utf8"));	request body, read only through strict zod schemas (parse())	2026-10-26
+jsonparse	src/adapters/chains/cursor.ts	const parsed: unknown = JSON.parse(cursor);	stored cursor, validated by parseTimeCursor (object with safe integers)	2026-10-26
+jsonparse	src/adapters/http/json-client.ts	json = JSON.parse(text);	provider answer, validated with the caller's zod schema right after	2026-10-26
+jsonparse	src/app/config.ts	json = JSON.parse(readFileSync(path, "utf8"));	config file, validated by the strict zod schema right after	2026-10-26
+routes		395: route("GET", "/pay/:id", null	public by design when the payment page is enabled; shared public bucket; id validated; reveals status, received amount and deadlines only	2026-10-26
+routes		427: route("GET", "/pay/:id/status", null	public by design when the payment page is enabled; shared public bucket; id validated; reveals status, received amount and deadlines only	2026-10-26
+routes		443: route("GET", "/health", null	liveness probe, answers {status: ok} only	2026-10-26
+routes		445: route("POST", "/v1/invoices", "invoices:write"	requires a key with this scope; 403 without it (server.test)	2026-10-26
+routes		493: route("GET", "/v1/invoices/:id", "invoices:read"	requires a key with this scope; 403 without it (server.test)	2026-10-26
+routes		501: route("GET", "/v1/invoices", "invoices:read"	requires a key with this scope; 403 without it (server.test)	2026-10-26
+routes		513: route("GET", "/v1/quotes", "quotes:read"	requires a key with this scope; 403 without it (server.test)	2026-10-26
+sql	src/adapters/persistence/pg/unit-of-work.ts	throw new ApplicationError("asset.unknown", `asset ${id} is stored in the database but not configured`);	an error message, not SQL	2026-10-26
+sql	src/adapters/persistence/pg/unit-of-work.ts	const { rows } = await db.query<InvoiceRow>(`SELECT * FROM invoices WHERE ${where}`, params);	constant fragments chosen in code (column list, where clause); values are $n parameters	2026-10-26
+sql	src/adapters/persistence/pg/unit-of-work.ts	`UPDATE tx_candidates SET ${sets}, updated_at = now()	constant fragments chosen in code (column list, where clause); values are $n parameters	2026-10-26
+sql	src/adapters/persistence/pg/unit-of-work.ts	`UPDATE observed_transfers SET ${sets}, updated_at = now()	constant fragments chosen in code (column list, where clause); values are $n parameters	2026-10-26
+errors	src/adapters/api/server.ts	if (err instanceof HttpError) return fail(err.status, err.code, err.message);	our own stable code and message	2026-10-26
+errors	src/adapters/api/server.ts	return fail(status, err.code, err.message);	ApplicationError codes below 500 are the API contract; 500-class answer a fixed message and log the detail	2026-10-26
+errors	src/adapters/api/server.ts	if (err instanceof DomainError) return fail(422, err.code, err.message);	domain validation code and message, no internals	2026-10-26
+errors	src/adapters/api/server.ts	throw new HttpError(400, "invalid_request", `${i?.path.join(".") || "body"}: ${i?.message}`);	our own stable code and message	2026-10-26
+actions	.github/workflows/ci.yml	permissions:	permissions declared: contents: read in CI, {} at the top of release with per-job grants	2026-10-26
+actions	.github/workflows/release.yml	permissions: {}	permissions declared: contents: read in CI, {} at the top of release with per-job grants	2026-10-26
+actions	.github/workflows/release.yml	permissions:	permissions declared: contents: read in CI, {} at the top of release with per-job grants	2026-10-26
+actions	.github/workflows/release.yml	permissions:	permissions declared: contents: read in CI, {} at the top of release with per-job grants	2026-10-26
+digests	Dockerfile	FROM scratch	scratch has no digest	2026-10-26
+digests	deploy/compose.yaml	image: "${NOCUSTODY_IMAGE:?set NOCUSTODY_IMAGE in .env}"	image comes from .env, pinned by digest after gh attestation verify (docs/deployment.md)	2026-10-26
+digests	.github/workflows/ci.yml	image:	the word image is a job name	2026-10-26
+digests	scripts/smoke-image.sh	IMAGE=${1:-}	script argument; defaults to the locally built image	2026-10-26
+digests	scripts/smoke-image.sh	IMAGE=nocustody:smoke	script argument; defaults to the locally built image	2026-10-26
+digests	scripts/smoke-image.sh	NOCUSTODY_IMAGE=$IMAGE	image comes from .env, pinned by digest after gh attestation verify (docs/deployment.md)	2026-10-26
+digests	Makefile	image: ## production image nocustody:dev, see docs/deployment.md	target name; the dev image is built locally	2026-10-26
+ports	compose.yaml	- "127.0.0.1:55432:5432"	loopback only; the API is published through a TLS reverse proxy	2026-10-26
+ports	deploy/compose.yaml	- "127.0.0.1:${NOCUSTODY_PORT:-8080}:8080"	loopback only; the API is published through a TLS reverse proxy	2026-10-26
+secrets		examples/php/test-vector.json:2	shared webhook signature test vector with a dummy secret (examples/php/test-vector.json)	2026-10-26

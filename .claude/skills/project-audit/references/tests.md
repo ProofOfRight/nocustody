@@ -5,7 +5,7 @@ the main session. The phase 2 checklist has the format "scenario → test";
 `scripts/test_checklist.py` compares it with the tests and the code. The
 checklist ages with the product: a source module in no group is printed as
 `UNMENTIONED` — add a group or an item here. Last update — 2026-10-26
-(created with the skill, after release 0.2.1).
+(created with the skill, after release 0.2.1); 2026-10-26 after the first full audit (34 scenarios added, 7 NO TEST closed).
 
 Contents: phase 2 — the script, the checklist by group, missing tests ·
 phase 3 — signs of an "empty" test, manual mutations for money code.
@@ -63,7 +63,12 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - AML: pending → completed, hold → manual decision — `invoice.test.ts :: goes through AML: pending → completed, or hold → manual decision`
 - optimistic version on every change — `invoice.test.ts :: increments the version on every change and keeps the loaded version`
 - amount classification is exact; dust below the threshold — `invoice.test.ts :: classifies exactly`, `invoice.test.ts :: treats amounts below the threshold as dust`
-- every status change writes exactly one event of the documented type — NO TEST (looked for a test that enumerates the event types in `docs/api.md` against the aggregate; the flow tests check some of them)
+- a zero-value transfer is dust whatever the threshold — `invoice.test.ts :: treats amounts below the threshold as dust`
+- a payment with an Invalid Date is refused, not accepted as on time — `invoice.test.ts :: rejects payments after grace, before creation, or in another asset`
+- a transfer more than 5 s before the invoice was created is refused (ADR-0030) — `invoice.test.ts :: rejects payments after grace, before creation, or in another asset`, `use-cases.test.ts :: a transfer that landed before the invoice existed is never claimed by it (someone else's money)`
+- `needsAmlReview` names the states `startAmlReview` accepts — `invoice.test.ts :: goes through AML: pending → completed, or hold → manual decision`
+- the transfer key round-trips through `parseTxRefKey`, malformed keys refused — `value-objects.test.ts :: builds a stable idempotency key`
+- every event type the aggregate can record is in `docs/api.md`, and no other — `contract.test.ts :: lists every webhook event type the gateway can emit, and no other` (the aggregate records `DomainEventType` only: a new literal is a type error)
 
 ### Payment instructions: unique amounts and memos
 <!-- covers: src/domain/amount-slot.ts, src/domain/memo.ts, src/application/strategies/strategy.ts,
@@ -78,6 +83,7 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - a forgotten memo falls back to the unique amount; unknown memo with a wrong amount is quarantined; free text never matches — `use-cases.test.ts :: a payer who forgot the memo is matched by the unique amount`, `use-cases.test.ts :: an unknown memo with a non-matching amount is quarantined; free text never matches`
 - a memo matches only payments to its own address — `use-cases.test.ts :: a memo only matches payments to its own address`
 - memos come from node:crypto without look-alike characters; payer input is normalised, free text refused — `system.test.ts :: produces valid memos from the alphabet without look-alike characters`, `system.test.ts :: normalizes payer input but rejects free text`
+- allocation starts at a chosen (random in production) slot and wraps around — `use-cases.test.ts :: starts at a chosen slot and wraps around, so a just-freed pair is not the next one handed out`
 
 ### Create invoice and quotes
 <!-- covers: src/application/use-cases/create-invoice.ts, src/application/use-cases/quote-price.ts,
@@ -90,6 +96,10 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - disabled currencies and stale rates refused; fallback to the next rate provider — `use-cases.test.ts :: refuses disabled currencies and stale rates`, `use-cases.test.ts :: falls back to the next provider when the first fails or is stale`
 - a quote never creates an invoice — `server.test.ts :: quotes without creating an invoice`
 - the depeg guard refuses new invoices in the blocked symbol — `monitor.test.ts :: blocks new invoices while the price is off the peg and unblocks when it returns`
+- with depeg protection configured a missing or stale guard reading blocks (fail closed) — `use-cases.test.ts :: with depeg protection configured, a missing or stale guard reading blocks new invoices (fail closed)`
+- an existing order is answered before quoting (a stale rate or a depeg block does not hide it) — `use-cases.test.ts :: answers an existing order before quoting: a stale rate or a depeg block does not hide it`
+- the integrity reason (config path, file fragment) never reaches the API caller — `use-cases.test.ts :: the integrity reason stays with the operator: the API caller never sees a config path or file fragment`
+- exhausted slots raise a critical alert — `use-cases.test.ts :: moves to the next address when slots run out, then fails`
 
 ### Payment flow: ingest, verify, settle, expire
 <!-- covers: src/application/use-cases/ingest-transfers.ts, src/application/use-cases/verify-transfers.ts,
@@ -106,9 +116,14 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - a late payment within grace is paid_late even when verified after grace; an expired invoice's slot is not reused — `use-cases.test.ts :: credits a late payment within grace as paid_late, even when verified after grace`, `use-cases.test.ts :: a late payment for an expired invoice cannot pay a new invoice: the slot is not reused`
 - an AML hold stops completion; an unavailable screener defers; threshold and manual resolution — `use-cases.test.ts :: AML hold stops completion; an unavailable screener defers it`, `monitor.test.ts :: payments below the AML threshold complete without screening; above it are screened; holds can be resolved`
 - the transfer key is recorded in the invoice payment; transfers for other assets or addresses are never stored — `use-cases.test.ts :: records the transfer key in the invoice payment`, `use-cases.test.ts :: never stores transfers for other assets or addresses`
-- one failing transfer or screening does not abort the settlement batch — NO TEST (the 0.2.1 fix counted and logged it; looked for a test with a throwing repository or screener inside a batch)
+- a transfer the adapter returns for a foreign address or another asset is rejected by the verifier — `use-cases.test.ts :: rejects a transfer the adapter returns for a foreign address or another asset`
+- a transfer settled by another worker between list and write is recorded once — `use-cases.test.ts :: a transfer settled by another worker between list and write is recorded once`, `pg.int.test.ts :: stores each candidate tx once and each transfer once: UNIQUE(network, tx_hash, log_index)`
+- a dust hint does not bury a real payment: a later non-dust hint re-queues the candidate — `use-cases.test.ts :: a dust hint does not bury a real payment: a later non-dust hint for the same transaction re-queues it`
+- verification that keeps failing is rejected after the max age; the max age counts from first seen after downtime — `monitor.test.ts :: a candidate whose verification keeps failing is rejected after the max age, with an alert`, `monitor.test.ts :: the max age counts from the time the candidate was first seen when its block time is older (downtime)`
+- one candidate whose result cannot be stored does not stop verification or settlement; one failing transfer does not abort the settlement batch — `use-cases.test.ts :: one candidate whose result cannot be stored does not stop the others or the settlement` (settlement: the 0.2.1 path is still without a throwing-repository test)
 - a row whose asset is no longer configured is skipped by every cycle — NO TEST (the 0.2.1 fix; looked for a flow test with an unknown asset id in the database)
-- the shared time cursor parses and advances identically for TRON and TON — NO TEST (`cursor.ts` is exercised only through the adapters' overlap tests)
+- the shared cursor parses, re-reads the overlap, and guarantees progress after a burst (tight, then deeper pages) — `cursor.test.ts :: parses stored cursors and drops anything that is not a safe integer`, `cursor.test.ts :: re-reads the overlap, never before the floor, and starts tight after a scan without progress`, `cursor.test.ts :: a burst larger than the page budget cannot freeze the cursor: tight, then deeper pages, then back to normal`
+- a burst larger than the page budget cannot freeze either adapter's cursor; the scan reports the exhausted budget and the application alerts — `ton/adapter.test.ts :: a burst of transactions larger than the page budget cannot freeze the cursor`, `tron/adapter.test.ts :: a burst of transfers larger than the page budget cannot freeze the cursor`, `use-cases.test.ts :: alerts when a scan used its whole page budget: the scanner lags behind the chain`
 
 ### TRON adapter and the JSON client
 <!-- covers: src/adapters/chains/tron/adapter.ts, src/adapters/chains/tron/address.ts,
@@ -121,9 +136,10 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - fake token: a Transfer log of another contract is not ours — `tron/adapter.test.ts :: fake token: a Transfer log from another contract is not a transfer of the asset`
 - several transfers in one transaction, each with its own log index — `tron/adapter.test.ts :: several transfers in one transaction: each log to us becomes a transfer with its own index`
 - dust reported with its exact amount — `tron/adapter.test.ts :: dust: tiny transfers are reported with their exact amount (the application drops them)`
-- an answer about another transaction or malformed topics is not a decision — `tron/adapter.test.ts :: rejects an answer about another transaction and ignores malformed topics`, `tron/adapter.test.ts :: an unexpected response shape is a provider error, not a decision`
+- an answer about another transaction or malformed topics is not a decision — `tron/adapter.test.ts :: an answer about another transaction is a provider fault (pending, retried), never a decision; malformed topics are ignored`, `tron/adapter.test.ts :: an unexpected response shape is a provider error, not a decision`
 - JSON client: https only, same host, retries on 429/5xx with backoff, no retry on 400, no redirects, size limit, key header only when configured — `tron/adapter.test.ts :: accepts only https and never leaves the configured host`, `tron/adapter.test.ts :: retries 429/5xx with backoff, does not retry 400, refuses redirects`, `tron/adapter.test.ts :: enforces the response size limit`, `tron/adapter.test.ts :: sends the API key header only when configured`
 - the client-side minimum interval between requests (keyless toncenter) is respected — NO TEST (looked for a test of `minIntervalMs` in the JSON client)
+- a transaction with several transfers to us is hinted with its largest one — `tron/adapter.test.ts :: drops rows of other tokens and de-duplicates rows of one transaction`
 
 ### TON adapter
 <!-- covers: src/adapters/chains/ton/adapter.ts, src/adapters/chains/ton/address.ts,
@@ -140,6 +156,8 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - a not-yet-indexed transaction keeps the candidate pending — `ton/adapter.test.ts :: a transaction that is not indexed yet keeps the candidate pending`
 - GRAM: credited amount from the credit phase and the comment; the credited amount wins over the message value; bounced or returned funds rejected; non-final pending — `ton/adapter.test.ts :: final: credited amount from the credit phase and the comment`, `ton/adapter.test.ts :: the credited amount wins over the message value (indexer hint)`, `ton/adapter.test.ts :: bounced or returned funds are rejected`, `ton/adapter.test.ts :: non-final: pending`
 - display form and payment URI for payers — `ton/adapter.test.ts :: shows payers the user-friendly non-bounceable testnet address`, `ton/adapter.test.ts :: ton://transfer with jetton master, amount in minimal units and memo`
+- a comment with control characters (U+0000) is no memo; binary comments checked on the raw byte — `ton/adapter.test.ts :: a comment with control characters is no comment: PostgreSQL refuses U+0000 and the row must still be written`, `ton/adapter.test.ts :: reads comments inline or by reference, ignores binary comments and malformed bodies`
+- a GRAM transfer with an encrypted comment is a payment without memo — `ton/adapter.test.ts :: a transfer with an encrypted comment is a payment without memo, not an invisible one`, `ton/adapter.test.ts :: native: plain transfers with their exact (dust) amounts; jetton notifications are not GRAM`
 
 ### Persistence (PostgreSQL)
 <!-- covers: src/adapters/persistence/pg/migrate.ts, src/adapters/persistence/pg/unit-of-work.ts -->
@@ -152,7 +170,11 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - ops rows: heartbeats, guards, dead-letter revival, verified candidates for reconciliation — `pg.int.test.ts :: ops: heartbeats, guards, dead-letter revival, verified candidates for reconciliation`
 - state, outbox and cursor roll back together — `pg.int.test.ts :: rolls back state, outbox and cursor together`
 - full flow on PostgreSQL with the invoice round-tripping; concurrent modification detected — `pg.int.test.ts :: full flow on PostgreSQL: invoice → transfer → completed, outbox written, invoice round-trips`, `pg.int.test.ts :: detects concurrent modification of an invoice`
-- status CHECK constraints in the migrations equal the TypeScript unions — NO TEST (looked for a cross-check of `InvoiceStatus`, `CandidateStatus`, `TransferStatus` against the `CHECK (status IN (…))` lists)
+- a migration marked `-- no-transaction` runs statement by statement (`CREATE INDEX CONCURRENTLY`) — `pg.int.test.ts :: a file marked -- no-transaction runs statement by statement, so CREATE INDEX CONCURRENTLY works`
+- candidates are per asset; a non-dust hint re-queues a dust row — `pg.int.test.ts :: stores each candidate tx once and each transfer once: UNIQUE(network, tx_hash, log_index)`
+- retention prunes delivered webhooks, idempotency keys and settled candidates only — `pg.int.test.ts :: retention: prunes delivered webhooks, idempotency keys and settled candidates older than the cutoff`, `monitor.test.ts :: prunes only what is configured, never payments or audit rows`
+- an invoice whose stored address is not pinned cannot be read — `pg.int.test.ts :: an invoice whose stored address is not a pinned address of its asset cannot be read (database tampering)`
+- status CHECK constraints in the migrations equal the TypeScript unions — `pg.int.test.ts :: status CHECK constraints in the migrations equal the TypeScript unions`
 - amounts survive the numeric(78,0) ↔ bigint boundary above 2^53 — NO TEST (looked for a round-trip of an amount above Number.MAX_SAFE_INTEGER through a repository)
 
 ### Merchant API and keys
@@ -165,6 +187,11 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - get and list invoices; quotes — `server.test.ts :: gets and lists invoices`, `server.test.ts :: quotes without creating an invoice`
 - transport rules: 404/405, JSON only, no duplicated query parameters, safe response headers — `server.test.ts :: transport rules: 404/405, JSON only, no duplicated query parameters, safe response headers`
 - rate limit per key — `server.test.ts :: rate-limits per key`
+- junk tokens are refused without a database transaction — `server.test.ts :: asks the database only for tokens shaped like a key; junk is refused without a transaction`
+- a concurrent create with the same Idempotency-Key and another body is refused — `server.test.ts :: a concurrent create with the same Idempotency-Key and another body is refused, not silently accepted`
+- a malformed request target is 400, never a logged 500; a server error after start-up is reported, not a crash — `server.test.ts :: a malformed request target is the client's error (400), never a logged 500`, `server.test.ts :: a server error after start-up is reported and does not crash the process`
+- `since` accepts an RFC 3339 offset — `server.test.ts :: accepts RFC 3339 timestamps with an offset in since, as the OpenAPI format date-time promises`
+- routes, the Status enum and the error codes match `docs/api/openapi.yaml` — `contract.test.ts :: documents every merchant API route and no other`, `contract.test.ts :: the Status enum equals the domain's statuses`, `contract.test.ts :: every application error code and transport code is listed`
 - a malformed %-escape in a path parameter answers 400 — NO TEST (the 0.2.1 fix; looked for a request with `%zz` in the path)
 - the API key's last_used_at is recorded on each authenticated request — NO TEST (the 0.2.1 change; looked for an assertion on `last_used_at` after a request)
 
@@ -177,6 +204,7 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - right-to-left for Persian; language links — `page.test.ts :: right-to-left for Persian; language links for all languages`
 - TRON without a wallet URI: QR carries the address, no wallet button — `page.test.ts :: TRON (no wallet URI): the QR carries the address and there is no wallet button`
 - disabled by default; strict CSP with the nonce; public status reveals only status, amount and deadlines; public routes rate-limited — `server.test.ts :: is disabled by default`, `server.test.ts :: serves the page with a strict CSP whose nonce matches the inline script`, `server.test.ts :: public status reveals only status, received amount and deadlines`, `server.test.ts :: public routes are rate-limited`
+- an invoice that can no longer be paid shows its status only; polling stops at grace; `underpaid` stays open — `page.test.ts :: an invoice that can no longer be paid shows its status only: no amount, address, memo, QR or wallet link`, `page.test.ts :: payable: payable statuses inside the grace period only`, `page.test.ts :: the page script polls until the grace period ends and treats underpaid as still open`, `server.test.ts :: after the grace period the page shows the status only, never an address a newer invoice may own`
 
 ### Webhooks
 <!-- covers: src/adapters/webhooks/http-sender.ts, src/application/use-cases/dispatch-webhooks.ts -->
@@ -185,7 +213,9 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - SSRF: private and special addresses refused unless allowed; classification — `http-sender.test.ts :: SSRF: private and special addresses are refused unless explicitly allowed`, `http-sender.test.ts :: classifies special addresses`
 - plain http, credentials in the URL and short secrets refused — `http-sender.test.ts :: refuses plain http, credentials in the URL and short secrets`
 - the PHP example and the gateway agree on the signature (shared test vector) — `http-sender.test.ts :: the PHP example and the gateway agree on the signature`
-- delivered once and marked; exponential backoff then dead-letter; a non-retryable failure dead-lettered at once; a thrown sender error retried; delay capped — `dispatch-webhooks.test.ts :: delivers once and marks the event delivered`, `dispatch-webhooks.test.ts :: retries with exponential backoff, then dead-letters`, `dispatch-webhooks.test.ts :: a non-retryable failure (e.g. blocked by SSRF policy) is dead-lettered at once`, `dispatch-webhooks.test.ts :: a thrown sender error is retried, not lost`, `dispatch-webhooks.test.ts :: caps the delay`
+- delivered once and marked; exponential backoff then dead-letter; a non-retryable failure dead-lettered at once; a thrown sender error retried; delay capped — `dispatch-webhooks.test.ts :: delivers once and marks the event delivered; every cycle writes the dispatcher heartbeat`, `dispatch-webhooks.test.ts :: retries with exponential backoff, then dead-letters`, `dispatch-webhooks.test.ts :: a non-retryable failure (e.g. blocked by SSRF policy) is dead-lettered at once`, `dispatch-webhooks.test.ts :: a thrown sender error is retried, not lost`, `dispatch-webhooks.test.ts :: caps the delay`
+- the lease outlives a whole batch, so a second dispatcher never re-sends — `dispatch-webhooks.test.ts :: the lease outlives a whole batch, so a second dispatcher running meanwhile never re-sends`
+- one attempt is bounded as a whole (a trickling response is cut off); a resolver failure is retried, only the SSRF policy is final — `http-sender.test.ts :: the deadline covers the whole attempt: a response that trickles bytes forever is cut off`, `http-sender.test.ts :: a resolver failure is retried; only the SSRF policy is final`
 - the Laravel example verifies the signature and rejects an old timestamp — NO TEST in vitest (checked by `make php-selftest`, `examples/laravel/selftest.php`)
 
 ### Operations: monitor, alerts, reconciliation, depeg, AML, canary
@@ -200,6 +230,11 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - second sources: Tronscan successful incoming transfers of the contract; tonapi internal_transfer on our jetton-wallet and plain GRAM — `ops-adapters.test.ts :: Tronscan: incoming transfers of the contract to the address, successful only`, `ops-adapters.test.ts :: tonapi: internal_transfer on our jetton-wallet with amount and memo; plain GRAM transfers`
 - AML blocklist holds listed senders, bare or network-prefixed, ignores comments — `ops-adapters.test.ts :: holds senders on the list (bare or network-prefixed), ignores comments`
 - the canary passes on an expected address, fails loudly on an unexpected one, reports when it cannot check — `canary.test.ts :: passes when the shown address is expected`, `canary.test.ts :: fails loudly when the gateway shows an unexpected address`, `canary.test.ts :: reports when it cannot check`
+- the canary checks `address_display` and the wallet URI too, uses a random order id, requires https — `canary.test.ts :: checks every form a payer could see: address_display and the wallet URI, not only payment.address`, `canary.test.ts :: uses a random order id and refuses plain http unless allowed`
+- the pinned config is re-checked every health cycle; a stopped dispatcher or an overdue webhook is an alert — `monitor.test.ts :: re-checks the pinned config every health cycle and alerts on a violation (not only on invoice creation)`, `monitor.test.ts :: with webhooks configured, a dispatcher that stopped or a webhook due for too long is an alert`
+- the depeg decision is exact, not on floored basis points — `monitor.test.ts :: blocks on a deviation just over the limit that the floored basis points would hide`
+- expired cooldown keys are forgotten — `ops-adapters.test.ts :: forgets keys whose cooldown has passed, so the map does not grow with uptime`
+- blocklist entries are normalised per network (TON friendly form matches) — `ops-adapters.test.ts :: normalises entries with the network's address parser: a TON address in friendly form matches the raw form the chain reports`
 - the noop screener clears everything — NO TEST (trivial; covered indirectly by the flow tests that use it)
 
 ### Configuration and integrity
@@ -210,30 +245,34 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - the guard notices a config file changed on disk — `config.test.ts :: the guard notices a config file changed on disk`
 - durations parse — `config.test.ts :: parses durations`
 - TON: a jetton-wallet is required for jettons, forbidden elsewhere, pinned; friendly addresses pinned in canonical raw form — `config.test.ts :: requires a jetton-wallet for jettons, forbids it elsewhere, and pins it`, `config.test.ts :: accepts friendly addresses and pins their canonical raw form`
+- the pin covers policies, providers, pricing, AML, depeg and the webhook URL, not operational knobs (ADR-0031) — `config.test.ts :: pins what decides money (ADR-0031): policies, providers, pricing, AML, depeg and the webhook URL; not operational knobs`
+- a provider key variable must not be another secret — `config.test.ts :: a provider key variable must not be another secret`
+- zero and overflowing durations refused; duplicate on-chain assets and an unused depeg symbol refused — `config.test.ts :: refuses zero durations and timer intervals Node would clamp to 1 ms`, `config.test.ts :: refuses two ids for one on-chain asset and a depeg symbol no asset is priced in`
 - the logger redacts every path that may carry a secret — NO TEST (looked for a test that logs a config or request object and asserts `[redacted]`)
 - every option in `docs/configuration.md` exists in the schema with the same default — NO TEST (cross-check of the documentation against `config.ts`)
 
 ### Processes and CLI
-<!-- covers: src/app/cli.ts, src/app/container.ts -->
+<!-- covers: src/app/cli.ts, src/app/container.ts, src/app/loop.ts -->
 <!-- skip: scripts/e2e-nile.ts — live replay, run by `make e2e-nile` (phase 5) -->
 <!-- skip: scripts/e2e-ton.ts — live replay, run by `make e2e-ton` (phase 5) -->
 <!-- skip: scripts/e2e-api.ts — live replay with the PHP receiver, `make e2e-api` (phase 5) -->
 <!-- skip: scripts/e2e-ops.ts — live reconciliation and depeg scenario, `make e2e-ops` (phase 5) -->
 <!-- skip: scripts/e2e-mainnet.ts — read-only mainnet replay, `make e2e-mainnet` (phase 5) -->
-- `run` starts every role it accepts, including `monitor`, and refuses an unknown role — NO TEST (the 0.2.1 fix; looked for a test of the roles list in `cli.ts`)
-- a loop keeps running after an exception in one cycle; cycles do not overlap; SIGTERM finishes the cycle — NO TEST (looked for a test of the loop helper in `cli.ts`)
-- the composition root wires every configured network and no other — NO TEST (looked for a test that builds the container from a config with tron only / ton only)
+- `run` starts every role it accepts, including `monitor`, and refuses an unknown role — NO TEST (the 0.2.1 fix; `cli.ts` has no test harness; the loop helper and the composition root are tested below)
+- a loop keeps running after an exception in one cycle; cycles do not overlap; a stop request interrupts the sleep — `loop.test.ts :: keeps running after an exception in one cycle and never overlaps cycles`, `loop.test.ts :: a stop request interrupts the sleep: shutdown does not wait for the poll interval`, `loop.test.ts :: sleep resolves early on abort and leaves no timer behind`
+- the composition root wires every configured network and no other; an asset without a provider is refused; an idle pool client error is logged, not thrown — `container.test.ts :: wires every configured network and no other`, `container.test.ts :: refuses an asset whose network has no provider section`, `container.test.ts :: a connection error on an idle database client is logged, not thrown`
 - the whole stack end to end against live testnets and mainnet (read-only) — replay scripts in `scripts/e2e-*.ts` (phase 5)
 - the production image, migrations, all roles, key, invoice and page — `scripts/smoke-image.sh` (phase 5)
 
 ### Repository policies and release tooling
 <!-- covers: scripts/check-layers.ts, scripts/check-licenses.ts, scripts/check-source.ts, scripts/check-dco.ts,
-     scripts/sbom.ts -->
+     scripts/sbom.ts, scripts/test-database.ts -->
 - the layer check fails when dependency-cruiser analysed nothing and reports violations — `check-layers.test.ts :: fails when dependency-cruiser analysed nothing (reported as 'no violations')`, `check-layers.test.ts :: reports rule violations`, `check-layers.test.ts :: expects every non-test source file under src/`
 - licence policy: permissive accepted, copyleft refused, MPL-2.0 for dev only — `policy.test.ts :: accepts permissive licenses and OR-expressions with one permissive option`, `policy.test.ts :: rejects copyleft licenses and AND-expressions containing them`, `policy.test.ts :: allows MPL-2.0 for dev-only dependencies but not for runtime ones`
 - source policy: SPDX header, Math.random / parseFloat / eval, invisible and bidi characters — `policy.test.ts :: requires the SPDX header`, `policy.test.ts :: rejects Math.random, parseFloat and eval`, `policy.test.ts :: rejects invisible and bidi characters and reports their position`
 - DCO: a sign-off matching the author — `policy.test.ts :: requires a sign-off matching the commit author`
 - SBOM: lockfile integrity to hex, Node version from the pinned image, deterministic listing — `sbom.test.ts :: converts lockfile integrity to a hex SHA512 checksum`, `sbom.test.ts :: takes the Node version from the pinned base image only`, `sbom.test.ts :: lists the Node runtime and every package, deterministically`
+- the e2e scripts reset only a database whose name ends in `_test` — `test-database.test.ts :: accepts only a database whose name ends in _test, because the scripts reset its schema`
 
 ## Phase 3. Stale and "empty" tests
 

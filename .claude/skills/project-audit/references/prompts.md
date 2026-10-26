@@ -54,6 +54,11 @@ Answer with findings only, no retelling of the code:
    never finish.
 ```
 
+The `examples` group (integration code merchants copy) goes to the `edge`
+security agent together with its own files; the `agents` group
+(`CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`) to the
+infrastructure agent for item G.
+
 ## Phase 4 — security reviewer (`security.md` by group / infrastructure) — `model: opus`
 
 ```text
