@@ -60,10 +60,16 @@ The receiver must:
    audit log.
 
 Event types: `invoice.created`, `invoice.transfer_detected`, `invoice.paid`, `invoice.underpaid`, `invoice.overpaid`,
-`invoice.paid_late`, `invoice.expired`, `invoice.cancelled`, `invoice.aml_pending`, `invoice.aml_hold`,
-`invoice.completed`, `invoice.rejected`, `transfer.unmatched` (`object_id` is the transfer). Grant access on
-`invoice.completed` (or on `invoice.paid` if AML screening is not used); always re-read the invoice with
-`GET /v1/invoices/{id}` before acting if in doubt.
+`invoice.paid_late`, `invoice.expired`, `invoice.cancelled` (reserved: nothing cancels an invoice yet),
+`invoice.aml_pending`, `invoice.aml_hold`, `invoice.completed`, `invoice.rejected`, `transfer.unmatched`
+(`object_id` is the transfer).
+
+A webhook tells you *when* to look, not *what* to do: grant access only after `GET /v1/invoices/{id}` answers
+`completed` (`invoice.completed` is the event to react to), never from the webhook body alone. A paid invoice goes
+through `aml_pending` to `completed` in the same cycle even with the default `noop` screener, so `paid`, `overpaid` and
+`paid_late` are events you receive, not statuses you will read back; an overpayment or late payment is visible in the
+event type and in the invoice's `received` versus `payment.amount`. Use a distinct webhook secret per gateway
+instance (testnet and mainnet): a signed event from one instance must not verify on the other.
 
 SSRF protection: the endpoint host is resolved and every address is checked; private, loopback, link-local and
 other special ranges are refused unless `webhooks.allowPrivateNetworks` is `true`. Plain `http` needs

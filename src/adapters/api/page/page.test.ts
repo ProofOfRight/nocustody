@@ -127,7 +127,7 @@ describe("payment page", () => {
       expect(html, status).not.toContain(">AB2C3D4E<");
       expect(html, status).not.toContain("<svg");
       expect(html, status).not.toContain('href="ton://');
-      expect(html, status).toContain(MESSAGES.en.status[status] ?? "MISSING");
+      expect(html, status).toContain((MESSAGES.en.status as Record<string, string>)[status] ?? "MISSING");
     }
     // the status is rendered server side, so it is visible without JavaScript
     expect(renderPaymentPage(view, "en", "n")).toContain(">Waiting for your payment<");
