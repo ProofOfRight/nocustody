@@ -69,9 +69,7 @@ export class CreateInvoice {
 
     try {
       return await uow.run(async (repos) => {
-        // Depeg protection: the monitor blocks new invoices priced in an asset that lost its peg.
-        const depeg = await repos.guards.get(`depeg:${settings.priceSymbol}`);
-        if (depeg?.blocked) throw new ApplicationError("pricing.depeg_block", depeg.reason);
+        await this.#checkDepeg(repos, settings.priceSymbol, now);
         return (await existing(repos)) ?? this.#create(repos, input, settings, base, price, now);
       });
     } catch (e) {
@@ -80,6 +78,30 @@ export class CreateInvoice {
       const won = await uow.run(existing);
       if (!won) throw e;
       return won;
+    }
+  }
+
+  /**
+   * Depeg protection: the monitor blocks new invoices priced in an asset that lost its peg. When it is configured for
+   * this symbol, no reading or a stale one blocks as well: a guard that only ever fails open is no guard.
+   */
+  async #checkDepeg(repos: Repositories, symbol: string, now: Date): Promise<void> {
+    const guard = await repos.guards.get(`depeg:${symbol}`);
+    if (guard?.blocked) throw new ApplicationError("pricing.depeg_block", guard.reason);
+    const cfg = this.#deps.depeg;
+    if (!cfg || cfg.symbol !== symbol) return;
+    if (!guard) {
+      throw new ApplicationError(
+        "pricing.depeg_block",
+        `no ${symbol} depeg reading yet (is the monitor running?)`,
+      );
+    }
+    const age = now.getTime() - guard.updatedAt.getTime();
+    if (age > cfg.maxGuardAgeMs) {
+      throw new ApplicationError(
+        "pricing.depeg_block",
+        `${symbol} depeg reading is ${Math.round(age / 60_000)} min old (is the monitor running?)`,
+      );
     }
   }
 
@@ -158,4 +180,9 @@ export interface CreateInvoiceDeps {
   readonly clock: Clock;
   readonly ids: IdGenerator;
   readonly integrity: IntegrityGuard;
+  /**
+   * Depeg protection as configured: invoices priced in `symbol` need a guard reading not older than `maxGuardAgeMs`
+   * that says "not blocked". Missing or stale (the monitor is not running) fails closed.
+   */
+  readonly depeg?: { readonly symbol: string; readonly maxGuardAgeMs: number } | null;
 }
