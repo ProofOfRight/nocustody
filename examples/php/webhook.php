@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Webhook receiver for nocustody. Plain PHP 8.1+, no Composer packages.
 //   php -S 0.0.0.0:8000 webhook.php        (for local testing; use your normal web server in production)
-// Environment: NOCUSTODY_WEBHOOK_SECRET; optional NOCUSTODY_WEBHOOK_LOG (file to append accepted events to).
+// Environment: NOCUSTODY_WEBHOOK_SECRET; NOCUSTODY_WEBHOOK_LOG — file to append accepted events to, in a directory
+// only this application can write, outside the web root and not in a shared /tmp (anyone who can create
+// "<log>.ids" there could make the receiver drop events as already processed).
 declare(strict_types=1);
 
 /**
@@ -29,15 +31,38 @@ function nocustody_verify(string $secret, string $rawBody, ?string $signature, ?
     return is_array($event) && ($event['id'] ?? null) === $eventId ? $event : null;
 }
 
-/** At-least-once delivery: remember processed event ids (use your database in production). */
-function nocustody_seen(string $eventId, string $store): bool
+/**
+ * At-least-once delivery: runs $handle once per event id. The check, the work and the record of the id happen under
+ * an exclusive lock, so two concurrent deliveries of one event cannot both run it, and an id is recorded only after
+ * $handle returned: if it throws, the id stays unrecorded and the gateway's retry runs it again. The file store is
+ * for the example; in production keep processed ids in your database, check and insert in one transaction.
+ * Returns false when the event had been processed before.
+ */
+function nocustody_once(string $eventId, string $store, callable $handle): bool
 {
-    $ids = is_file($store) ? file($store, FILE_IGNORE_NEW_LINES) : [];
-    if (in_array($eventId, $ids, true)) {
-        return true;
+    $h = fopen($store, 'c+');
+    if ($h === false) {
+        throw new RuntimeException("cannot open $store");
     }
-    file_put_contents($store, $eventId . PHP_EOL, FILE_APPEND | LOCK_EX);
-    return false;
+    try {
+        if (!flock($h, LOCK_EX)) {
+            throw new RuntimeException("cannot lock $store");
+        }
+        while (($line = fgets($h)) !== false) {
+            if (rtrim($line, "\r\n") === $eventId) {
+                return false;
+            }
+        }
+        $handle();
+        fseek($h, 0, SEEK_END);
+        if (fwrite($h, $eventId . PHP_EOL) === false || !fflush($h)) {
+            throw new RuntimeException("cannot record $eventId in $store");
+        }
+        return true;
+    } finally {
+        flock($h, LOCK_UN);
+        fclose($h);
+    }
 }
 
 if (PHP_SAPI !== 'cli') {
@@ -55,10 +80,24 @@ if (PHP_SAPI !== 'cli') {
         http_response_code(400);
         exit;
     }
-    $log = getenv('NOCUSTODY_WEBHOOK_LOG') ?: sys_get_temp_dir() . '/nocustody-events.log';
-    if (!nocustody_seen($event['id'], $log . '.ids')) {
-        // Do the real work asynchronously (queue a job). Grant access on invoice.completed.
-        file_put_contents($log, json_encode($event, JSON_UNESCAPED_SLASHES) . PHP_EOL, FILE_APPEND | LOCK_EX);
+    $log = (string) getenv('NOCUSTODY_WEBHOOK_LOG');
+    if ($log === '') {
+        error_log('nocustody webhook: NOCUSTODY_WEBHOOK_LOG is not set');
+        http_response_code(500); // the gateway retries; nothing is lost while the receiver is misconfigured
+        exit;
+    }
+    try {
+        nocustody_once($event['id'], $log . '.ids', function () use ($log, $event): void {
+            // Do the real work asynchronously (queue a job). Grant access on invoice.completed.
+            $line = json_encode($event, JSON_UNESCAPED_SLASHES) . PHP_EOL;
+            if (file_put_contents($log, $line, FILE_APPEND | LOCK_EX) === false) {
+                throw new RuntimeException("cannot append to $log");
+            }
+        });
+    } catch (RuntimeException $e) {
+        error_log('nocustody webhook: ' . $e->getMessage());
+        http_response_code(500);
+        exit;
     }
     http_response_code(204);
 }
