@@ -5,24 +5,23 @@ by a memo (text comment); a unique amount is reserved as a second signal for pay
 
 ## How a TON payment is verified
 
-The indexer (toncenter v3) only supplies candidates: the transactions of the receiving wallet. A payment counts only
-when the same transaction, re-read by hash, is:
+The indexer (toncenter v3) only supplies candidates. A payment counts only when the same transaction, re-read by
+hash, is **finalized** (`finality = finalized`, included in a masterchain block, not emulated).
 
-- **finalized** (`finality = finalized`, included in a masterchain block, not emulated);
-- without outgoing messages from the wallet (no bounce, nothing returned).
+For **jettons** the gateway reads the transactions of **our** jetton-wallet — the one the pinned master derives for
+the owner. It is pinned in config next to the owner address and checked at startup with `get_wallet_address` on the
+pinned master; a mismatch stops the gateway. The token is never identified by the indexer's `jetton_master` field or
+by metadata. A payment is the jetton-wallet transaction that processed `internal_transfer` (op `0x178d4519`):
 
-For **jettons** additionally:
+- on our pinned jetton-wallet, not bounced;
+- successful (not aborted, compute and action phases succeeded). The standard jetton-wallet code accepts
+  `internal_transfer` only from the master or from a jetton-wallet of the same master, so a forged message fails;
+- amount, sender and memo are read from the `internal_transfer` body.
 
-- the `transfer_notification` (op `0x7362d09c`) comes from **our** jetton-wallet. It is pinned in config next to
-  the owner address and checked at startup with `get_wallet_address` on the pinned master; a mismatch stops the
-  gateway. The token is never identified by the indexer's `jetton_master` field or by metadata;
-- the jetton-wallet transaction that processed `internal_transfer` (op `0x178d4519`) and emitted the notification
-  is finalized and successful, and credited the same amount.
+The owner's `transfer_notification` is not used: the jetton-wallet sends it only when the payer sets
+`forward_ton_amount` above zero (TEP-74), so relying on it would miss payments sent without one.
 
-The owner's notification transaction itself is usually `aborted` (compute phase skipped for lack of gas, because
-wallets forward 1 nanoton with the notification). That is normal: the balance changed in the jetton-wallet
-transaction, which is what is checked.
-
+For **GRAM** the receiving wallet's own transaction must have no outgoing messages (no bounce, nothing returned).
 For **GRAM** the amount is what the credit phase credited, not the message value.
 
 ## Test jetton

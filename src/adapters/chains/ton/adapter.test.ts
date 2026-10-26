@@ -12,7 +12,7 @@ import { networkId } from "../../../domain/network.ts";
 import { type FetchFn, JsonHttpClient } from "../../http/json-client.ts";
 import { TonAdapter } from "./adapter.ts";
 import { friendlyTon, parseTonAddress } from "./address.ts";
-import { parsePlainComment, parseTransferNotification } from "./payload.ts";
+import { parseInternalTransfer, parsePlainComment } from "./payload.ts";
 
 // biome-ignore lint/suspicious/noExplicitAny: recorded fixtures are free-form JSON that tests mutate
 type Json = Record<string, any>;
@@ -47,7 +47,6 @@ const b64ToHex = (b: string) => Buffer.from(b, "base64").toString("hex");
 
 interface Routes {
   tx?: (hash: string) => Json;
-  parent?: () => Json;
   list?: () => Json;
   getMethod?: () => Json;
 }
@@ -61,7 +60,6 @@ function fake(routes: Routes) {
     if (u.pathname === "/api/v3/transactions" && u.searchParams.get("hash"))
       body = routes.tx?.(u.searchParams.get("hash") ?? "") ?? { transactions: [] };
     else if (u.pathname === "/api/v3/transactions") body = routes.list?.() ?? { transactions: [] };
-    else if (u.pathname === "/api/v3/transactionsByMessage") body = routes.parent?.() ?? { transactions: [] };
     else if (u.pathname === "/api/v3/runGetMethod") body = routes.getMethod?.() ?? {};
     return new Response(JSON.stringify(body), { status: 200 });
   };
@@ -85,11 +83,11 @@ function adapter(fetch: FetchFn, jettonWallet = JETTON_WALLET) {
   });
 }
 
-const notif1 = () => structuredClone(fixture("testnet-notification-1-tx.json"));
-const parent1 = () => structuredClone(fixture("testnet-notification-1-jetton-wallet-tx.json"));
+// The jetton-wallet transaction that processed internal_transfer (1.227528 USDT, comment 586935205).
+const credit1 = () => structuredClone(fixture("testnet-jetton-wallet-credit-tx.json"));
 const candidate: TransferCandidate = {
   network: TESTNET,
-  txHash: b64ToHex("abqMy1QtE6azS+MTURibE1gQiK547HIFMlk7+KEed+4="),
+  txHash: b64ToHex("2zQiu6B4z7FomO7A/ZpJjxTD0L03JK3p/Cmk9yB6riE="),
   from: SENDER,
   to: owner,
   amount: Money.of(USDT, 1_227_528n),
@@ -97,12 +95,25 @@ const candidate: TransferCandidate = {
   memo: "586935205",
 };
 
-function verifyJetton(patchTx: (t: Json) => void = () => {}, patchParent: (t: Json) => void = () => {}) {
-  const tx = notif1();
-  patchTx(tx.transactions[0]);
-  const parent = parent1();
-  patchParent(parent.transactions[0]);
-  return adapter(fake({ tx: () => tx, parent: () => parent }).fn).verify(candidate, USDT, [owner]);
+/** internal_transfer body as a sender's jetton wallet builds it. */
+function internalTransfer(amount: bigint, forwardTon: bigint, comment: string | null): string {
+  const b = beginCell()
+    .storeUint(0x178d4519, 32)
+    .storeUint(0, 64)
+    .storeCoins(amount)
+    .storeAddress(null)
+    .storeAddress(null)
+    .storeCoins(forwardTon);
+  if (comment === null) b.storeBit(0);
+  else b.storeBit(1).storeRef(beginCell().storeUint(0, 32).storeStringTail(comment).endCell());
+  return b.endCell().toBoc().toString("base64");
+}
+
+function verifyJetton(patch: (t: Json) => void = () => {}) {
+  const tx = credit1();
+  patch(tx.transactions[0]);
+  const { fn, calls } = fake({ tx: () => tx });
+  return { result: adapter(fn).verify(candidate, USDT, [owner]), calls };
 }
 
 describe("TON addresses and payloads", () => {
@@ -115,36 +126,40 @@ describe("TON addresses and payloads", () => {
     expect(() => parseTonAddress("TF34bV549WecfEHpo6gzMFWYrQXeHnK8Jq")).toThrow();
   });
 
-  it("parses the recorded transfer_notification: amount, sender, comment", () => {
-    const body = notif1().transactions[0].in_msg.message_content.body;
-    expect(parseTransferNotification(body)).toEqual({
+  it("parses the recorded internal_transfer: amount, sender, forward amount, comment", () => {
+    const body = credit1().transactions[0].in_msg.message_content.body;
+    expect(parseInternalTransfer(body)).toEqual({
       queryId: 0n,
       amount: 1_227_528n,
-      sender: SENDER,
+      from: SENDER,
+      forwardTonAmount: 1n,
       comment: "586935205",
     });
   });
 
   it("reads comments inline or by reference, ignores binary comments and malformed bodies", () => {
     const comment = (text: string) => beginCell().storeUint(0, 32).storeStringTail(text).endCell();
-    const notification = (payload: (b: ReturnType<typeof beginCell>) => void) => {
-      const b = beginCell().storeUint(0x7362d09c, 32).storeUint(0, 64).storeCoins(5n).storeAddress(null);
+    const transfer = (payload: (b: ReturnType<typeof beginCell>) => void) => {
+      const b = beginCell()
+        .storeUint(0x178d4519, 32)
+        .storeUint(0, 64)
+        .storeCoins(5n)
+        .storeAddress(null)
+        .storeAddress(null)
+        .storeCoins(0n);
       payload(b);
       return b.endCell().toBoc().toString("base64");
     };
+    expect(parseInternalTransfer(transfer((b) => b.storeBit(1).storeRef(comment("INV2345A"))))?.comment).toBe(
+      "INV2345A",
+    );
     expect(
-      parseTransferNotification(notification((b) => b.storeBit(1).storeRef(comment("INV2345A"))))?.comment,
+      parseInternalTransfer(transfer((b) => b.storeBit(0).storeSlice(comment("INV2345A").beginParse())))
+        ?.comment,
     ).toBe("INV2345A");
-    expect(
-      parseTransferNotification(
-        notification((b) => b.storeBit(0).storeSlice(comment("INV2345A").beginParse())),
-      )?.comment,
-    ).toBe("INV2345A");
-    expect(
-      parseTransferNotification(notification((b) => b.storeBit(0).storeUint(0xff, 8)))?.comment,
-    ).toBeNull();
-    expect(parseTransferNotification(notification((b) => b.storeBit(0)))?.sender).toBeNull();
-    expect(parseTransferNotification("not-a-boc")).toBeNull();
+    expect(parseInternalTransfer(transfer((b) => b.storeBit(0).storeUint(0xff, 8)))?.comment).toBeNull();
+    expect(parseInternalTransfer(transfer((b) => b.storeBit(0)))?.from).toBeNull();
+    expect(parseInternalTransfer("not-a-boc")).toBeNull();
     expect(parsePlainComment(comment("hello").toBoc().toString("base64"))).toBe("hello");
     expect(parsePlainComment(null)).toBeNull();
   });
@@ -165,19 +180,38 @@ describe("jetton-wallet binding", () => {
 });
 
 describe("fetchIncoming (indexer candidates)", () => {
-  it("jetton: only notifications from our jetton-wallet, with amount and memo hints", async () => {
-    const { fn, calls } = fake({ list: () => fixture("testnet-owner-transactions.json") });
+  it("jetton: internal_transfer on our jetton-wallet, with amount, sender and memo hints", async () => {
+    const { fn, calls } = fake({ list: () => fixture("testnet-jetton-wallet-transactions.json") });
     const res = await adapter(fn).fetchIncoming(USDT, [owner], null, 50);
     expect(Object.fromEntries(calls[0]?.searchParams ?? [])).toMatchObject({
-      account: OWNER,
+      account: JETTON_WALLET,
       sort: "asc",
       start_utime: "1792965900",
     });
-    expect(res.candidates.map((c) => [c.amount.units, c.memo, c.from])).toEqual([
-      [1_227_528n, "586935205", SENDER],
-      [expect.any(BigInt), expect.any(String), SENDER],
+    expect(res.candidates.map((c) => [c.amount.units, c.memo, c.from, c.to.value])).toEqual([
+      [1_227_528n, "586935205", SENDER, OWNER],
+      [expect.any(BigInt), expect.any(String), SENDER, OWNER],
     ]);
-    expect(JSON.parse(res.next)).toEqual({ [OWNER]: 1792966158 });
+    expect(res.candidates[0]?.txHash).toBe(candidate.txHash);
+    expect(JSON.parse(res.next)).toEqual({ [JETTON_WALLET]: 1792966132 });
+  });
+
+  it("jetton: a payment sent with forward_ton_amount = 0 (no notification to the owner) is still found", async () => {
+    const list = structuredClone(fixture("testnet-jetton-wallet-transactions.json"));
+    const t = list.transactions[0];
+    t.in_msg.message_content.body = internalTransfer(6_100_000n, 0n, null);
+    t.out_msgs = t.out_msgs.filter((m: Json) => m.opcode !== "0x7362d09c");
+    const res = await adapter(fake({ list: () => list }).fn).fetchIncoming(USDT, [owner], null, 50);
+    expect(res.candidates[0]).toMatchObject({ memo: null, to: owner });
+    expect(res.candidates[0]?.amount.units).toBe(6_100_000n);
+  });
+
+  it("jetton: resumes from a 0.1.0 owner cursor instead of rescanning from startFrom", async () => {
+    const { fn, calls } = fake({ list: () => ({ transactions: [] }) });
+    const res = await adapter(fn).fetchIncoming(USDT, [owner], JSON.stringify({ [OWNER]: 1792970000 }), 50);
+    expect(calls[0]?.searchParams.get("account")).toBe(JETTON_WALLET);
+    expect(calls[0]?.searchParams.get("start_utime")).toBe(String(1792970000 - 600));
+    expect(JSON.parse(res.next)).toEqual({});
   });
 
   it("native: plain transfers with their exact (dust) amounts; jetton notifications are not GRAM", async () => {
@@ -186,115 +220,122 @@ describe("fetchIncoming (indexer candidates)", () => {
     expect(res.candidates.map((c) => c.amount.units)).toEqual([6035n, 7511n, 7511n]);
   });
 
-  it("a forged notification from a foreign jetton-wallet is not even a candidate", async () => {
-    const list = structuredClone(fixture("testnet-owner-transactions.json"));
-    for (const t of list.transactions)
-      if (t.in_msg?.opcode === "0x7362d09c") t.in_msg.source = `0:${"cd".repeat(32)}`;
+  it("other messages to the jetton-wallet (outgoing transfer, excesses) are not candidates", async () => {
+    const list = structuredClone(fixture("testnet-jetton-wallet-transactions.json"));
+    list.transactions[0].in_msg.opcode = "0x0f8a7ea5";
+    list.transactions[1].in_msg.opcode = "0xd53276db";
     const res = await adapter(fake({ list: () => list }).fn).fetchIncoming(USDT, [owner], null, 50);
     expect(res.candidates).toEqual([]);
+  });
+
+  it("without a pinned jetton-wallet the owner is not scanned for the jetton", async () => {
+    const { fn, calls } = fake({ list: () => fixture("testnet-jetton-wallet-transactions.json") });
+    const a = new TonAdapter({
+      network: TESTNET,
+      client: new JsonHttpClient({
+        baseUrl: "https://x",
+        timeoutMs: 1_000,
+        maxResponseBytes: 1_000_000,
+        fetch: fn,
+      }),
+      startFrom: new Date(0),
+      overlapMs: 0,
+      jettonWallets: new Map(),
+    });
+    expect((await a.fetchIncoming(USDT, [owner], null, 50)).candidates).toEqual([]);
+    expect(calls).toEqual([]);
   });
 
   it("re-reads an overlap window from the cursor (duplicates are dropped by the database)", async () => {
     const { fn, calls } = fake({ list: () => ({ transactions: [] }) });
     const a = adapter(fn);
-    await a.fetchIncoming(USDT, [owner], JSON.stringify({ [OWNER]: 1792970000 }), 50);
+    await a.fetchIncoming(USDT, [owner], JSON.stringify({ [JETTON_WALLET]: 1792970000 }), 50);
     expect(calls[0]?.searchParams.get("start_utime")).toBe(String(1792970000 - 600));
-    await a.fetchIncoming(USDT, [owner], JSON.stringify({ [OWNER]: 1792966000 }), 50);
+    await a.fetchIncoming(USDT, [owner], JSON.stringify({ [JETTON_WALLET]: 1792966000 }), 50);
     expect(calls[1]?.searchParams.get("start_utime")).toBe("1792965900"); // never before startFrom
   });
 });
 
 describe("verify jetton (finalized truth)", () => {
-  it("final: recorded payment — amount, sender, memo, lt as index, block time", async () => {
-    const r = await verifyJetton();
+  it("final: recorded payment — amount, sender, memo, lt as index, block time; one query by hash", async () => {
+    const { result, calls } = verifyJetton();
+    const r = await result;
     expect(r.status).toBe("final");
     if (r.status !== "final") return;
     expect(r.transfers).toHaveLength(1);
     const t = r.transfers[0];
-    expect(t?.ref.index).toBe(105448048000011n);
+    expect(t?.ref.index).toBe(105448048000009n);
     expect(t?.amount.units).toBe(1_227_528n);
     expect(t?.from).toBe(SENDER);
+    expect(t?.to).toEqual(owner);
     expect(t?.memo).toBe("586935205");
     expect(t?.at.getTime()).toBe(1792965972 * 1000);
+    expect(calls.map((c) => c.pathname)).toEqual(["/api/v3/transactions"]);
   });
 
-  it("the usual 'aborted' notification (no gas) is accepted; success is checked on the jetton-wallet", async () => {
-    expect(notif1().transactions[0].description.aborted).toBe(true);
-    expect((await verifyJetton()).status).toBe("final");
+  it("forward_ton_amount = 0: credited without any notification to the owner", async () => {
+    const r = await verifyJetton((t) => {
+      t.in_msg.message_content.body = internalTransfer(6_100_000n, 0n, null);
+      t.out_msgs = t.out_msgs.filter((m: Json) => m.opcode !== "0x7362d09c");
+    }).result;
+    expect(r.status === "final" && r.transfers.map((x) => [x.amount.units, x.memo])).toEqual([
+      [6_100_000n, null],
+    ]);
   });
 
   it("non-final or emulated: pending, never credited", async () => {
-    expect((await verifyJetton((t) => (t.finality = "confirmed"))).status).toBe("pending");
-    expect((await verifyJetton((t) => (t.emulated = true))).status).toBe("pending");
+    expect((await verifyJetton((t) => (t.finality = "confirmed")).result).status).toBe("pending");
+    expect((await verifyJetton((t) => (t.emulated = true)).result).status).toBe("pending");
+    expect((await verifyJetton((t) => (t.mc_block_seqno = null)).result).status).toBe("pending");
+  });
+
+  it("fake jetton-wallet / fake master: a transaction on any other jetton-wallet is rejected", async () => {
+    const r = await verifyJetton((t) => (t.account = `0:${"CD".repeat(32)}`)).result;
+    expect(r).toEqual({ status: "rejected", reason: "transaction is not on a pinned jetton-wallet" });
+  });
+
+  it("forged internal_transfer: the jetton-wallet code refuses it, the failed transaction is rejected", async () => {
+    for (const patch of [
+      (t: Json) => (t.description.aborted = true),
+      (t: Json) => (t.description.compute_ph.success = false),
+      (t: Json) => (t.description.action.success = false),
+      (t: Json) => (t.description.action = null),
+    ]) {
+      expect(await verifyJetton(patch).result).toEqual({
+        status: "rejected",
+        reason: "jetton-wallet transaction failed",
+      });
+    }
+  });
+
+  it("the amount is read from the internal_transfer the jetton-wallet processed", async () => {
+    const r = await verifyJetton((t) => (t.in_msg.message_content.body = internalTransfer(7n, 1n, "X")))
+      .result;
+    expect(r.status === "final" && r.transfers[0]?.amount.units).toBe(7n);
     expect(
-      (
-        await verifyJetton(
-          () => {},
-          (p) => (p.finality = "pending"),
-        )
-      ).status,
-    ).toBe("pending");
-  });
-
-  it("fake jetton-wallet / fake master: a notification from another jetton-wallet is no transfer of the asset", async () => {
-    const r = await verifyJetton((t) => (t.in_msg.source = `0:${"cd".repeat(32)}`));
-    expect(r).toEqual({ status: "final", transfers: [] });
-  });
-
-  it("failed jetton-wallet transaction is rejected", async () => {
-    expect(
-      (
-        await verifyJetton(
-          () => {},
-          (p) => (p.description.aborted = true),
-        )
-      ).status,
-    ).toBe("rejected");
-    expect(
-      (
-        await verifyJetton(
-          () => {},
-          (p) => (p.description.action.success = false),
-        )
-      ).status,
-    ).toBe("rejected");
-  });
-
-  it("notification amount must equal the amount credited by internal_transfer", async () => {
-    const forged = beginCell()
-      .storeUint(0x7362d09c, 32)
-      .storeUint(0, 64)
-      .storeCoins(999_000_000n)
-      .storeAddress(null)
-      .storeBit(0)
-      .endCell()
-      .toBoc()
-      .toString("base64");
-    const r = await verifyJetton((t) => (t.in_msg.message_content.body = forged));
-    expect(r).toEqual({ status: "rejected", reason: "notification amount differs from credited amount" });
-  });
-
-  it("bounce: outgoing messages from the wallet reject the payment", async () => {
-    const r = await verifyJetton((t) =>
-      t.out_msgs.push({ ...t.in_msg, source: OWNER, destination: JETTON_WALLET }),
-    );
-    expect(r.status).toBe("rejected");
-  });
-
-  it("wrong opcode or another wallet is not our transfer", async () => {
-    expect(await verifyJetton((t) => (t.in_msg.opcode = "0x00000000"))).toEqual({
-      status: "final",
-      transfers: [],
+      await verifyJetton((t) => (t.in_msg.message_content.body = internalTransfer(0n, 1n, null))).result,
+    ).toEqual({ status: "final", transfers: [] });
+    expect(await verifyJetton((t) => (t.in_msg.message_content.body = "not-a-boc")).result).toEqual({
+      status: "rejected",
+      reason: "malformed internal_transfer",
     });
-    expect((await verifyJetton((t) => (t.account = GRAM_OWNER))).status).toBe("rejected");
   });
 
-  it("a parent transaction that is not indexed yet keeps the candidate pending", async () => {
-    const r = await adapter(fake({ tx: () => notif1(), parent: () => ({ transactions: [] }) }).fn).verify(
-      candidate,
-      USDT,
-      [owner],
-    );
+  it("bounced inbound message is rejected", async () => {
+    expect((await verifyJetton((t) => (t.in_msg.bounced = true)).result).status).toBe("rejected");
+  });
+
+  it("other messages to the jetton-wallet credit nothing", async () => {
+    for (const op of ["0x0f8a7ea5", "0xd53276db", "0x7362d09c", "0x00000000"]) {
+      expect(await verifyJetton((t) => (t.in_msg.opcode = op)).result).toEqual({
+        status: "final",
+        transfers: [],
+      });
+    }
+  });
+
+  it("a transaction that is not indexed yet keeps the candidate pending", async () => {
+    const r = await adapter(fake({ tx: () => ({ transactions: [] }) }).fn).verify(candidate, USDT, [owner]);
     expect(r.status).toBe("pending");
   });
 });

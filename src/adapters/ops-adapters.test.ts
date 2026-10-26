@@ -123,7 +123,7 @@ describe("second sources (recorded)", () => {
     ]);
   });
 
-  it("tonapi: notifications from our jetton-wallet with amount and memo; plain GRAM transfers", async () => {
+  it("tonapi: internal_transfer on our jetton-wallet with amount and memo; plain GRAM transfers", async () => {
     const TESTNET = networkId("ton:testnet");
     const owner = chainAddress(TESTNET, "0:326bcaf1f252ca9e3458fe73348566afe805f7c5b40339277260bcb2fc8762b0");
     const jw = chainAddress(TESTNET, "0:58594ddbf5aae9eff2baf115da69590be38e07e89e79768915fda3089c190f6b");
@@ -145,16 +145,21 @@ describe("second sources (recorded)", () => {
     });
     const fx = read("./chains/ton/fixtures/testnet-tonapi-transactions.json");
     const receiving = [{ address: owner, status: "active" as const, tokenAccount: jw }];
-    const jettons = await new TonapiSource(TESTNET, client(fx)).incoming(
+    // Jettons: internal_transfer on OUR jetton-wallet (found even without a notification to the owner).
+    const calls: URL[] = [];
+    const jwFx = read("./chains/ton/fixtures/testnet-tonapi-jetton-wallet-transactions.json");
+    const jettons = await new TonapiSource(TESTNET, client(jwFx, calls)).incoming(
       usdt,
       owner,
       receiving,
       new Date(1792965900 * 1000),
     );
-    expect(jettons[0]).toMatchObject({ memo: "586935205" });
-    expect(jettons[0]?.amount.units).toBe(1_227_528n);
-    expect(jettons[0]?.txHash).toBe("69ba8ccb542d13a6b34be31351189b13581088ae78ec720532593bf8a11e77ee");
-    expect(jettons.length).toBe(4);
+    expect(calls[0]?.pathname).toBe(`/v2/blockchain/accounts/${jw.value}/transactions`);
+    expect(jettons[0]).toMatchObject({ memo: "2473565594", to: owner });
+    expect(jettons[0]?.amount.units).toBe(1_009_774n);
+    expect(jettons[0]?.from).toBe("0:06dceffaa6fac2a300f40b1afb7814351ab8e13241b5e99f63aa4c2d6f5985f4");
+    expect(jettons[0]?.txHash).toBe("9bbb6e27fb677d746f0df613b9a86a41ae94874498ce831badb4758aefd8765e");
+    expect(jettons.length).toBe(8); // outgoing jetton_transfer messages are skipped
     const native = await new TonapiSource(TESTNET, client(fx)).incoming(
       gram,
       owner,
