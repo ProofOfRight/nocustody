@@ -12,15 +12,18 @@ import type { NetworkId } from "../../../domain/network.ts";
 import type { JsonHttpClient } from "../../http/json-client.ts";
 import { canonicalTon } from "./address.ts";
 
+/** Integers tonapi sends as JSON numbers; above 2^53 the client parses them as bigint (never rounded). */
+const integer = z.union([z.number().int(), z.bigint()]);
+
 const tx = z.object({
   hash: z.string().regex(/^[0-9a-f]{64}$/),
-  lt: z.number().int(),
+  lt: integer,
   utime: z.number().int(),
   in_msg: z
     .object({
       msg_type: z.string(),
       source: z.object({ address: z.string() }).nullable().optional(),
-      value: z.number().int().nonnegative().optional(),
+      value: integer.optional(),
       op_code: z.string().optional(),
       bounced: z.boolean().optional(),
       decoded_body: z.unknown().optional(),
@@ -69,7 +72,7 @@ export class TonapiSource implements SecondarySource {
     const fromUtime = Math.floor(from.getTime() / 1000);
     // Newest first, paging backwards with before_lt, until the window start is crossed. tonapi has no upper time
     // bound, so transactions after `until` count against the page budget too.
-    let beforeLt: number | null = null;
+    let beforeLt: number | bigint | null = null;
     let complete = false;
     for (let i = 0; i < this.#maxPages; i++) {
       const query: Record<string, string> = { limit: String(this.#pageSize), sort_order: "desc" };
@@ -112,12 +115,13 @@ export class TonapiSource implements SecondarySource {
     }
     // plain transfer: no op, a text comment, or an encrypted comment (0x2167da4b)
     if (m.op_code !== undefined && m.op_code !== "0x00000000" && m.op_code !== "0x2167da4b") return null;
-    if (!m.value || m.value <= 0) return null;
+    const value = BigInt(m.value ?? 0);
+    if (value <= 0n) return null;
     const text = (m.decoded_body as { text?: unknown } | undefined)?.text;
     return {
       ...base,
       from: canonicalTon(m.source.address),
-      amount: Money.of(asset, BigInt(m.value)),
+      amount: Money.of(asset, value),
       memo: typeof text === "string" ? text : null,
     };
   }

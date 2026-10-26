@@ -2,6 +2,7 @@
 // Ops adapters on recorded responses: alert sinks, USDT/USD sources, second sources (Tronscan, tonapi), AML blocklist.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import type { Alert } from "../application/ports.ts";
 import { defineAsset } from "../domain/asset.ts";
 import { chainAddress } from "../domain/chain-address.ts";
@@ -223,6 +224,53 @@ describe("second sources (recorded)", () => {
     );
     expect(busy).toHaveLength(10);
     expect(truncated.complete).toBe(false);
+  });
+});
+
+describe("JSON numbers from providers", () => {
+  const raw = (text: string) =>
+    new JsonHttpClient({
+      baseUrl: "https://example.org",
+      timeoutMs: 1_000,
+      maxResponseBytes: 1_000_000,
+      fetch: async () => new Response(text, { status: 200 }),
+      sleep: async () => {},
+    });
+
+  it("an integer beyond 2^53 is exact as bigint, and a schema expecting a number rejects it", async () => {
+    const big = '{"a": 9007199254740993, "b": 9007199254740991, "c": 1.5, "d": 1e21}';
+    expect(await raw(big).get("/", {}, z.unknown())).toEqual({
+      a: 9007199254740993n,
+      b: 9007199254740991,
+      c: 1.5,
+      d: 1e21,
+    });
+    await expect(raw(big).get("/", {}, z.object({ a: z.number() }))).rejects.toThrow("unexpected response");
+  });
+
+  it("tonapi: a GRAM value above 2^53 nanoton is credited exactly, not rounded", async () => {
+    const TESTNET = networkId("ton:testnet");
+    const owner = chainAddress(TESTNET, "0:326bcaf1f252ca9e3458fe73348566afe805f7c5b40339277260bcb2fc8762b0");
+    const gram = defineAsset({
+      id: "gram",
+      network: TESTNET,
+      kind: "native",
+      contract: null,
+      decimals: 9,
+      symbol: "GRAM",
+    });
+    const text = readFileSync(
+      new URL("./chains/ton/fixtures/testnet-tonapi-transactions.json", import.meta.url),
+      "utf8",
+    ).replace('"value": 6035', '"value": 9007199254740993');
+    const { transfers } = await new TonapiSource(TESTNET, raw(text)).incoming(
+      gram,
+      owner,
+      [{ address: owner, status: "active", tokenAccount: null }],
+      new Date(1792965900 * 1000),
+      new Date(),
+    );
+    expect(transfers[0]?.amount.units).toBe(9_007_199_254_740_993n);
   });
 });
 
