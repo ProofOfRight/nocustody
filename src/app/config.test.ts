@@ -119,8 +119,91 @@ describe("config", () => {
       withAsset({ decimals: 18 }),
     ];
     for (const v of variants) expect(parseConfig(v, validators).pinnedChecksum).not.toBe(sum);
-    // policies are not pinned: changing the TTL keeps the checksum
-    expect(parseConfig(withAsset({ ttl: "15m" }), validators).pinnedChecksum).toBe(sum);
+  });
+
+  it("pins what decides money (ADR-0031): policies, providers, pricing, AML, depeg and the webhook URL; not operational knobs", () => {
+    const sum = parseConfig(base(), validators).pinnedChecksum;
+    const tron = {
+      network: "tron:mainnet",
+      apiUrl: "https://api.trongrid.io",
+      startFrom: "2026-10-26T00:00:00Z",
+    };
+    const changesIt: Record<string, unknown>[] = [
+      withAsset({ ttl: "15m" }),
+      withAsset({ grace: "10m" }),
+      withAsset({
+        amounts: { step: "0.01", maxSlots: 99, dustThreshold: "0.1", underpaymentToleranceBps: 50 },
+      }),
+      withAsset({ amounts: { step: "0.02", maxSlots: 99, dustThreshold: "0.1" } }),
+      withAsset({ amlThreshold: "500" }),
+      withAsset({ strategy: "memo" }),
+      withAsset({ priceSymbol: "USDC" }),
+      { ...base(), tron },
+      { ...base(), pricing: { ...(base().pricing as object), currencies: ["USD", "JPY", "EUR"] } },
+      { ...base(), pricing: { ...(base().pricing as object), markupBps: { USD: 100 } } },
+      { ...base(), ops: { aml: { provider: "blocklist", blocklistFile: "/etc/nocustody/aml.txt" } } },
+      { ...base(), ops: { depeg: { maxDeviationBps: 300 } } },
+      { ...base(), webhooks: { url: "https://shop.example/hook", secretEnv: "WH" } },
+    ];
+    for (const c of changesIt)
+      expect(parseConfig(c, validators).pinnedChecksum, JSON.stringify(c)).not.toBe(sum);
+    const withTron = parseConfig({ ...base(), tron }, validators).pinnedChecksum;
+    expect(
+      parseConfig({ ...base(), tron: { ...tron, apiUrl: "https://nile.trongrid.io" } }, validators)
+        .pinnedChecksum,
+    ).not.toBe(withTron);
+    expect(
+      parseConfig({ ...base(), tron: { ...tron, apiKeyEnv: "OTHER_KEY" } }, validators).pinnedChecksum,
+    ).not.toBe(withTron);
+    // the same money in another spelling is the same pin; operational knobs change nothing
+    expect(
+      parseConfig(withAsset({ amounts: { step: "0.010", maxSlots: 99, dustThreshold: "0.10" } }), validators)
+        .pinnedChecksum,
+    ).toBe(sum);
+    const sameMoney: Record<string, unknown>[] = [
+      { ...base(), api: { port: 9000, rateLimitPerMinute: 5 } },
+      { ...base(), ops: { alerts: { cooldown: "1h" }, candidateMaxAge: "48h", maxDispatcherLag: "10m" } },
+      { ...base(), ops: { retention: { deliveredWebhooks: "30d" } } },
+      { ...base(), ops: { reconcile: { tron: { apiUrl: "https://apilist.tronscanapi.com" } } } },
+    ];
+    for (const c of sameMoney) expect(parseConfig(c, validators).pinnedChecksum, JSON.stringify(c)).toBe(sum);
+    expect(
+      parseConfig(
+        { ...base(), tron: { ...tron, pollInterval: "30s", timeout: "20s", overlap: "1h" } },
+        validators,
+      ).pinnedChecksum,
+    ).toBe(withTron);
+  });
+
+  it("a provider key variable must not be another secret", () => {
+    const tron = {
+      network: "tron:mainnet",
+      apiUrl: "https://api.trongrid.io",
+      startFrom: "2026-10-26T00:00:00Z",
+    };
+    expect(() =>
+      parseConfig({ ...base(), tron: { ...tron, apiKeyEnv: "DATABASE_URL" } }, validators),
+    ).toThrow(/database.urlEnv/);
+    expect(() =>
+      parseConfig({ ...base(), tron: { ...tron, apiKeyEnv: "POSTGRES_PASSWORD" } }, validators),
+    ).toThrow(/database variable/);
+    expect(() =>
+      parseConfig({ ...base(), tron: { ...tron, apiKeyEnv: "NOCUSTODY_PINNED_SHA256" } }, validators),
+    ).toThrow(/pinned/);
+    expect(() =>
+      parseConfig(
+        {
+          ...base(),
+          tron: { ...tron, apiKeyEnv: "WH" },
+          webhooks: { url: "https://shop.example/h", secretEnv: "WH" },
+        },
+        validators,
+      ),
+    ).toThrow(/webhooks.secretEnv/);
+    expect(
+      parseConfig({ ...base(), tron: { ...tron, apiKeyEnv: "TRONGRID_API_KEY" } }, validators).raw.tron
+        ?.apiKeyEnv,
+    ).toBe("TRONGRID_API_KEY");
   });
 
   it("refuses to start without the separately supplied checksum or on mismatch", () => {

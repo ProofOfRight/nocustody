@@ -336,6 +336,7 @@ export function parseConfig(json: unknown, validators: AddressValidators): Confi
   for (const c of raw.pricing.currencies) {
     if (!isIsoCurrency(c)) throw new ConfigError(`pricing.currencies: ${c} is not an ISO 4217 currency`);
   }
+  assertKeyEnvs(raw);
   // The depeg guard is read by CreateInvoice under the asset's priceSymbol; a symbol no asset uses guards nothing.
   if (raw.ops.depeg && !assets.some((a) => a.priceSymbol === raw.ops.depeg?.symbol)) {
     throw new ConfigError(`ops.depeg.symbol ${raw.ops.depeg.symbol} is not the priceSymbol of any asset`);
@@ -354,28 +355,124 @@ export function parseConfig(json: unknown, validators: AddressValidators): Confi
       setAt: new Date(r.setAt),
       maxAgeMs: parseDuration(r.maxAge),
     })),
-    pinnedChecksum: pinnedChecksum(assets),
+    pinnedChecksum: pinnedChecksum(raw, assets),
   };
 }
 
-/**
- * Canonical form of everything that decides where money goes and what counts as the asset:
- * per asset (sorted by id) its network, kind, contract and decimals, then its addresses (sorted) with status.
- */
-export function pinnedChecksum(assets: readonly AssetSettings[]): string {
-  const lines: string[] = [];
-  for (const s of [...assets].sort((a, b) => (a.asset.id < b.asset.id ? -1 : 1))) {
-    const a = s.asset;
-    lines.push(["asset", a.id, a.network, a.kind, a.contract ?? "-", String(a.decimals)].join("\t"));
-    for (const x of [...s.addresses].sort((p, q) => (p.address.value < q.address.value ? -1 : 1))) {
-      const fields = ["address", a.id, x.address.value, x.status];
-      if (x.tokenAccount) fields.push(x.tokenAccount.value);
-      lines.push(fields.join("\t"));
-    }
+/** Deterministic JSON: object keys sorted at every level, so key order in the file does not change the checksum. */
+function canonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
+  if (v !== null && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`)
+      .join(",")}}`;
   }
+  return JSON.stringify(v) ?? "null";
+}
+
+/**
+ * Canonical form of everything that decides where money goes, what counts as the asset and what counts as paid
+ * (docs/adr/0031-pinned-config-scope.md): per asset its identity, addresses with status and jetton-wallet, amount
+ * policy, TTL, grace, AML threshold, strategy and price symbol; the provider endpoints that answer the finality
+ * queries (network, URL, key variable); pricing (currencies, markup, manual rates); the AML provider; the depeg
+ * guard; the webhook URL and its network policy. Operational knobs (timeouts, intervals, API bind and limits,
+ * alerts, retention, reconciliation sources) are not pinned. Amounts are compared in units, so "0.01" and
+ * "0.010" are the same pin.
+ */
+export function pinnedChecksum(raw: RawConfig, assets: readonly AssetSettings[]): string {
+  const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : 1);
+  const pinned = {
+    assets: assets
+      .map((s) => ({
+        id: s.asset.id,
+        network: s.asset.network,
+        kind: s.asset.kind,
+        contract: s.asset.contract,
+        decimals: s.asset.decimals,
+        priceSymbol: s.priceSymbol,
+        strategy: s.strategy,
+        addresses: s.addresses
+          .map((x) => ({
+            address: x.address.value,
+            status: x.status,
+            jettonWallet: x.tokenAccount?.value ?? null,
+          }))
+          .sort((p, q) => (p.address < q.address ? -1 : 1)),
+        amounts: {
+          stepUnits: s.uniqueAmount.stepUnits.toString(),
+          maxSlots: s.uniqueAmount.maxSlots,
+          dustThresholdUnits: s.amountPolicy.dustThresholdUnits.toString(),
+          underpaymentToleranceUnits: s.amountPolicy.underpaymentToleranceUnits.toString(),
+          underpaymentToleranceBps: s.amountPolicy.underpaymentToleranceBps,
+          acceptLatePayments: s.amountPolicy.acceptLatePayments,
+        },
+        ttlMs: s.ttlMs,
+        graceMs: s.graceMs,
+        amlThresholdUnits: s.amlThresholdUnits.toString(),
+      }))
+      .sort(byId),
+    providers: {
+      tron: raw.tron
+        ? { network: raw.tron.network, apiUrl: raw.tron.apiUrl, apiKeyEnv: raw.tron.apiKeyEnv ?? null }
+        : null,
+      ton: raw.ton
+        ? { network: raw.ton.network, apiUrl: raw.ton.apiUrl, apiKeyEnv: raw.ton.apiKeyEnv ?? null }
+        : null,
+    },
+    pricing: {
+      currencies: [...raw.pricing.currencies].sort(),
+      markupBps: raw.pricing.markupBps,
+      manualRates: raw.pricing.manualRates.map((r) => ({ ...r, setAt: new Date(r.setAt).toISOString() })),
+    },
+    aml: { provider: raw.ops.aml.provider, blocklistFile: raw.ops.aml.blocklistFile ?? null },
+    depeg: raw.ops.depeg
+      ? {
+          symbol: raw.ops.depeg.symbol,
+          maxDeviationBps: raw.ops.depeg.maxDeviationBps,
+          sources: raw.ops.depeg.sources,
+        }
+      : null,
+    webhooks: raw.webhooks
+      ? {
+          url: raw.webhooks.url,
+          allowPrivateNetworks: raw.webhooks.allowPrivateNetworks,
+          allowHttp: raw.webhooks.allowHttp,
+        }
+      : null,
+  };
   return createHash("sha256")
-    .update(`nocustody-pinned-v1\n${lines.join("\n")}\n`)
+    .update(`nocustody-pinned-v2\n${canonical(pinned)}\n`)
     .digest("hex");
+}
+
+/**
+ * A provider key variable must not name another secret: `apiKeyEnv: "POSTGRES_PASSWORD"` would send the database
+ * password to the provider as its API key. Checked for every variable a provider or sink reads.
+ */
+function assertKeyEnvs(raw: RawConfig): void {
+  const secrets = new Map<string, string>([
+    [raw.database.urlEnv, "database.urlEnv"],
+    ["NOCUSTODY_PINNED_SHA256", "the pinned checksum"],
+  ]);
+  if (raw.webhooks) secrets.set(raw.webhooks.secretEnv, "webhooks.secretEnv");
+  const keyEnvs: Array<[string | undefined, string]> = [
+    [raw.tron?.apiKeyEnv, "tron.apiKeyEnv"],
+    [raw.ton?.apiKeyEnv, "ton.apiKeyEnv"],
+    [raw.ops.reconcile?.tron?.apiKeyEnv, "ops.reconcile.tron.apiKeyEnv"],
+    [raw.ops.reconcile?.ton?.apiKeyEnv, "ops.reconcile.ton.apiKeyEnv"],
+    [raw.ops.alerts.telegram?.botTokenEnv, "ops.alerts.telegram.botTokenEnv"],
+  ];
+  for (const [env, field] of keyEnvs) {
+    if (!env) continue;
+    const other = secrets.get(env);
+    if (other) throw new ConfigError(`${field}: ${env} is ${other}; a provider key must be its own variable`);
+    if (/^(POSTGRES_|PG|DATABASE_)/.test(env))
+      throw new ConfigError(
+        `${field}: ${env} looks like a database variable; a provider key must be its own variable`,
+      );
+  }
 }
 
 export function loadConfigFile(path: string, validators: AddressValidators): Config {
@@ -397,7 +494,7 @@ export function assertPinned(config: Config, expected: string | undefined): void
   }
   if (expected !== config.pinnedChecksum) {
     throw new ConfigError(
-      "receiving addresses or asset contracts differ from the pinned checksum (NOCUSTODY_PINNED_SHA256); refusing to start",
+      "the pinned parts of the config (addresses, contracts, providers, amount policies, pricing, AML, depeg, webhook URL) differ from NOCUSTODY_PINNED_SHA256; refusing to start. Review the change, then run config:hash and update the variable",
     );
   }
 }

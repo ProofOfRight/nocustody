@@ -37,3 +37,4 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0028](0028-container-image.md) | 2026-10-26 | Production container image from scratch with the official Node binary | accepted |
 | [0029](0029-release-provenance.md) | 2026-10-26 | Releases: tag-triggered workflow, GitHub artifact attestations, own SBOM | accepted |
 | [0030](0030-early-payment-tolerance.md) | 2026-10-26 | Early-payment tolerance of 5 seconds, separate from the slot margin | accepted |
+| [0031](0031-pinned-config-scope.md) | 2026-10-26 | The pinned checksum covers everything that decides money, not only addresses | accepted |
