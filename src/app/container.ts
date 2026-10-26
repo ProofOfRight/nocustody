@@ -163,7 +163,16 @@ export function buildContainer(o: ContainerOptions) {
     }
     workers.push({
       adapter,
-      ingest: new IngestTransfers({ adapter, catalog, strategies, uow, clock, pageSize: 200, maxPages: 5 }),
+      ingest: new IngestTransfers({
+        adapter,
+        catalog,
+        strategies,
+        uow,
+        clock,
+        pageSize: 200,
+        maxPages: 5,
+        alerts,
+      }),
       verify: new VerifyTransfers({ adapter, catalog, uow, clock, batchSize: 100, maxPendingMs, alerts }),
       settle: new SettlePayments({
         network: adapter.network,
@@ -218,7 +227,16 @@ export function buildContainer(o: ContainerOptions) {
     startupChecks.push(() => adapter.checkJettonWallets(tonAssets.map((s) => s.asset)));
     workers.push({
       adapter,
-      ingest: new IngestTransfers({ adapter, catalog, strategies, uow, clock, pageSize: 100, maxPages: 5 }),
+      ingest: new IngestTransfers({
+        adapter,
+        catalog,
+        strategies,
+        uow,
+        clock,
+        pageSize: 100,
+        maxPages: 5,
+        alerts,
+      }),
       verify: new VerifyTransfers({ adapter, catalog, uow, clock, batchSize: 50, maxPendingMs, alerts }),
       settle: new SettlePayments({
         network,

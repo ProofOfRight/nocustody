@@ -142,6 +142,31 @@ describe("fetchIncoming (indexer candidates)", () => {
     expect(calls[2]?.url.searchParams.get("min_timestamp")).toBe(String(1792970475000 - 600_000));
   });
 
+  it("a burst of transfers larger than the page budget cannot freeze the cursor", async () => {
+    const S = 1792970475000;
+    const h = fixture("nile-trc20-history.json") as { data: Array<Record<string, unknown>> };
+    const row = h.data[0] as Record<string, unknown>;
+    let n = 0;
+    const { fn, calls } = fakeFetch(() => ({
+      json: {
+        success: true,
+        data: [0, 1].map(() => ({
+          ...row,
+          transaction_id: String(n++).padStart(64, "0"),
+          block_timestamp: S - 1000,
+        })),
+        meta: { fingerprint: `FP${n}` }, // there is always another page
+      },
+    }));
+    const a = adapter(fn);
+    const first = await a.fetchIncoming(USDT, [ADDR], JSON.stringify({ [ADDR.value]: S }), 2);
+    expect(first.exhausted).toBe(true);
+    expect(calls).toHaveLength(10);
+    expect(JSON.parse(first.next)).toEqual({ [ADDR.value]: S, [`${ADDR.value}#tight`]: 1 });
+    await a.fetchIncoming(USDT, [ADDR], first.next, 2);
+    expect(calls[10]?.url.searchParams.get("min_timestamp")).toBe(String(S)); // tight: no overlap
+  });
+
   it("drops rows of other tokens and de-duplicates rows of one transaction", async () => {
     const h = fixture("nile-trc20-history.json") as { data: Array<Record<string, unknown>> };
     const row = h.data[0] as Record<string, unknown>;

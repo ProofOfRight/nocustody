@@ -24,7 +24,7 @@ import { Money } from "../../../domain/money.ts";
 import type { NetworkId } from "../../../domain/network.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
 import type { JsonHttpClient } from "../../http/json-client.ts";
-import { parseTimeCursor, type TimeCursor } from "../cursor.ts";
+import { pageOffset, parseTimeCursor, recordProgress, type TimeCursor, windowStart } from "../cursor.ts";
 import { canonicalTon, friendlyTon, parseTonAddress } from "./address.ts";
 import {
   OP_ENCRYPTED_COMMENT,
@@ -144,6 +144,8 @@ export class TonAdapter implements ChainAdapter {
     const next: Cursor = { ...state };
     const out: TransferCandidate[] = [];
     const pageSize = Math.min(256, Math.max(1, limit));
+    const maxPages = this.#o.maxPagesPerAddress ?? 10;
+    let exhausted = false;
     for (const owner of addresses) {
       const token = asset.kind === "token";
       const account = token ? this.#jettonWallet(asset, owner.value) : owner.value;
@@ -151,11 +153,17 @@ export class TonAdapter implements ChainAdapter {
       // 0.1.0 scanned jetton assets on the owner's wallet: resume from that cursor rather than from startFrom.
       const seen = state[account] ?? (token ? state[owner.value] : undefined) ?? 0;
       if (token) delete next[owner.value];
-      const fromUtime = Math.max(
+      const fromUtime = windowStart(
+        state,
+        account,
+        seen,
+        Math.ceil(this.#o.overlapMs / 1000),
         Math.floor(this.#o.startFrom.getTime() / 1000),
-        seen - Math.ceil(this.#o.overlapMs / 1000),
       );
-      for (let page = 0; page < (this.#o.maxPagesPerAddress ?? 10); page++) {
+      const baseOffset = pageOffset(state, account);
+      let rows = 0;
+      let full = true;
+      for (let page = 0; page < maxPages; page++) {
         const res = await this.#o.client.get(
           "/api/v3/transactions",
           {
@@ -163,19 +171,25 @@ export class TonAdapter implements ChainAdapter {
             start_utime: String(fromUtime),
             sort: "asc",
             limit: String(pageSize),
-            offset: String(page * pageSize),
+            offset: String(baseOffset + page * pageSize),
           },
           tonTransactionsSchema,
         );
+        rows += res.transactions.length;
         for (const t of res.transactions) {
           next[account] = Math.max(next[account] ?? 0, t.now);
           const c = this.#candidate(asset, owner, t);
           if (c) out.push(c);
         }
-        if (res.transactions.length < pageSize) break;
+        if (res.transactions.length < pageSize) {
+          full = false;
+          break;
+        }
       }
+      if (full) exhausted = true;
+      recordProgress(next, state, account, seen, full, rows);
     }
-    return { candidates: out, next: JSON.stringify(next) };
+    return { candidates: out, next: JSON.stringify(next), exhausted };
   }
 
   /** Hint extraction; the verifier re-checks everything against finalized state. */

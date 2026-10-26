@@ -291,6 +291,43 @@ describe("fetchIncoming (indexer candidates)", () => {
     expect(calls).toEqual([]);
   });
 
+  it("a burst of transactions larger than the page budget cannot freeze the cursor", async () => {
+    const S = 1792970000;
+    const template = structuredClone(fixture("testnet-jetton-wallet-transactions.json").transactions[0]);
+    let n = 0;
+    let burstTime = S - 100; // every row inside the overlap window, before the cursor
+    const { fn, calls } = fake({
+      list: () => ({
+        transactions: [0, 1].map(() => ({
+          ...structuredClone(template),
+          hash: Buffer.from(String(n++).padStart(32, "0")).toString("base64"),
+          now: burstTime,
+          lt: String(1000 + n),
+        })),
+      }),
+    });
+    const a = adapter(fn);
+    // page size 2 × 10 pages = 20 rows per scan, all at S−100: the cursor cannot move
+    const first = await a.fetchIncoming(USDT, [owner], JSON.stringify({ [JETTON_WALLET]: S }), 2);
+    expect(first.exhausted).toBe(true);
+    expect(calls).toHaveLength(10);
+    expect(JSON.parse(first.next)).toEqual({ [JETTON_WALLET]: S, [`${JETTON_WALLET}#tight`]: 1 });
+    // tight scan: starts exactly at the cursor, no overlap; still stuck → remember how far it read
+    const second = await a.fetchIncoming(USDT, [owner], first.next, 2);
+    expect(calls[10]?.searchParams.get("start_utime")).toBe(String(S));
+    expect(calls[10]?.searchParams.get("offset")).toBe("0");
+    expect(JSON.parse(second.next)).toEqual({
+      [JETTON_WALLET]: S,
+      [`${JETTON_WALLET}#tight`]: 1,
+      [`${JETTON_WALLET}#offset`]: 20,
+    });
+    // the third scan resumes 20 rows deeper, finds newer rows and the markers disappear
+    burstTime = S + 50;
+    const third = await a.fetchIncoming(USDT, [owner], second.next, 2);
+    expect(calls[20]?.searchParams.get("offset")).toBe("20");
+    expect(JSON.parse(third.next)).toEqual({ [JETTON_WALLET]: S + 50 });
+  });
+
   it("re-reads an overlap window from the cursor (duplicates are dropped by the database)", async () => {
     const { fn, calls } = fake({ list: () => ({ transactions: [] }) });
     const a = adapter(fn);
