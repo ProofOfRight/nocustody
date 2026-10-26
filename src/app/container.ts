@@ -2,7 +2,7 @@
 // Composition root: wires config, adapters and use cases. The only place that knows concrete implementations.
 import pg from "pg";
 import { AlertRouter, LogAlertSink, TelegramAlertSink } from "../adapters/alerts/sinks.ts";
-import { BlocklistAmlScreener } from "../adapters/aml/blocklist.ts";
+import { type AddressNormaliser, BlocklistAmlScreener } from "../adapters/aml/blocklist.ts";
 import { NoopAmlScreener } from "../adapters/aml/noop.ts";
 import { ApiServer } from "../adapters/api/server.ts";
 import { TonAdapter } from "../adapters/chains/ton/adapter.ts";
@@ -41,7 +41,7 @@ import { ResolveAmlHold } from "../application/use-cases/resolve-aml-hold.ts";
 import { SettlePayments } from "../application/use-cases/settle-payments.ts";
 import { VerifyTransfers } from "../application/use-cases/verify-transfers.ts";
 import { chainAddress } from "../domain/chain-address.ts";
-import { type NetworkId, networkFamily } from "../domain/network.ts";
+import { type NetworkId, networkFamily, networkId } from "../domain/network.ts";
 import type { AddressValidators, Config } from "./config.ts";
 import { parseDuration } from "./duration.ts";
 import { logger } from "./logger.ts";
@@ -96,7 +96,16 @@ export function buildContainer(o: ContainerOptions) {
     logger.error({ subject, err: err instanceof Error ? err.message : String(err) }, "settlement failed");
   const uniqueAmount = new UniqueAmountStrategy();
   const memo = new MemoStrategy(o.memos ?? cryptoMemos);
-  const strategies: StrategyResolver = (s) => (s.strategy === "memo" ? memo : uniqueAmount);
+  const strategies: StrategyResolver = (s) => {
+    switch (s.strategy) {
+      case "memo":
+        return memo;
+      case "unique-amount":
+        return uniqueAmount;
+      default:
+        return unreachable(s.strategy);
+    }
+  };
   const rates = new RateService([new ManualRateTable(o.config.manualRates)]);
   const ops = o.config.raw.ops;
   const sinks: AlertSink[] = [new LogAlertSink((level, fields, msg) => logger[level](fields, msg))];
@@ -108,11 +117,7 @@ export function buildContainer(o: ContainerOptions) {
   const alerts = new AlertRouter(sinks, parseDuration(ops.alerts.cooldown), (err) =>
     logger.error({ err: err instanceof Error ? err.message : String(err) }, "alert delivery failed"),
   );
-  const aml =
-    o.aml ??
-    (ops.aml.provider === "blocklist" && ops.aml.blocklistFile
-      ? BlocklistAmlScreener.fromFile(ops.aml.blocklistFile)
-      : new NoopAmlScreener());
+  const aml = o.aml ?? buildAml(ops.aml);
   const maxPendingMs = parseDuration(ops.candidateMaxAge);
 
   const createInvoice = new CreateInvoice({
@@ -277,11 +282,16 @@ export function buildContainer(o: ContainerOptions) {
       ? {
           symbol: ops.depeg.symbol,
           maxDeviationBps: ops.depeg.maxDeviationBps,
-          sources: ops.depeg.sources.map((s) =>
-            s === "kraken"
-              ? new KrakenUsdtUsd(exchange("https://api.kraken.com"))
-              : new CoinbaseUsdtUsd(exchange("https://api.exchange.coinbase.com")),
-          ),
+          sources: ops.depeg.sources.map((s) => {
+            switch (s) {
+              case "kraken":
+                return new KrakenUsdtUsd(exchange("https://api.kraken.com"));
+              case "coinbase":
+                return new CoinbaseUsdtUsd(exchange("https://api.exchange.coinbase.com"));
+              default:
+                return unreachable(s);
+            }
+          }),
         }
       : null,
   });
@@ -357,6 +367,40 @@ export function buildContainer(o: ContainerOptions) {
 }
 
 export type Container = ReturnType<typeof buildContainer>;
+
+/** A new variant of a config enum must be wired here, not fall through to a default silently. */
+function unreachable(x: never): never {
+  throw new Error(`unhandled config variant ${String(x)}`);
+}
+
+function buildAml(aml: Config["raw"]["ops"]["aml"]): AmlScreener {
+  switch (aml.provider) {
+    case "noop":
+      return new NoopAmlScreener();
+    case "blocklist":
+      if (!aml.blocklistFile) throw new Error("ops.aml.blocklistFile is required for the blocklist provider");
+      return BlocklistAmlScreener.fromFile(aml.blocklistFile, normaliseAddress);
+    default:
+      return unreachable(aml.provider);
+  }
+}
+
+/** Canonical form of an address for the blocklist: by network, or by any family that accepts it. */
+const normaliseAddress: AddressNormaliser = (network, raw) => {
+  if (network) {
+    const validate = addressValidators.get(networkFamily(network));
+    if (!validate) throw new Error(`no adapter for network ${network}`);
+    return validate(network, raw).value;
+  }
+  for (const [family, validate] of addressValidators) {
+    try {
+      return validate(networkId(`${family}:mainnet`), raw).value;
+    } catch {
+      // not this family's address format
+    }
+  }
+  throw new Error(`${raw} is not an address of any configured network family`);
+};
 
 /** One scanner → verifier → settlement pass for every network, plus expiry. */
 /**
