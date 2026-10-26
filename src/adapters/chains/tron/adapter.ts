@@ -11,13 +11,13 @@ import type {
   VerifiedTransfer,
 } from "../../../application/ports.ts";
 import type { Asset } from "../../../domain/asset.ts";
-import { type ChainAddress, chainAddress } from "../../../domain/chain-address.ts";
+import type { ChainAddress } from "../../../domain/chain-address.ts";
 import { Money } from "../../../domain/money.ts";
 import type { NetworkId } from "../../../domain/network.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
 import type { JsonHttpClient } from "../../http/json-client.ts";
 import { parseTimeCursor, recordProgress, type TimeCursor, windowStart } from "../cursor.ts";
-import { parseTronAddress, tronAddressFromHex, tronAddressToHex20 } from "./address.ts";
+import { tronAddressFromHex, tronAddressToHex20 } from "./address.ts";
 import { solidTxInfoSchema, trc20HistorySchema } from "./schemas.ts";
 
 /** keccak256("Transfer(address,address,uint256)") */
@@ -49,10 +49,6 @@ export class TronAdapter implements ChainAdapter {
 
   supports(asset: Asset): boolean {
     return asset.network === this.network && asset.kind === "token" && asset.contract !== null;
-  }
-
-  validateAddress(raw: string): ChainAddress {
-    return chainAddress(this.network, parseTronAddress(raw));
   }
 
   buildPaymentUri(): string | null {

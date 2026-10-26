@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Scripted chain adapter for tests: candidates by page, verification results by tx hash.
-import { type ChainAddress, chainAddress } from "../../domain/chain-address.ts";
 import type { NetworkId } from "../../domain/network.ts";
 import { txRef } from "../../domain/tx-ref.ts";
 import type { ChainAdapter, FetchResult, TransferCandidate, VerificationResult } from "../ports.ts";
@@ -20,10 +19,6 @@ export class FakeChain implements ChainAdapter {
 
   supports(): boolean {
     return true;
-  }
-
-  validateAddress(raw: string): ChainAddress {
-    return chainAddress(this.network, raw);
   }
 
   buildPaymentUri(): string | null {

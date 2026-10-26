@@ -18,14 +18,14 @@ import type {
   VerifiedTransfer,
 } from "../../../application/ports.ts";
 import type { Asset } from "../../../domain/asset.ts";
-import { type ChainAddress, chainAddress } from "../../../domain/chain-address.ts";
+import type { ChainAddress } from "../../../domain/chain-address.ts";
 import type { PaymentInstructions } from "../../../domain/invoice.ts";
 import { Money } from "../../../domain/money.ts";
 import type { NetworkId } from "../../../domain/network.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
 import { type JsonHttpClient, ResponseTooLargeError } from "../../http/json-client.ts";
 import { pageOffset, parseTimeCursor, recordProgress, type TimeCursor, windowStart } from "../cursor.ts";
-import { canonicalTon, friendlyTon, parseTonAddress } from "./address.ts";
+import { canonicalTon, friendlyTon } from "./address.ts";
 import {
   OP_ENCRYPTED_COMMENT,
   OP_INTERNAL_TRANSFER,
@@ -78,10 +78,6 @@ export class TonAdapter implements ChainAdapter {
   supports(asset: Asset): boolean {
     if (asset.network !== this.network) return false;
     return asset.kind === "native" ? asset.contract === null : asset.contract !== null;
-  }
-
-  validateAddress(raw: string): ChainAddress {
-    return chainAddress(this.network, parseTonAddress(raw));
   }
 
   formatAddress(address: ChainAddress): string {
