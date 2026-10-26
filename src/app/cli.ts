@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Command line entry point. Stage 2 has no HTTP API yet; invoices can be created from the CLI.
+// Command line entry point: operator commands and the long-running process roles (see docs/operations.md).
 //   node src/app/cli.ts config:hash            print the pinned checksum to set as NOCUSTODY_PINNED_SHA256
 //   node src/app/cli.ts db:migrate             apply database migrations
 //   node src/app/cli.ts invoice:create --order <id> --amount <decimal> --currency <code> --asset <id>
@@ -18,6 +18,7 @@ import { assertPinned, type Config, loadConfigFile } from "./config.ts";
 import { addressValidators, buildContainer, type Container, createPool, runCycle } from "./container.ts";
 import { ConfigFilePinGuard } from "./integrity.ts";
 import { logger } from "./logger.ts";
+import { runLoop } from "./loop.ts";
 
 function configPath(): string {
   const p = process.env.NOCUSTODY_CONFIG;
@@ -31,7 +32,12 @@ function databaseUrl(config: Config): string {
   return url;
 }
 
-async function start(): Promise<{ config: Config; container: Container }> {
+/**
+ * Config, pin check and the container. The network start-up checks (TON jetton-wallet binding, which asks the
+ * provider) run only for the roles that scan: an unreachable provider must not block ops:status, apikey:revoke or
+ * an api-only process.
+ */
+async function start(o: { networkChecks?: boolean } = {}): Promise<{ config: Config; container: Container }> {
   const path = configPath();
   const config = loadConfigFile(path, addressValidators);
   const expected = process.env.NOCUSTODY_PINNED_SHA256;
@@ -43,11 +49,13 @@ async function start(): Promise<{ config: Config; container: Container }> {
     ),
   );
   const container = buildContainer({ config, databaseUrl: databaseUrl(config), integrity });
-  try {
-    await container.verifyStartup();
-  } catch (e) {
-    await container.pool.end();
-    throw e;
+  if (o.networkChecks) {
+    try {
+      await container.verifyStartup();
+    } catch (e) {
+      await container.pool.end();
+      throw e;
+    }
   }
   return { config, container };
 }
@@ -257,23 +265,17 @@ async function main(argv: string[]): Promise<void> {
       );
       for (const r of roles)
         if (!["api", "worker", "dispatcher", "monitor"].includes(r)) throw new Error(`unknown role ${r}`);
-      const { config, container } = await start();
-      let stopping = false;
+      const { config, container } = await start({ networkChecks: roles.has("worker") });
+      const stop = new AbortController();
       const loops: Promise<void>[] = [];
       const loop = (name: string, intervalMs: number, step: () => Promise<unknown>) =>
         loops.push(
-          (async () => {
-            while (!stopping) {
-              try {
-                const result = await step();
-                logger.debug({ role: name, result }, "cycle");
-              } catch (e) {
-                // A failing provider, endpoint or database must not crash the loop; the next cycle retries.
-                logger.error({ role: name, err: e }, "cycle failed");
-              }
-              await new Promise((r) => setTimeout(r, intervalMs));
-            }
-          })(),
+          runLoop(step, {
+            intervalMs,
+            signal: stop.signal,
+            onCycle: (result) => logger.debug({ role: name, result }, "cycle"),
+            onError: (e) => logger.error({ role: name, err: e }, "cycle failed"),
+          }),
         );
       let api: ReturnType<Container["api"]> | null = null;
       if (roles.has("api")) {
@@ -296,23 +298,17 @@ async function main(argv: string[]): Promise<void> {
         if (reconcileMs) loop("monitor:reconcile", reconcileMs, () => container.monitor.reconcile());
         if (depegMs) loop("monitor:depeg", depegMs, () => container.monitor.checkDepeg());
       }
-      const stop = () => {
-        stopping = true;
-      };
-      process.on("SIGINT", stop);
-      process.on("SIGTERM", stop);
+      // SIGTERM/SIGINT: finish the current cycle of every loop, then close; a sleeping loop wakes at once.
+      process.on("SIGINT", () => stop.abort());
+      process.on("SIGTERM", () => stop.abort());
       logger.info(
         { roles: [...roles], networks: container.workers.map((w) => w.adapter.network) },
         "started",
       );
-      await new Promise<void>((resolve) => {
-        const t = setInterval(() => {
-          if (stopping) {
-            clearInterval(t);
-            resolve();
-          }
-        }, 200);
-      });
+      await new Promise<void>((resolve) =>
+        stop.signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+      logger.info("stopping: finishing current cycles");
       await api?.close();
       await Promise.all(loops);
       await container.pool.end();
