@@ -127,7 +127,7 @@ describe("monitor: health", () => {
     const s = setup();
     await s.store.run((r) => r.heartbeats.ok(`scanner:${TRON}`, s.clock.now()));
     await s.store.run((r) =>
-      r.outbox.append([{ type: "x", aggregateId: "a", occurredAt: new Date(T0), data: {} }]),
+      r.outbox.append([{ type: "invoice.paid", aggregateId: "a", occurredAt: new Date(T0), data: {} }]),
     );
     await s.store.run((r) => r.delivery.markDead("1", new Date(T0), "gave up"));
     expect(await s.monitor.checkHealth()).toEqual(["1 webhook event(s) in dead-letter"]);

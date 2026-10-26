@@ -3,6 +3,8 @@
 // (docs/payment-page.md). Persian is right-to-left; its zero-width non-joiners are written as \u200c escapes so
 // that no invisible characters appear in the source (source policy).
 
+import type { InvoiceStatus } from "../../../domain/invoice.ts";
+
 export const LANGUAGES = ["en", "ru", "fr", "fa", "zh-CN"] as const;
 export type Lang = (typeof LANGUAGES)[number];
 
@@ -20,7 +22,8 @@ export interface Messages {
   readonly timeLeft: string;
   readonly qr: string;
   readonly onlyAsset: string;
-  readonly status: Readonly<Record<string, string>>;
+  /** One text per invoice status: a new status is a type error here, not a raw code shown to a payer. */
+  readonly status: Readonly<Record<InvoiceStatus, string>>;
 }
 
 const en: Messages = {

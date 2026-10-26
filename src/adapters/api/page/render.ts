@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Hosted payment page: one HTML document, inline CSS and JS only (no external resources, ADR-0027), strict CSP with
 // a per-response nonce. Every dynamic value is HTML-escaped; data for the script is embedded as escaped JSON.
-import { isRtl, LANGUAGES, type Lang, MESSAGES } from "./i18n.ts";
+import { isRtl, LANGUAGES, type Lang, MESSAGES, type Messages } from "./i18n.ts";
 import { qrSvg } from "./qr.ts";
 
 export interface PageView {
@@ -112,6 +112,9 @@ const SCRIPT = `
 })();
 `;
 
+const statusText = (t: Messages, status: string): string =>
+  (t.status as Readonly<Record<string, string>>)[status] ?? status;
+
 export function renderPaymentPage(v: PageView, lang: Lang, nonce: string): string {
   const t = MESSAGES[lang];
   const qrPayload = v.uri ?? v.address;
@@ -149,7 +152,7 @@ ${v.memo ? `${field("memo", t.memo, v.memo)}<p class="warning">${esc(t.memoWarni
 ${v.uri ? `<p><a class="btn" href="${esc(v.uri)}" rel="noopener noreferrer">${esc(t.openWallet)}</a></p>` : ""}`
     : ""
 }
-<div class="status" id="status" role="status" aria-live="polite">${esc(t.status[v.status] ?? v.status)}</div>
+<div class="status" id="status" role="status" aria-live="polite">${esc(statusText(t, v.status))}</div>
 ${v.payable ? `<div class="muted">${esc(t.timeLeft)}: <span id="timer" class="value"></span></div>` : ""}
 <nav>${langs}</nav>
 </main>

@@ -10,7 +10,7 @@ import type { ApiKeyRecord, ApiScope, ChainAdapter, Clock, UnitOfWork } from "..
 import type { CreateInvoice } from "../../application/use-cases/create-invoice.ts";
 import type { QuotePrice } from "../../application/use-cases/quote-price.ts";
 import { DomainError } from "../../domain/errors.ts";
-import type { Invoice, InvoiceStatus } from "../../domain/invoice.ts";
+import { INVOICE_STATUSES, type Invoice } from "../../domain/invoice.ts";
 import { authenticate, isTokenShaped } from "./keys.ts";
 import { type Lang, pickLanguage } from "./page/i18n.ts";
 import { contentSecurityPolicy, isPayable, NETWORK_NAMES, renderPaymentPage } from "./page/render.ts";
@@ -30,20 +30,7 @@ export interface ApiDeps {
 /** Request bodies above this size are refused with 413. */
 export const BODY_LIMIT = 16 * 1024;
 
-const STATUSES = [
-  "awaiting_payment",
-  "confirming",
-  "paid",
-  "underpaid",
-  "overpaid",
-  "paid_late",
-  "expired",
-  "cancelled",
-  "aml_pending",
-  "aml_hold",
-  "completed",
-  "rejected",
-] as const satisfies readonly InvoiceStatus[];
+const STATUSES = INVOICE_STATUSES;
 
 const decimal = z.string().regex(/^(0|[1-9]\d{0,30})(\.\d{1,36})?$/, 'decimal string, e.g. "10.50"');
 const createSchema = z
@@ -76,7 +63,8 @@ class HttpError extends Error {
   }
 }
 
-const APP_ERRORS: Readonly<Record<string, number>> = {
+/** Application error code → HTTP status; every code here is listed in docs/api/openapi.yaml (contract test). */
+export const APP_ERRORS: Readonly<Record<string, number>> = {
   "asset.unknown": 422,
   "pricing.currency_disabled": 422,
   "invoice.zero_amount": 422,
@@ -155,6 +143,7 @@ type Handler = (req: Request) => Promise<Reply>;
 
 interface Route {
   readonly method: string;
+  readonly path: string;
   readonly pattern: RegExp;
   readonly params: readonly string[];
   readonly scope: ApiScope | null;
@@ -171,7 +160,7 @@ function route(method: string, path: string, scope: ApiScope | null, handler: Ha
       return "([^/]+)";
     })}$`,
   );
-  return { method, pattern, params, scope, handler };
+  return { method, path, pattern, params, scope, handler };
 }
 
 /** Reads the body up to BODY_LIMIT bytes; JSON only. */
@@ -225,6 +214,11 @@ export class ApiServer {
       },
     );
     this.server.maxHeadersCount = 50;
+  }
+
+  /** The route table (method, path pattern, scope), for the contract test against docs/api/openapi.yaml. */
+  get routes(): ReadonlyArray<{ method: string; path: string; scope: ApiScope | null }> {
+    return this.#routes.map((r) => ({ method: r.method, path: r.path, scope: r.scope }));
   }
 
   async listen(host: string, port: number): Promise<AddressInfo> {

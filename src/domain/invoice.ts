@@ -4,22 +4,29 @@ import { SLOT_CLOCK_SKEW_MS } from "./amount-slot.ts";
 import { type Asset, sameAsset } from "./asset.ts";
 import type { ChainAddress } from "./chain-address.ts";
 import { DomainError, invariant } from "./errors.ts";
-import type { DomainEvent } from "./events.ts";
+import type { DomainEvent, DomainEventType } from "./events.ts";
 import { Money } from "./money.ts";
 
-export type InvoiceStatus =
-  | "awaiting_payment"
-  | "confirming"
-  | "paid"
-  | "underpaid"
-  | "overpaid"
-  | "paid_late"
-  | "expired"
-  | "cancelled"
-  | "aml_pending"
-  | "aml_hold"
-  | "completed"
-  | "rejected";
+/**
+ * Every invoice status. The same list is the CHECK constraint in the first migration, the OpenAPI `Status` enum,
+ * the API's list filter and the payment page's texts; a cross-check test keeps them equal (a status forgotten in
+ * one place is otherwise found only in production).
+ */
+export const INVOICE_STATUSES = [
+  "awaiting_payment",
+  "confirming",
+  "paid",
+  "underpaid",
+  "overpaid",
+  "paid_late",
+  "expired",
+  "cancelled",
+  "aml_pending",
+  "aml_hold",
+  "completed",
+  "rejected",
+] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
 /** Where and how much to pay. The address comes from the pinned receiving-address list. */
 export interface PaymentInstructions {
@@ -297,7 +304,7 @@ export class Invoice {
     this.#state = Object.freeze({ ...this.#state, ...patch, version: this.#state.version + 1 });
   }
 
-  #record(type: string, at: Date, data: DomainEvent["data"]): void {
+  #record(type: DomainEventType, at: Date, data: DomainEvent["data"]): void {
     this.#events.push(
       Object.freeze({ type, aggregateId: this.#state.id, occurredAt: at, data: { ...data } }),
     );

@@ -7,6 +7,7 @@ import pg from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { AssetCatalog } from "../../../application/catalog.ts";
 import { ConcurrencyError } from "../../../application/errors.ts";
+import { CANDIDATE_STATUSES, TRANSFER_STATUSES } from "../../../application/ports.ts";
 import { RateService } from "../../../application/rates.ts";
 import { UniqueAmountStrategy } from "../../../application/strategies/unique-amount.ts";
 import { FakeChain } from "../../../application/testing/fake-chain.ts";
@@ -17,6 +18,7 @@ import { VerifyTransfers } from "../../../application/use-cases/verify-transfers
 import { STRICT_AMOUNT_POLICY, uniqueAmountPolicy } from "../../../domain/amount-policy.ts";
 import { amountSlot } from "../../../domain/amount-slot.ts";
 import { chainAddress } from "../../../domain/chain-address.ts";
+import { INVOICE_STATUSES } from "../../../domain/invoice.ts";
 import { Money } from "../../../domain/money.ts";
 import { TRON, USDT_TRON } from "../../../domain/test-fixtures.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
@@ -121,6 +123,20 @@ describe("PostgreSQL repositories", () => {
     expect(rows[0].n).toBe(2);
   });
 
+  it("status CHECK constraints in the migrations equal the TypeScript unions", async () => {
+    const checks = await pool.query<{ table: string; def: string }>(
+      `SELECT c.conrelid::regclass::text AS table, pg_get_constraintdef(c.oid) AS def
+       FROM pg_constraint c WHERE c.contype = 'c' AND pg_get_constraintdef(c.oid) LIKE '%status%'`,
+    );
+    const listed = (table: string): string[] => {
+      const def = checks.rows.find((r) => r.table === table)?.def ?? "";
+      return [...def.matchAll(/'([a-z_]+)'/g)].map((m) => m[1] ?? "").sort();
+    };
+    expect(listed("invoices")).toEqual([...INVOICE_STATUSES].sort());
+    expect(listed("tx_candidates")).toEqual([...CANDIDATE_STATUSES].sort());
+    expect(listed("observed_transfers")).toEqual([...TRANSFER_STATUSES].sort());
+  });
+
   it("memos are unique per network forever", async () => {
     await expect(
       uow.run(async (r) => {
@@ -190,7 +206,7 @@ describe("PostgreSQL repositories", () => {
       await r.heartbeats.ok("scanner:tron:mainnet", T0);
       await r.heartbeats.error("scanner:tron:mainnet", T0, "HTTP 503");
       await r.guards.set("depeg:USDT", true, "off peg", T0);
-      await r.outbox.append([{ type: "x", aggregateId: "a", occurredAt: T0, data: {} }]);
+      await r.outbox.append([{ type: "invoice.paid", aggregateId: "a", occurredAt: T0, data: {} }]);
     });
     expect(await uow.run((r) => r.heartbeats.list())).toEqual([
       { role: "scanner:tron:mainnet", lastOkAt: T0, lastErrorAt: T0, lastError: "HTTP 503" },
@@ -226,7 +242,7 @@ describe("PostgreSQL repositories", () => {
   it("rolls back state, outbox and cursor together", async () => {
     await expect(
       uow.run(async (r) => {
-        await r.outbox.append([{ type: "x", aggregateId: "a", occurredAt: T0, data: {} }]);
+        await r.outbox.append([{ type: "invoice.paid", aggregateId: "a", occurredAt: T0, data: {} }]);
         await r.cursors.set(TRON, "usdt-tron", "c1");
         throw new Error("boom");
       }),

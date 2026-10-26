@@ -183,7 +183,8 @@ export interface MemoRepository {
   ): Promise<{ invoiceId: string; address: ChainAddress; assetId: string } | null>;
 }
 
-export type CandidateStatus = "seen" | "dust" | "verified" | "rejected";
+export const CANDIDATE_STATUSES = ["seen", "dust", "verified", "rejected"] as const;
+export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
 
 export interface StoredCandidate {
   readonly candidate: TransferCandidate;
@@ -210,7 +211,8 @@ export interface CandidateRepository {
   listVerified(network: NetworkId, address: ChainAddress, from: Date, until: Date): Promise<string[]>;
 }
 
-export type TransferStatus = "verified" | "dust" | "matched" | "unmatched";
+export const TRANSFER_STATUSES = ["verified", "dust", "matched", "unmatched"] as const;
+export type TransferStatus = (typeof TRANSFER_STATUSES)[number];
 
 export interface StoredTransfer {
   readonly transfer: VerifiedTransfer;
