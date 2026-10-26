@@ -158,14 +158,20 @@ export class InMemoryStore implements UnitOfWork {
             )
             .slice(0, limit)
             .map((s) => Invoice.restore(s)),
-        search: async ({ status, since, limit }) =>
-          [...d().invoices.values()]
+        search: async ({ status, since, before, limit }) => {
+          const order = (a: InvoiceState, b: { createdAt: Date; id: string }) =>
+            b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+          return [...d().invoices.values()]
             .filter(
-              (s) => (!status || s.status === status) && (!since || s.createdAt.getTime() >= since.getTime()),
+              (s) =>
+                (!status || s.status === status) &&
+                (!since || s.createdAt.getTime() >= since.getTime()) &&
+                (!before || order(s, before) > 0),
             )
-            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+            .sort(order)
             .slice(0, limit)
-            .map((s) => Invoice.restore(s)),
+            .map((s) => Invoice.restore(s));
+        },
         listByStatus: async (status: InvoiceStatus, limit) =>
           [...d().invoices.values()]
             .filter((s) => s.status === status)

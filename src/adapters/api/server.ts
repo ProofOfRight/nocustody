@@ -45,8 +45,27 @@ const listSchema = z
     status: z.enum(STATUSES).optional(),
     since: z.string().datetime({ offset: true }).optional(), // RFC 3339, as the OpenAPI format date-time says
     limit: z.coerce.number().int().min(1).max(100).default(50),
+    before: z.string().max(200).optional(),
   })
   .strict();
+
+/**
+ * Opaque list cursor: the last invoice of a page (created_at and id), base64url. Clients pass it back as `before`;
+ * its content is not part of the API.
+ */
+function encodeListCursor(inv: Invoice): string {
+  return Buffer.from(`${inv.state.createdAt.toISOString()}|${inv.id}`).toString("base64url");
+}
+
+function decodeListCursor(cursor: string): { createdAt: Date; id: string } | null {
+  const m = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\|([A-Za-z0-9-]{1,64})$/.exec(
+    Buffer.from(cursor, "base64url").toString("utf8"),
+  );
+  const createdAt = m ? new Date(m[1] ?? "") : null;
+  if (!m || !createdAt || Number.isNaN(createdAt.getTime())) return null;
+  return { createdAt, id: m[2] ?? "" };
+}
+
 const quoteSchema = z
   .object({ amount: decimal, currency: z.string().regex(/^[A-Z][A-Z0-9]{1,9}$/), asset: z.string() })
   .strict();
@@ -500,14 +519,19 @@ export class ApiServer {
 
       route("GET", "/v1/invoices", "invoices:read", async (req) => {
         const q = parse(listSchema, req.query);
+        const before = q.before === undefined ? undefined : decodeListCursor(q.before);
+        if (before === null)
+          throw new HttpError(400, "invalid_request", "before: not a cursor from next_before");
         const list = await d.uow.run((r) =>
           r.invoices.search({
             limit: q.limit,
             ...(q.status ? { status: q.status } : {}),
             ...(q.since ? { since: new Date(q.since) } : {}),
+            ...(before ? { before } : {}),
           }),
         );
-        return ok({ data: list.map((i) => this.#dto(i)) });
+        const last = list.length === q.limit ? list.at(-1) : undefined;
+        return ok({ data: list.map((i) => this.#dto(i)), next_before: last ? encodeListCursor(last) : null });
       }),
 
       route("GET", "/v1/quotes", "quotes:read", async (req) => {

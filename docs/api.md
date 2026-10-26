@@ -29,6 +29,13 @@ Show the payer `payment.address_display`, `payment.amount` (exact — the amount
 and, on TON, `payment.memo` as the transfer comment. `payment.uri` is a wallet deep link where one exists. Or send
 the payer to the hosted page `payment.page` if it is enabled ([payment-page.md](payment-page.md)).
 
+## Listing invoices
+
+`GET /v1/invoices` returns up to `limit` (≤ 100) invoices, newest first, filtered by `status` and `since`. For the
+next page pass the response's `next_before` back as `before` with the same filters; `next_before` is null on the
+last page. The cursor is opaque and stable while new invoices arrive (they appear on the first page, not between
+pages).
+
 ## Webhooks
 
 Configure one endpoint:

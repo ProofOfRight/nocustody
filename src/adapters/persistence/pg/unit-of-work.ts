@@ -316,11 +316,12 @@ function repositories(db: PoolClient, assets: AssetResolver, pinned: PinnedAddre
           limit,
           assetIds,
         ]),
-      search: ({ status, since, limit }) =>
+      search: ({ status, since, before, limit }) =>
         loadInvoices(
           `($1::text IS NULL OR status = $1) AND ($2::timestamptz IS NULL OR created_at >= $2)
+           AND ($5::timestamptz IS NULL OR created_at < $5 OR (created_at = $5 AND id > $6))
            AND asset_id = ANY($4::text[]) ORDER BY created_at DESC, id LIMIT $3`,
-          [status ?? null, since ?? null, limit, assetIds],
+          [status ?? null, since ?? null, limit, assetIds, before?.createdAt ?? null, before?.id ?? null],
         ),
     },
 

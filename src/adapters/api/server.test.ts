@@ -314,6 +314,30 @@ describe("merchant API", () => {
     expect((await app.inject({ url: "/v1/invoices?status=bogus", headers: auth() })).statusCode).toBe(400);
   });
 
+  it("pages through invoices with next_before, newest first, without gaps or repeats", async () => {
+    const { create, app, auth, body } = await setup();
+    // created in the same millisecond: the order between them is decided by id
+    for (let i = 1; i <= 5; i++) await create({ ...body, merchant_order_id: `p${i}` }, `kp${i}`);
+    const seen: string[] = [];
+    let before: string | null = null;
+    let pages = 0;
+    do {
+      const qs: string = before ? `&before=${encodeURIComponent(before)}` : "";
+      const r = await app.inject({ url: `/v1/invoices?limit=2${qs}`, headers: auth() });
+      expect(r.statusCode).toBe(200);
+      const page = r.json() as { data: Array<{ merchant_order_id: string }>; next_before: string | null };
+      seen.push(...page.data.map((x) => x.merchant_order_id));
+      before = page.next_before;
+      pages++;
+    } while (before && pages < 10);
+    expect(pages).toBe(3);
+    expect([...seen].sort()).toEqual(["p1", "p2", "p3", "p4", "p5"]);
+    expect(new Set(seen).size).toBe(5);
+    const bad = await app.inject({ url: "/v1/invoices?before=not-a-cursor", headers: auth() });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error.code).toBe("invalid_request");
+  });
+
   it("quotes without creating an invoice", async () => {
     const { app, auth, store } = await setup();
     const r = await app.inject({
