@@ -101,7 +101,6 @@ const apiSchema = z
     /** Bind address; expose the API through a TLS reverse proxy, never directly. */
     host: z.string().default("127.0.0.1"),
     port: z.number().int().min(1).max(65_535).default(8080),
-    trustProxy: z.boolean().default(false),
     rateLimitPerMinute: z.number().int().min(1).max(100_000).default(120),
   })
   .strict();

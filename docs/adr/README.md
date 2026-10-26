@@ -18,7 +18,7 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0009](0009-independent-finality-check.md) | 2026-10-26 | Independent "final + successful" verification before crediting | accepted |
 | [0010](0010-multi-currency-pricing.md) | 2026-10-26 | Multi-currency pricing as a first-class requirement | accepted |
 | [0011](0011-project-name.md) | 2026-10-26 | Project name `nocustody`, separate GitHub organization | accepted |
-| [0012](0012-fastify-manual-di.md) | 2026-10-26 | Fastify with a hand-written composition root | accepted |
+| [0012](0012-fastify-manual-di.md) | 2026-10-26 | Fastify with a hand-written composition root | superseded in part |
 | [0013](0013-single-package-npm.md) | 2026-10-26 | Single package, npm, enforced layer boundaries | accepted |
 | [0014](0014-postgresql-only.md) | 2026-10-26 | PostgreSQL only, `pg` driver, plain SQL migrations | accepted |
 | [0015](0015-thin-chain-clients.md) | 2026-10-26 | Thin in-house chain clients; official libraries only where parsing is risky | accepted |
@@ -31,3 +31,4 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0022](0022-typescript-run-mode.md) | 2026-10-26 | Run TypeScript natively in development, compile for production | accepted |
 | [0023](0023-mpl-for-dev-dependencies.md) | 2026-10-26 | MPL-2.0 allowed for dev-only dependencies | accepted |
 | [0024](0024-unlicense-allowed.md) | 2026-10-26 | Unlicense allowed; TON libraries `@ton/core` and `@ton/crypto` | accepted |
+| [0025](0025-http-api-on-node-http.md) | 2026-10-26 | HTTP API on node:http without a framework | accepted |

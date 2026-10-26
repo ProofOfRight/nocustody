@@ -5,8 +5,8 @@ The API is described in [api/openapi.yaml](api/openapi.yaml). This page covers w
 ## Deployment
 
 The API binds to `127.0.0.1:8080` by default (`api.host`, `api.port`). Publish it only through a reverse proxy with
-TLS. If the proxy sets `X-Forwarded-For`, enable `api.trustProxy`. There is no admin interface and no endpoint
-that changes receiving addresses.
+TLS. It is plain `node:http` without a framework (ADR-0025): JSON only, bodies up to 16 KiB, responses carry
+`Cache-Control: no-store`. There is no admin interface and no endpoint that changes receiving addresses.
 
 ## API keys
 

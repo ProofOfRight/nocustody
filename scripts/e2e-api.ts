@@ -2,7 +2,6 @@
 // End to end through the merchant API: create an API key, create an invoice over HTTP, replay the recorded Nile
 // payment (see e2e-nile.ts), then the dispatcher delivers signed webhooks to E2E_WEBHOOK_URL (the PHP receiver in
 // examples/php, started by scripts/e2e-api.sh). Uses TEST_DATABASE_URL and RESETS its schema.
-import type { AddressInfo } from "node:net";
 import pg from "pg";
 import { newApiKey } from "../src/adapters/api/keys.ts";
 import { migrate } from "../src/adapters/persistence/pg/migrate.ts";
@@ -66,8 +65,8 @@ const c = buildContainer({
 const api = c.api((e) => console.error("api error", e));
 let ok = false;
 try {
-  await api.listen({ host: "127.0.0.1", port: 0 });
-  const base = `http://127.0.0.1:${(api.server.address() as AddressInfo).port}`;
+  const { port } = await api.listen("127.0.0.1", 0);
+  const base = `http://127.0.0.1:${port}`;
   const { record, token } = newApiKey("e2e", ["invoices:read", "invoices:write"]);
   await c.uow.run((r) => r.apiKeys.insert(record));
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };

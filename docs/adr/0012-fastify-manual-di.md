@@ -1,6 +1,6 @@
 # 0012. Fastify with a hand-written composition root
 
-- Status: accepted
+- Status: HTTP part superseded by [0025](0025-http-api-on-node-http.md); manual composition root still accepted
 - Date: 2026-10-26
 
 ## Context

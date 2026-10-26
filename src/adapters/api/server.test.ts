@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { AssetCatalog, type AssetSettings } from "../../application/catalog.ts";
 import type { ApiScope } from "../../application/ports.ts";
 import { RateService } from "../../application/rates.ts";
@@ -13,9 +13,43 @@ import { chainAddress } from "../../domain/chain-address.ts";
 import { TRON, USDT_TRON } from "../../domain/test-fixtures.ts";
 import { ManualRateTable } from "../pricing/manual-table.ts";
 import { newApiKey } from "./keys.ts";
-import { buildApi } from "./server.ts";
+import { ApiServer } from "./server.ts";
 
 const T0 = new Date("2026-10-26T12:00:00Z");
+const servers: ApiServer[] = [];
+afterAll(async () => {
+  await Promise.all(servers.map((s) => s.close()));
+});
+
+interface InjectOptions {
+  method?: string;
+  url: string;
+  headers?: Record<string, string>;
+  payload?: object | string;
+}
+
+/** Real HTTP round trip against a server on a random port. */
+async function client(api: ApiServer) {
+  servers.push(api);
+  const { port } = await api.listen("127.0.0.1", 0);
+  return {
+    inject: async (o: InjectOptions) => {
+      const headers: Record<string, string> = { ...(o.headers ?? {}) };
+      let body: string | undefined;
+      if (o.payload !== undefined) {
+        body = typeof o.payload === "string" ? o.payload : JSON.stringify(o.payload);
+        headers["content-type"] ??= "application/json";
+      }
+      const res = await fetch(`http://127.0.0.1:${port}${o.url}`, {
+        method: o.method ?? "GET",
+        headers,
+        ...(body !== undefined ? { body } : {}),
+      });
+      const text = await res.text();
+      return { statusCode: res.status, headers: res.headers, body: text, json: () => JSON.parse(text) };
+    },
+  };
+}
 const ADDR = chainAddress(TRON, "TAddrA111111111111111111111111111");
 
 async function setup(opts: { rateLimit?: number; failing?: boolean } = {}) {
@@ -52,21 +86,21 @@ async function setup(opts: { rateLimit?: number; failing?: boolean } = {}) {
     integrity: { check: async () => ({ ok: true }) },
   });
   const errors: unknown[] = [];
-  const app = buildApi({
-    uow: store,
-    catalog,
-    createInvoice: opts.failing
-      ? ({
-          execute: async () => Promise.reject(new Error("secret db password in message")),
-        } as unknown as CreateInvoice)
-      : createInvoice,
-    quotePrice: new QuotePrice(catalog, pricing, rates),
-    adapters: [new FakeChain(TRON)],
-    clock,
-    rateLimitPerMinute: opts.rateLimit ?? 1_000,
-    trustProxy: false,
-    onError: (e) => errors.push(e),
-  });
+  const app = await client(
+    new ApiServer({
+      uow: store,
+      createInvoice: opts.failing
+        ? ({
+            execute: async () => Promise.reject(new Error("secret db password in message")),
+          } as unknown as CreateInvoice)
+        : createInvoice,
+      quotePrice: new QuotePrice(catalog, pricing, rates),
+      adapters: [new FakeChain(TRON)],
+      clock,
+      rateLimitPerMinute: opts.rateLimit ?? 1_000,
+      onError: (e) => errors.push(e),
+    }),
+  );
   const key = async (scopes: ApiScope[]) => {
     const k = newApiKey("test", scopes);
     await store.run((r) => r.apiKeys.insert(k.record));
@@ -189,6 +223,47 @@ describe("merchant API", () => {
     });
     expect(r.json()).toMatchObject({ asset: "usdt-tron", amount: "10.000000" });
     expect(store.data.invoices.size).toBe(0);
+  });
+
+  it("transport rules: 404/405, JSON only, no duplicated query parameters, safe response headers", async () => {
+    const { app, auth } = await setup();
+    expect((await app.inject({ url: "/v2/nothing" })).statusCode).toBe(404);
+    expect((await app.inject({ method: "DELETE", url: "/v1/invoices", headers: auth() })).statusCode).toBe(
+      405,
+    );
+    const form = await app.inject({
+      method: "POST",
+      url: "/v1/invoices",
+      headers: { ...auth(), "idempotency-key": "k1", "content-type": "application/x-www-form-urlencoded" },
+      payload: "a=1",
+    });
+    expect(form.statusCode).toBe(415);
+    const broken = await app.inject({
+      method: "POST",
+      url: "/v1/invoices",
+      headers: { ...auth(), "idempotency-key": "k1" },
+      payload: "{not json",
+    });
+    expect(broken.json().error.code).toBe("invalid_json");
+    const dup = await app.inject({ url: "/v1/invoices?limit=1&limit=2", headers: auth() });
+    expect(dup.statusCode).toBe(400);
+    const r = await app.inject({ url: "/health" });
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect(r.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(r.headers.get("content-type")).toBe("application/json; charset=utf-8");
+  });
+
+  it("an own __proto__ key in the body is an unknown field and is refused", async () => {
+    const { app, auth } = await setup();
+    const raw =
+      '{"merchant_order_id":"o1","price":{"amount":"1","currency":"USD"},"asset":"usdt-tron","__proto__":{"x":1}}';
+    const r = await app.inject({
+      method: "POST",
+      url: "/v1/invoices",
+      headers: { ...auth(), "idempotency-key": "k1" },
+      payload: raw,
+    });
+    expect(r.statusCode).toBe(400);
   });
 
   it("rate-limits per key", async () => {
