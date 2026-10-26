@@ -227,8 +227,12 @@ export interface TransferRepository {
     reason: string | null,
   ): Promise<"inserted" | "duplicate">;
   listVerified(network: NetworkId, limit: number): Promise<StoredTransfer[]>;
-  markMatched(ref: TxRef, invoiceId: string): Promise<void>;
-  markUnmatched(ref: TxRef, reason: string): Promise<void>;
+  /**
+   * Settle a transfer that is still `verified`. Returns false when it no longer is (another worker settled it
+   * between list and write), and the caller must not record an outcome for it.
+   */
+  markMatched(ref: TxRef, invoiceId: string): Promise<boolean>;
+  markUnmatched(ref: TxRef, reason: string): Promise<boolean>;
 }
 
 export interface OutboxRepository {

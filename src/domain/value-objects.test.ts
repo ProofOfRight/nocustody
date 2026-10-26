@@ -8,7 +8,7 @@ import { DomainError } from "./errors.ts";
 import { Money } from "./money.ts";
 import { networkFamily, networkId } from "./network.ts";
 import { TRON, USDT_TRON } from "./test-fixtures.ts";
-import { txRef, txRefKey } from "./tx-ref.ts";
+import { parseTxRefKey, txRef, txRefKey } from "./tx-ref.ts";
 
 const code = (fn: () => unknown): string | undefined => {
   try {
@@ -124,5 +124,17 @@ describe("ChainAddress and TxRef", () => {
     expect(txRefKey(ref)).toBe(`tron:mainnet/${"a".repeat(64)}/2`);
     expect(code(() => txRef(TRON, "short", 0n))).toBe("txref.hash");
     expect(code(() => txRef(TRON, "a".repeat(64), -1n))).toBe("txref.index");
+    // the key is parsed back where a stored payment is screened: it must round-trip and refuse anything else
+    expect(parseTxRefKey(txRefKey(ref))).toEqual(ref);
+    for (const bad of [
+      "a/b",
+      "tron:mainnet/abc",
+      `tron:mainnet/${"a".repeat(64)}/x`,
+      `tron:mainnet/${"a".repeat(64)}/1/2`,
+    ])
+      expect(
+        code(() => parseTxRefKey(bad)),
+        bad,
+      ).toBe("txref.key");
   });
 });

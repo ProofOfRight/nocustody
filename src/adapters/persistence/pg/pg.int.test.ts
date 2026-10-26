@@ -111,6 +111,11 @@ describe("PostgreSQL repositories", () => {
       expect(await r.transfers.insert({ ...t, ref: txRef(TRON, hash, 1n) }, "verified", null)).toBe(
         "inserted",
       );
+      // settling is conditional on status = 'verified': a second worker that lists the same row loses
+      expect(await r.transfers.markUnmatched(t.ref, "no slot")).toBe(true);
+      expect(await r.transfers.markUnmatched(t.ref, "no slot")).toBe(false);
+      expect(await r.transfers.markUnmatched(txRef(TRON, hash, 1n), "no slot")).toBe(true);
+      expect(await r.transfers.markUnmatched(txRef(TRON, hash, 1n), "again")).toBe(false);
     });
     const { rows } = await pool.query("SELECT count(*)::int AS n FROM observed_transfers");
     expect(rows[0].n).toBe(2);

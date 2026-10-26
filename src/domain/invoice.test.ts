@@ -181,6 +181,8 @@ describe("Invoice lifecycle", () => {
     expect(code(pay(91 * MIN))).toBe("invoice.payment_after_grace");
     expect(code(pay(-MIN))).toBe("invoice.payment_before_creation");
     expect(code(pay(-10_000))).toBeUndefined(); // within clock skew
+    // An Invalid Date compares false with every bound and would otherwise be accepted as paid on time.
+    expect(code(pay(Number.NaN))).toBe("invoice.payment_time");
     const fake = defineAsset({ ...USDT_TRON, id: "fake", contract: "TFakeContract1111111111111111111111" });
     expect(code(pay(MIN, Money.parse(fake, "10.01")))).toBe("invoice.asset");
   });
@@ -206,9 +208,13 @@ describe("Invoice lifecycle", () => {
       STRICT_AMOUNT_POLICY,
       at(MIN),
     );
+    expect(ok.needsAmlReview()).toBe(true);
     ok.startAmlReview(at(MIN));
+    expect(ok.needsAmlReview()).toBe(false);
     ok.amlCleared(at(MIN));
     expect(ok.status).toBe("completed");
+    expect(newInvoice().needsAmlReview()).toBe(false);
+    expect(code(() => newInvoice().startAmlReview(at(MIN)))).toBe("invoice.aml_state");
 
     const held = newInvoice();
     held.applyPayment(

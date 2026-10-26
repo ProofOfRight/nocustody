@@ -2,7 +2,7 @@
 import { DomainError } from "../../domain/errors.ts";
 import type { Invoice } from "../../domain/invoice.ts";
 import type { NetworkId } from "../../domain/network.ts";
-import { txRefKey } from "../../domain/tx-ref.ts";
+import { parseTxRefKey, txRefKey } from "../../domain/tx-ref.ts";
 import type { AssetCatalog } from "../catalog.ts";
 import { ConcurrencyError } from "../errors.ts";
 import type { AmlScreener, Clock, Repositories, UnitOfWork, VerifiedTransfer } from "../ports.ts";
@@ -17,8 +17,6 @@ export interface SettleStats {
   /** Transfers or screenings that failed with an unexpected error; left as they are and retried next cycle. */
   errors: number;
 }
-
-const SCREENABLE = new Set(["paid", "overpaid", "paid_late"]);
 
 /**
  * Settlement (MatchPayment): match verified transfers to invoices, apply amount policies, change status and write
@@ -71,8 +69,9 @@ export class SettlePayments {
     const now = clock.now();
     const subject = txRefKey(v.ref);
     const unmatched = async (reason: string): Promise<void> => {
+      // Another worker may have settled this transfer since it was listed: then nothing is recorded twice.
+      if (!(await repos.transfers.markUnmatched(v.ref, reason))) return;
       stats.unmatched++;
-      await repos.transfers.markUnmatched(v.ref, reason);
       await repos.audit.record({ at: now, actor: "settlement", subject, decision: "unmatched", reason });
       await repos.outbox.append([
         {
@@ -105,9 +104,9 @@ export class SettlePayments {
       if (e instanceof DomainError) return unmatched(e.code);
       throw e;
     }
-    if (SCREENABLE.has(invoice.status)) invoice.startAmlReview(now);
+    if (invoice.needsAmlReview()) invoice.startAmlReview(now);
+    if (!(await repos.transfers.markMatched(v.ref, invoice.id))) return; // settled by another worker meanwhile
     await this.#save(repos, invoice);
-    await repos.transfers.markMatched(v.ref, invoice.id);
     await repos.audit.record({
       at: now,
       actor: "settlement",
@@ -129,12 +128,11 @@ export class SettlePayments {
       const belowThreshold = inv.received().units < threshold;
       try {
         for (const p of belowThreshold ? [] : payments) {
-          const [txHash = "", index = "0"] = p.transferKey.split("/").slice(-2);
           verdicts.push(
             await aml.screen({
               network: inv.state.asset.network,
               from: p.from,
-              txRef: { network: inv.state.asset.network, txHash, index: BigInt(index) },
+              txRef: parseTxRefKey(p.transferKey),
               amount: p.amount,
             }),
           );

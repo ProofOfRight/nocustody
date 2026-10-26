@@ -99,11 +99,13 @@ export class InMemoryStore implements UnitOfWork {
 
   #repos(): Repositories {
     const d = () => this.data;
-    const patch = (ref: TxRef, p: Partial<StoredTransfer>) => {
+    /** Like the SQL `UPDATE … WHERE status = 'verified'`: false when another worker settled the transfer first. */
+    const settle = (ref: TxRef, p: Partial<StoredTransfer>): boolean => {
       const key = txRefKey(ref);
       const cur = d().transfers.get(key);
-      if (!cur) throw new Error(`no transfer ${key}`);
+      if (cur?.status !== "verified") return false;
       d().transfers.set(key, { ...cur, ...p });
+      return true;
     };
     const patchCandidate = (network: NetworkId, txHash: string, p: Partial<StoredCandidate>) => {
       const key = `${network}/${txHash}`;
@@ -229,8 +231,8 @@ export class InMemoryStore implements UnitOfWork {
           [...d().transfers.values()]
             .filter((t) => t.transfer.ref.network === network && t.status === "verified")
             .slice(0, limit),
-        markMatched: async (ref, invoiceId) => patch(ref, { status: "matched", invoiceId }),
-        markUnmatched: async (ref, reason) => patch(ref, { status: "unmatched", reason }),
+        markMatched: async (ref, invoiceId) => settle(ref, { status: "matched", invoiceId }),
+        markUnmatched: async (ref, reason) => settle(ref, { status: "unmatched", reason }),
       },
       outbox: {
         append: async (events) => {

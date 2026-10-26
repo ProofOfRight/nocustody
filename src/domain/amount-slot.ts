@@ -4,7 +4,11 @@ import { type ChainAddress, sameAddress } from "./chain-address.ts";
 import { invariant } from "./errors.ts";
 import type { Money } from "./money.ts";
 
-/** A transfer timestamped up to this much before the slot opened still counts (clock skew). */
+/**
+ * Clock skew between the chain's block time and this server, used by the slot window and by `Invoice.applyPayment`
+ * alike: a transfer timestamped up to this much before the slot (invoice) opened still counts, and a new slot for the
+ * same pair may open only this long after the previous one closed. One constant, so the two checks cannot drift.
+ */
 export const SLOT_CLOCK_SKEW_MS = 30_000;
 
 /**
