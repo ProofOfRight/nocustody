@@ -18,7 +18,7 @@ Starting list of threats and mitigations for the gateway. Requirements contribut
 | Fake token / jetton / master contract | Contract / master taken from config, never from metadata; TON — our own jetton-wallet via `get_wallet_address` |
 | Failed or reverted transaction ("Flash USDT") | Credit only final and successful transactions (TRON solidified + `SUCCESS`; TON masterchain, no bounce, not aborted) |
 | Forged provider response | TLS only, finalized-state query, optional second source, reconciliation |
-| Late payment settles someone else's invoice | (address, amount) slot / memo locked until `expires_at + grace` |
+| Late payment settles someone else's invoice | (address, amount) slot / memo locked until `expires_at + grace`; allocation starts at a random slot, so a pair just released is rarely handed out next. Residual risk: a payment after grace for an old invoice meets a newer invoice that holds the same pair; a 5 s early-payment tolerance keeps a transfer that landed before an invoice from being claimed by it ([ADR-0030](adr/0030-early-payment-tolerance.md)) |
 | Double crediting | `UNIQUE(network, tx_hash, log_index \| lt)`, DB transactions |
 | Lost events on restart | Scanner cursor advances only after durable write; transactional outbox |
 | Forged / replayed webhook to the merchant | HMAC over timestamp + event id + body; webhook secret separate from the API key |
