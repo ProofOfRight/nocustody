@@ -27,6 +27,13 @@ services:
   postgres:
     image: postgres:18.6-alpine3.24@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
     restart: unless-stopped
+    # The entrypoint starts as root to own the data directory, then drops to the postgres user: these are the
+    # capabilities that needs; everything else is dropped. Limits keep a flood on the API from exhausting the host.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 1g
     environment:
       POSTGRES_USER: nocustody
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
@@ -44,6 +51,7 @@ services:
     <<: *gateway
     command: ["db:migrate"]
     restart: "no"
+    networks: [db] # migrations need the database only
     depends_on:
       postgres:
         condition: service_healthy

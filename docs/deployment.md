@@ -90,17 +90,24 @@ fresh copy for each verification, since the trusted root changes when Sigstore r
 The `migrate` service is the same image with the CLI as entrypoint; any CLI command can be run through it
 (`ops:status`, `apikey:list`, `webhook:retry-dead`, `invoice:show <id>`, …). See [src/app/cli.ts](../src/app/cli.ts).
 
-The gateway refuses to start when the startup checks fail (pinned checksum, TON jetton-wallet binding) and blocks
-new invoices if `config.json` changes while it runs. After changing the config, compute the new checksum, update
-`.env` and recreate the containers (`docker compose up -d`). Many editors replace a file instead of rewriting it;
-a bind-mounted file then keeps showing the old content inside the container until it is recreated.
+The gateway refuses to start when the startup checks fail (pinned checksum, TON jetton-wallet binding). While it
+runs, the pinned parts of `config.json` (addresses, contracts, providers, amount policies, pricing, AML, depeg,
+webhook URL — [ADR-0031](adr/0031-pinned-config-scope.md)) are re-read before every invoice and once a minute by
+the monitor: a change blocks new invoices and raises the `address_pin_violation` alert. Operational settings
+(timeouts, intervals, limits) are not pinned, but still need a restart to take effect. After changing a pinned
+setting, compute the new checksum, update `.env` and recreate the containers (`docker compose up -d`). Many editors
+replace a file instead of rewriting it; a bind-mounted file then keeps showing the old content inside the container
+until it is recreated.
 
 ## TLS and exposure
 
 The API speaks plain HTTP and must be published through a TLS reverse proxy (nginx, Caddy, Traefik):
 
 - `/v1/*` — for the merchant backend only; restrict by source address where possible;
-- `/pay/*` — for payers, only if the [payment page](payment-page.md) is enabled;
+- `/pay/*` — for payers, only if the [payment page](payment-page.md) is enabled. **Rate-limit it per client address
+  at the proxy** (nginx `limit_req`, Caddy `rate_limit`): the gateway's own limit for these routes is one bucket
+  shared by everybody behind the proxy, so one client could otherwise starve all payers of the page
+  ([payment-page.md](payment-page.md#security));
 - `/health` — for local monitoring; there is no need to publish it.
 
 The proxy must not cache responses; the gateway sends `cache-control: no-store`.
@@ -111,10 +118,27 @@ The proxy must not cache responses; the gateway sends `cache-control: no-store`.
 |---|---|
 | `read_only: true`, `tmpfs: /tmp` | nothing in the container can be modified at runtime |
 | `user: 65532:65532`, `cap_drop: [ALL]`, `no-new-privileges` | no root, no capabilities, no privilege escalation |
-| `pids_limit`, `mem_limit` | a bug or a flood cannot exhaust the host |
+| `pids_limit`, `mem_limit` (gateway and PostgreSQL) | a bug or a flood cannot exhaust the host |
+| PostgreSQL with `cap_drop: [ALL]` plus the five capabilities its entrypoint needs, `no-new-privileges` | the database container is hardened like the gateway |
 | API published on `127.0.0.1` | only the reverse proxy reaches it |
-| internal network `db` | PostgreSQL is not reachable from outside and has no internet access |
+| internal network `db`; `migrate` on `db` only | PostgreSQL is not reachable from outside and has no internet access; migrations need no egress |
 | config mounted `:ro` | the gateway cannot change its own addresses |
+
+What the compose file cannot do for you:
+
+- **Egress.** The gateway must reach its providers, so `egress` is an ordinary bridge network. On a cloud host,
+  block the instance metadata endpoint (`169.254.169.254`) from containers, or require IMDSv2 with a hop limit of 1;
+  otherwise code execution inside the container could read instance credentials.
+- **Who may change the pin.** `NOCUSTODY_PINNED_SHA256` lives in `.env`. If the same user can edit `config.json` and
+  `.env`, the pin only catches mistakes, not an attacker on the host. Where possible give `.env` a different owner
+  (root, mode 600) than the account that edits `config.json`, or deliver the pin as a compose `secrets:` file; the
+  address canary on another host remains the control against a compromised host.
+- **Database role.** The example connects as the PostgreSQL superuser. For production create a separate role for
+  the gateway without `CREATEDB`/`SUPERUSER`, grant it the tables of the `nocustody` database, run migrations as
+  the owner role, and revoke `UPDATE`/`DELETE` on `audit_log`, `invoice_payments` and `observed_transfers` from the
+  runtime role once the schema is in place. The gateway never needs to change those rows.
+- **A backup holds secrets.** `pg_dump` contains API key hashes, idempotency keys, webhook payloads and payer
+  addresses; protect dumps like the server. The webhook secret and provider keys are only in `.env`.
 
 ## Running roles separately
 
