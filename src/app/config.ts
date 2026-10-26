@@ -455,6 +455,7 @@ function assertKeyEnvs(raw: RawConfig): void {
   const secrets = new Map<string, string>([
     [raw.database.urlEnv, "database.urlEnv"],
     ["NOCUSTODY_PINNED_SHA256", "the pinned checksum"],
+    ["NOCUSTODY_DB_PASSWORD", "the gateway's database password (deploy/compose.yaml)"],
   ]);
   if (raw.webhooks) secrets.set(raw.webhooks.secretEnv, "webhooks.secretEnv");
   const keyEnvs: Array<[string | undefined, string]> = [

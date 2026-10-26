@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-# Example production deployment: PostgreSQL, a one-shot migration and the gateway with all roles in one process.
+# Example production deployment: PostgreSQL, a one-shot migration, the database grants and the gateway with all
+# roles in one process.
 # See docs/deployment.md. Copy this directory next to your config.json and .env (from .env.example).
 # Pin the image by digest after verifying its attestations (docs/deployment.md#verify-the-image).
 name: nocustody
@@ -16,9 +17,6 @@ x-gateway: &gateway
   mem_limit: 512m
   # Secrets and provider keys (NOCUSTODY_PINNED_SHA256, every *Env name used in config.json); see .env.example.
   env_file: [.env]
-  environment:
-    NOCUSTODY_CONFIG: /etc/nocustody/config.json
-    DATABASE_URL: postgres://nocustody:${POSTGRES_PASSWORD:?}@postgres:5432/nocustody
   volumes:
     - ./config.json:/etc/nocustody/config.json:ro
   networks: [db, egress]
@@ -50,19 +48,57 @@ services:
   migrate:
     <<: *gateway
     command: ["db:migrate"]
+    environment:
+      NOCUSTODY_CONFIG: /etc/nocustody/config.json
+      # Migrations (and CLI commands run through this service) use the owner role.
+      DATABASE_URL: postgres://nocustody:${POSTGRES_PASSWORD:?}@postgres:5432/nocustody
     restart: "no"
     networks: [db] # migrations need the database only
     depends_on:
       postgres:
         condition: service_healthy
 
+  # Creates the gateway's runtime role and (re)applies its grants after every migration (deploy/db-roles.sql).
+  db-roles:
+    image: postgres:18.6-alpine3.24@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
+    command:
+      - psql
+      - --no-psqlrc
+      - -v
+      - ON_ERROR_STOP=1
+      - -v
+      - "app_password=${NOCUSTODY_DB_PASSWORD:?set NOCUSTODY_DB_PASSWORD in .env}"
+      - -f
+      - /etc/nocustody/db-roles.sql
+    restart: "no"
+    user: postgres
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      PGHOST: postgres
+      PGUSER: nocustody
+      PGDATABASE: nocustody
+      PGPASSWORD: "${POSTGRES_PASSWORD:?}"
+    volumes:
+      - ./db-roles.sql:/etc/nocustody/db-roles.sql:ro
+    networks: [db]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   gateway:
     <<: *gateway
     command: ["run"]
     restart: unless-stopped
     stop_grace_period: 30s
+    environment:
+      NOCUSTODY_CONFIG: /etc/nocustody/config.json
+      # Runtime role: no DDL, payment history append-only. The owner password from .env is blanked here.
+      DATABASE_URL: postgres://nocustody_app:${NOCUSTODY_DB_PASSWORD:?}@postgres:5432/nocustody
+      POSTGRES_PASSWORD: ""
     depends_on:
-      migrate:
+      db-roles:
         condition: service_completed_successfully
     # The API must stay behind a TLS reverse proxy: publish on loopback only.
     ports:

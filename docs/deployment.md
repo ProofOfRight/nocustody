@@ -60,14 +60,14 @@ fresh copy for each verification, since the trusted root changes when Sigstore r
 
 ## First start
 
-1. Copy `deploy/compose.yaml` and `deploy/.env.example` into a directory on the server, rename the second one to
-   `.env` and `chmod 600 .env`.
+1. Copy `deploy/compose.yaml`, `deploy/db-roles.sql` and `deploy/.env.example` into a directory on the server,
+   rename the last one to `.env` and `chmod 600 .env`.
 2. Write `config.json` next to it. Start from [examples/](../examples/) and the [configuration reference](configuration.md).
    Inside the container the API must listen on all interfaces: `"api": { "host": "0.0.0.0" }`; compose publishes it
    on the host's loopback only. The file contains no secrets (only names of environment variables) and must be
    readable by UID 65532: `chmod 644 config.json`.
-3. Fill in `.env`: the image digest, `POSTGRES_PASSWORD` (`openssl rand -hex 32`) and every variable that
-   `config.json` refers to by name (`apiKeyEnv`, `secretEnv`, `botTokenEnv`).
+3. Fill in `.env`: the image digest, `POSTGRES_PASSWORD` and `NOCUSTODY_DB_PASSWORD` (`openssl rand -hex 32` each)
+   and every variable that `config.json` refers to by name (`apiKeyEnv`, `secretEnv`, `botTokenEnv`).
 4. Pin the addresses and contracts. Check every address in `config.json` against the wallet itself (not against a
    chat or e-mail), then compute the checksum and put it into `.env` as `NOCUSTODY_PINNED_SHA256`:
 
@@ -75,7 +75,8 @@ fresh copy for each verification, since the trusted root changes when Sigstore r
    docker compose run --rm --no-deps migrate config:hash
    ```
 
-5. Start. The `migrate` service applies migrations and exits; the gateway starts after it succeeds:
+5. Start. The `migrate` service applies migrations and exits, `db-roles` creates the gateway's database role and
+   grants it the tables ([database roles](#database-roles)); the gateway starts after both succeed:
 
    ```bash
    docker compose up -d --wait
@@ -121,8 +122,9 @@ The proxy must not cache responses; the gateway sends `cache-control: no-store`.
 | `pids_limit`, `mem_limit` (gateway and PostgreSQL) | a bug or a flood cannot exhaust the host |
 | PostgreSQL with `cap_drop: [ALL]` plus the five capabilities its entrypoint needs, `no-new-privileges` | the database container is hardened like the gateway |
 | API published on `127.0.0.1` | only the reverse proxy reaches it |
-| internal network `db`; `migrate` on `db` only | PostgreSQL is not reachable from outside and has no internet access; migrations need no egress |
+| internal network `db`; `migrate` and `db-roles` on `db` only | PostgreSQL is not reachable from outside and has no internet access; migrations need no egress |
 | config mounted `:ro` | the gateway cannot change its own addresses |
+| gateway connects as `nocustody_app`, the owner password is blanked in its environment | code execution in the gateway cannot change the schema or rewrite payment history ([database roles](#database-roles)) |
 
 What the compose file cannot do for you:
 
@@ -133,12 +135,24 @@ What the compose file cannot do for you:
   `.env`, the pin only catches mistakes, not an attacker on the host. Where possible give `.env` a different owner
   (root, mode 600) than the account that edits `config.json`, or deliver the pin as a compose `secrets:` file; the
   address canary on another host remains the control against a compromised host.
-- **Database role.** The example connects as the PostgreSQL superuser. For production create a separate role for
-  the gateway without `CREATEDB`/`SUPERUSER`, grant it the tables of the `nocustody` database, run migrations as
-  the owner role, and revoke `UPDATE`/`DELETE` on `audit_log`, `invoice_payments` and `observed_transfers` from the
-  runtime role once the schema is in place. The gateway never needs to change those rows.
 - **A backup holds secrets.** `pg_dump` contains API key hashes, idempotency keys, webhook payloads and payer
   addresses; protect dumps like the server. The webhook secret and provider keys are only in `.env`.
+
+## Database roles
+
+Two PostgreSQL roles:
+
+- `nocustody` — the owner (a superuser in the official image). Used by `migrate` and by CLI commands run through
+  it. Its password, `POSTGRES_PASSWORD`, is blanked in the gateway's environment.
+- `nocustody_app` — the gateway at runtime: no superuser, no `CREATEDB`/`CREATEROLE`, no DDL; reads and writes
+  rows, but cannot `UPDATE` or `DELETE` `audit_log` and `invoice_payments` or `DELETE` `observed_transfers` (the
+  gateway updates a transfer's status when it settles). Code execution in the gateway therefore cannot drop tables
+  or erase the record of what was credited.
+
+`db-roles` runs [deploy/db-roles.sql](../deploy/db-roles.sql) as the owner after every migration; it is idempotent,
+so tables added by an upgrade get the same grants. To rotate `NOCUSTODY_DB_PASSWORD`, change it in `.env` and run
+`docker compose up -d`. An existing deployment that connected as the owner switches on its next
+`docker compose up -d` once `NOCUSTODY_DB_PASSWORD` is set and `db-roles.sql` is next to `compose.yaml`.
 
 ## Running roles separately
 

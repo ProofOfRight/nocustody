@@ -191,6 +191,9 @@ describe("config", () => {
       parseConfig({ ...base(), tron: { ...tron, apiKeyEnv: "NOCUSTODY_PINNED_SHA256" } }, validators),
     ).toThrow(/pinned/);
     expect(() =>
+      parseConfig({ ...base(), tron: { ...tron, apiKeyEnv: "NOCUSTODY_DB_PASSWORD" } }, validators),
+    ).toThrow(/database password/);
+    expect(() =>
       parseConfig(
         {
           ...base(),

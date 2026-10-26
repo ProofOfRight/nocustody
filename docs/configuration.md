@@ -116,7 +116,8 @@ Monitoring, reconciliation, depeg protection, alerts and AML: see [operations.md
 | `aml { provider: noop \| blocklist, blocklistFile }` | `noop` |
 
 Durations must be above zero; intervals and timeouts between 1 s and 24 days. A provider key variable (`apiKeyEnv`,
-`botTokenEnv`) must not name another secret (`database.urlEnv`, `webhooks.secretEnv`, `POSTGRES_*`).
+`botTokenEnv`) must not name another secret (`database.urlEnv`, `webhooks.secretEnv`, `NOCUSTODY_DB_PASSWORD`,
+`POSTGRES_*`).
 
 ## `database`
 
