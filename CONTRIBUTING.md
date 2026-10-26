@@ -72,3 +72,11 @@ A pull request adding or changing a chain adapter must satisfy all of the follow
 8. External hosts, rate limits and costs are documented.
 
 Changes to `src/domain`, `src/application` and `src/adapters/chains` require maintainer review.
+
+## Agent instructions and audit skill
+
+`CLAUDE.md` and `.claude/` (including the project audit skill in `.claude/skills/project-audit/`) are instructions and
+scripts that AI coding agents execute, so a change there is reviewed like a change to CI: maintainer review, no
+instructions that relax a rule in `docs/security.md`, and scripts that run only what `make check` could run. The audit
+procedure is public on purpose; audit reports and anything private stay outside the repository
+([ADR-0020](docs/adr/0020-internal-docs-outside-repo.md)).
