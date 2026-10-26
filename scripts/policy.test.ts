@@ -56,5 +56,10 @@ describe("DCO", () => {
     expect(missingSignoff([{ sha: "a", author, signoffs: [author] }])).toEqual([]);
     expect(missingSignoff([{ sha: "b", author, signoffs: [] }])).toHaveLength(1);
     expect(missingSignoff([{ sha: "c", author, signoffs: ["Other <o@example.org>"] }])).toHaveLength(1);
+    const bot = "dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>";
+    expect(missingSignoff([{ sha: "d", author: bot, signoffs: [] }])).toEqual([]);
+    expect(missingSignoff([{ sha: "e", author: "dependabot <d@example.org>", signoffs: [] }])).toHaveLength(
+      1,
+    );
   });
 });
