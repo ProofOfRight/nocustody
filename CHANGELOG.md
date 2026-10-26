@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 Before 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
+## [Unreleased]
+
+**Upgrade note** for deployments from `deploy/compose.yaml`: add `NOCUSTODY_DB_PASSWORD` to `.env` and copy
+`deploy/db-roles.sql` next to `compose.yaml`; the gateway then connects as its own role
+([database roles](docs/deployment.md#database-roles)).
+
+### Security
+
+- TON: anyone could stop the TON scanner by sending our jetton-wallet a few messages with large bodies (up to
+  256 KiB each): a page of them exceeded the provider response limit and the scan failed on every cycle. The page
+  now shrinks until the answer fits.
+- The example deployment runs the gateway as `nocustody_app`: no DDL, no superuser, and `audit_log`,
+  `invoice_payments` and `observed_transfers` cannot be rewritten or deleted; the owner password no longer reaches
+  the gateway container. The variable `NOCUSTODY_DB_PASSWORD` may not be used as a provider key.
+
+### Fixed
+
+- Reconciliation: when a second source returned only part of the window (more transfers than its page budget), the
+  credited transfers it left out were reported as `reconcile-unknown`. The comparison is now skipped with a
+  `reconcile-truncated` alert; Tronscan is asked for the window end too.
+- Provider integers beyond 2^53 (tonapi GRAM values) are parsed exactly as bigint instead of being rounded.
+- Laravel example: a webhook event recorded while the queue was down was never processed (the retry found the row
+  and queued nothing). The job is queued while the event is unprocessed, runs once under a row lock, and a
+  scheduled task re-queues events left behind.
+
 ## [0.3.0] - 2026-10-26
 
 Results of the first full project audit (code, tests, security). **Upgrade note:** the pinned checksum changed
@@ -142,6 +167,7 @@ mainnet**; start with small amounts.
 - Production container image (`FROM scratch`, non-root, no shell), example `docker compose` deployment,
   reproducible multi-arch builds, signed build provenance and SPDX SBOM attestations.
 
+[Unreleased]: https://github.com/ProofOfRight/nocustody/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/ProofOfRight/nocustody/releases/tag/v0.3.0
 [0.2.1]: https://github.com/ProofOfRight/nocustody/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ProofOfRight/nocustody/releases/tag/v0.2.0
