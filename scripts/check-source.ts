@@ -25,8 +25,27 @@ export const FORBIDDEN: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
 // combining grapheme joiner, Khmer and Mongolian format characters, interlinear annotation marks, musical format
 // characters, and the LINE/PARAGRAPH SEPARATORs U+2028/U+2029, which end a JavaScript line comment while most
 // editors show them as part of it.
-export const INVISIBLE =
-  /[\u00AD\u061C\u115F\u1160\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\u3164\uFEFF\uFFA0\uFFF9-\uFFFB\u{1D173}-\u{1D17A}\u{E0000}-\u{E007F}]|[\u034F\u17B4\u17B5\u180B-\u180F\uFE00-\uFE0E\u{E0100}-\u{E01EF}]/gu;
+const INVISIBLE_CODE_POINTS = [
+  "\\u00AD", // soft hyphen
+  "\\u034F", // combining grapheme joiner
+  "\\u061C", // Arabic letter mark
+  "\\u115F\\u1160", // Hangul fillers
+  "\\u17B4\\u17B5", // Khmer inherent vowels
+  "\\u180B-\\u180F", // Mongolian free variation selectors and vowel separator
+  "\\u200B-\\u200F", // zero-width space/joiners, bidi marks
+  "\\u2028-\\u202E", // line/paragraph separator, bidi embeddings and overrides
+  "\\u2060-\\u2064", // word joiner, invisible operators
+  "\\u2066-\\u2069", // bidi isolates
+  "\\u3164", // Hangul filler
+  "\\uFE00-\\uFE0E", // variation selectors (U+FE0F, emoji presentation, is allowed)
+  "\\uFEFF", // byte order mark / zero-width no-break space
+  "\\uFFA0", // halfwidth Hangul filler
+  "\\uFFF9-\\uFFFB", // interlinear annotation
+  "\\u{1D173}-\\u{1D17A}", // musical symbol format characters
+  "\\u{E0000}-\\u{E007F}", // tags
+  "\\u{E0100}-\\u{E01EF}", // variation selectors supplement
+];
+export const INVISIBLE = new RegExp(`[${INVISIBLE_CODE_POINTS.join("")}]`, "gu");
 
 const TEXT_FILE =
   /\.(ts|mjs|js|json|md|ya?ml|sql|sh|php|py|tsv|txt|example)$|(^|\/)(CODEOWNERS|Makefile|Dockerfile|LICENSE|NOTICE|\.gitignore|\.npmrc|\.dockerignore|\.env\.example)$/;
