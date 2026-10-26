@@ -67,6 +67,17 @@ jobs:
       - name: Build the image and smoke-test deploy/compose.yaml
         run: sh scripts/smoke-image.sh
 
+  examples:
+    # The PHP and Laravel examples are what merchants copy to verify webhook signatures: syntax plus the shared
+    # signature test vector, with the same pinned PHP image as `make php-selftest`.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make php-selftest
+
   dco:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04

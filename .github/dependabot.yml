@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Updates are proposed weekly and always reviewed manually (docs/adr/0007-minimal-dependencies.md).
-# One grouped pull request per ecosystem and week instead of one per dependency.
+# One grouped pull request per ecosystem and week instead of one per dependency. A version is proposed only after
+# it has been published for a week: most hijacked package versions are pulled within days.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     open-pull-requests-limit: 5
     groups:
       npm:
@@ -17,12 +19,14 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     groups:
       github-actions:
         patterns: ["*"]
   - package-ecosystem: docker-compose
     directories: [/, /deploy]
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     groups:
       docker-compose:
         patterns: ["*"]
@@ -30,6 +34,7 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     groups:
       docker:
         patterns: ["*"]
