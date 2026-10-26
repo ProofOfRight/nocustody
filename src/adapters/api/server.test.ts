@@ -2,6 +2,7 @@
 import { connect } from "node:net";
 import { afterAll, describe, expect, it } from "vitest";
 import { AssetCatalog, type AssetSettings } from "../../application/catalog.ts";
+import { ApplicationError } from "../../application/errors.ts";
 import type { ApiScope } from "../../application/ports.ts";
 import { RateService } from "../../application/rates.ts";
 import { UniqueAmountStrategy } from "../../application/strategies/unique-amount.ts";
@@ -69,7 +70,7 @@ async function client(api: ApiServer) {
 const ADDR = chainAddress(TRON, "TAddrA111111111111111111111111111");
 
 async function setup(
-  opts: { rateLimit?: number; failing?: boolean; page?: boolean; publicLimit?: number } = {},
+  opts: { rateLimit?: number; failing?: boolean | Error; page?: boolean; publicLimit?: number } = {},
 ) {
   const store = new InMemoryStore();
   const settings: AssetSettings = {
@@ -110,7 +111,10 @@ async function setup(
       uow: store,
       createInvoice: opts.failing
         ? ({
-            execute: async () => Promise.reject(new Error("secret db password in message")),
+            execute: async () =>
+              Promise.reject(
+                opts.failing instanceof Error ? opts.failing : new Error("secret db password in message"),
+              ),
           } as unknown as CreateInvoice)
         : createInvoice,
       quotePrice: new QuotePrice(catalog, pricing, rates),
@@ -289,6 +293,19 @@ describe("merchant API", () => {
     expect(r.body).not.toContain("password");
     expect(r.json()).toEqual({ error: { code: "internal", message: "internal error" } });
     expect(errors).toHaveLength(1);
+  });
+
+  it("an operator-side application error is 500 with its code, one never expected in a request is 500 internal", async () => {
+    const memo = await setup({ failing: new ApplicationError("allocation.bad_memo", "generator detail") });
+    const r = await memo.create();
+    expect(r.statusCode).toBe(500); // was 422: the code had no status and fell back to a client error
+    expect(r.json()).toEqual({ error: { code: "allocation.bad_memo", message: "internal error" } });
+    expect(memo.errors).toHaveLength(1);
+    const cli = await setup({ failing: new ApplicationError("invoice.not_found", "inv-1 detail") });
+    const r2 = await cli.create();
+    expect(r2.statusCode).toBe(500);
+    expect(r2.json()).toEqual({ error: { code: "internal", message: "internal error" } });
+    expect(cli.errors).toHaveLength(1);
   });
 
   it("accepts RFC 3339 timestamps with an offset in since, as the OpenAPI format date-time promises", async () => {

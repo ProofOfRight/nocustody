@@ -5,7 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { z } from "zod";
-import { ApplicationError, ConcurrencyError } from "../../application/errors.ts";
+import { ApplicationError, type ApplicationErrorCode, ConcurrencyError } from "../../application/errors.ts";
 import type { ApiKeyRecord, ApiScope, ChainAdapter, Clock, UnitOfWork } from "../../application/ports.ts";
 import type { CreateInvoice } from "../../application/use-cases/create-invoice.ts";
 import type { QuotePrice } from "../../application/use-cases/quote-price.ts";
@@ -82,8 +82,11 @@ class HttpError extends Error {
   }
 }
 
-/** Application error code → HTTP status; every code here is listed in docs/api/openapi.yaml (contract test). */
-export const APP_ERRORS: Readonly<Record<string, number>> = {
+/**
+ * Application error code → HTTP status; every code with a status is listed in docs/api/openapi.yaml (contract test).
+ * null: never raised while serving a request (startup, CLI); if it ever is, the client gets 500 internal.
+ */
+export const APP_ERRORS: Readonly<Record<ApplicationErrorCode, number | null>> = {
   "asset.unknown": 422,
   "pricing.currency_disabled": 422,
   "invoice.zero_amount": 422,
@@ -95,6 +98,9 @@ export const APP_ERRORS: Readonly<Record<string, number>> = {
   "allocation.memo_collision": 503,
   "integrity.pin_violation": 503,
   "invoice.address_unpinned": 500,
+  "allocation.bad_memo": 500,
+  "config.duplicate_asset": null,
+  "invoice.not_found": null,
 };
 
 export function invoiceDto(inv: Invoice, adapters: readonly ChainAdapter[]) {
@@ -383,7 +389,11 @@ export class ApiServer {
     });
     if (err instanceof HttpError) return fail(err.status, err.code, err.message);
     if (err instanceof ApplicationError) {
-      const status = APP_ERRORS[err.code] ?? 422;
+      const status = APP_ERRORS[err.code];
+      if (status === null) {
+        this.#d.onError?.(err);
+        return fail(500, "internal", "internal error");
+      }
       if (status >= 500) {
         // an operator problem (e.g. a stored address outside the pinned list): log the detail, answer a fixed code
         this.#d.onError?.(err);

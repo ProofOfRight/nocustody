@@ -73,7 +73,8 @@ describe("docs/api/openapi.yaml against the server", () => {
       "conflict",
       "internal",
     ];
-    for (const code of [...Object.keys(APP_ERRORS), ...transport]) expect(listed, code).toContain(code);
+    const served = Object.entries(APP_ERRORS).flatMap(([code, status]) => (status === null ? [] : [code]));
+    for (const code of [...served, ...transport]) expect(listed, code).toContain(code);
   });
 });
 
