@@ -10,5 +10,9 @@ updates:
     directory: /
     schedule: { interval: weekly }
   - package-ecosystem: docker-compose
+    directories: [/, /deploy]
+    schedule: { interval: weekly }
+  # Base image of the production Dockerfile.
+  - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }

@@ -18,6 +18,25 @@ gateway only watches them. See [security.md](security.md) and [operations.md](op
 
 Always deploy a verified digest, not a tag; see [Verify the image](#verify-the-image).
 
+## Verify the image
+
+Each release image carries signed attestations made by the release workflow ([ADR-0029](adr/0029-release-provenance.md)):
+SLSA build provenance and an SPDX SBOM. Verify the digest from the release notes with a current GitHub CLI
+before deploying it:
+
+```bash
+IMAGE=ghcr.io/proofofright/nocustody@sha256:<digest>
+gh attestation verify oci://$IMAGE --repo ProofOfRight/nocustody \
+  --signer-workflow ProofOfRight/nocustody/.github/workflows/release.yml --source-ref refs/tags/v0.1.0
+gh attestation verify oci://$IMAGE --repo ProofOfRight/nocustody \
+  --signer-workflow ProofOfRight/nocustody/.github/workflows/release.yml --source-ref refs/tags/v0.1.0 \
+  --predicate-type https://spdx.dev/Document/v2.3 --format json --jq '.[0].verificationResult.statement.predicate'
+```
+
+The first command proves the image was built by the release workflow of this repository from that tag; the second
+prints the verified SBOM. Builds are reproducible: you can also rebuild the tag and compare digests
+([releasing.md](releasing.md#reproducing-a-release-build)).
+
 ## First start
 
 1. Copy `deploy/compose.yaml` and `deploy/.env.example` into a directory on the server, rename the second one to

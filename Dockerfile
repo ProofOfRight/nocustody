@@ -4,17 +4,17 @@
 # The application is plain JavaScript (no native modules), so dependencies are installed and the code is compiled
 # once on the build platform. The runtime stage takes only the Node binary and the C/C++ runtime it links against
 # from the official image for the target platform: no shell, no package manager, no npm.
-
-# Same image as the dev container in compose.yaml; pinned by version and multi-arch index digest.
-ARG NODE_IMAGE=node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797
+#
+# Every stage uses the same Node image as the dev container in compose.yaml, pinned by version and multi-arch index
+# digest. It is written out in each FROM (not an ARG) so that Dependabot can update it; keep the four identical.
 
 # Production dependencies only, from the lockfile, lifecycle scripts disabled.
-FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS deps
+FROM --platform=$BUILDPLATFORM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS deps
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
-FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS build
+FROM --platform=$BUILDPLATFORM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
@@ -23,14 +23,14 @@ COPY src ./src
 RUN npm run build
 
 # Account database and a sticky /tmp for the scratch image (text files, platform independent).
-FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS rootfs
+FROM --platform=$BUILDPLATFORM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS rootfs
 RUN mkdir -p /out/etc /out/tmp \
  && chmod 1777 /out/tmp \
  && echo 'nonroot:x:65532:65532:nonroot:/nonexistent:/sbin/nologin' > /out/etc/passwd \
  && echo 'nonroot:x:65532:' > /out/etc/group
 
 # Target platform: only files are copied out of it, nothing runs there (no emulation for multi-arch builds).
-FROM ${NODE_IMAGE} AS node
+FROM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS node
 
 FROM scratch
 ARG VERSION=dev

@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: Apache-2.0
+# Release on a version tag: full CI, multi-arch image to GHCR, signed SLSA provenance and SBOM attestations,
+# GitHub release. See docs/releasing.md and docs/adr/0029-release-provenance.md.
+# Third-party actions are pinned by commit SHA; Docker is driven through the CLI preinstalled on the runner.
+name: release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  release:
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Maintainers can require an approval for this environment in the repository settings.
+    environment: release
+    permissions:
+      contents: write # GitHub release
+      packages: write # push to ghcr.io
+      id-token: write # short-lived Sigstore certificate for the attestations
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Tag matches package.json; reproducible build inputs
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [ "$(jq -r .version package.json)" = "$version" ] || { echo "tag $GITHUB_REF_NAME != package.json"; exit 1; }
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "CHANGELOG.md has no section for $version"; exit 1; }
+          {
+            echo "VERSION=$version"
+            echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}"
+            echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)"
+          } >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Build and push linux/amd64 + linux/arm64
+        run: |
+          docker buildx create --use --name release --driver docker-container \
+            --driver-opt image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c
+          # BuildKit's own (unsigned) attestations are off: provenance and SBOM are attested and signed below,
+          # and the image digest stays reproducible from the source.
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --build-arg SOURCE_DATE_EPOCH --build-arg VERSION="$VERSION" --build-arg REVISION="$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --provenance=false --sbom=false \
+            --output "type=image,name=$IMAGE:$VERSION,push=true,rewrite-timestamp=true" \
+            --metadata-file "$RUNNER_TEMP/metadata.json" .
+          echo "DIGEST=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.12.1
+
+      - name: SBOM of the image contents (SPDX)
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node scripts/sbom.ts > "nocustody-$VERSION.spdx.json"
+
+      - name: Attest build provenance of the image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          push-to-registry: true
+
+      - name: Attest the SBOM for the image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          sbom-path: nocustody-${{ env.VERSION }}.spdx.json
+          push-to-registry: true
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          awk -v v="$VERSION" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          cat >> "$RUNNER_TEMP/notes.md" <<EOF
+
+          ## Image
+
+          \`$IMAGE:$VERSION@$DIGEST\` (linux/amd64, linux/arm64)
+
+          Verify before deploying (docs/deployment.md#verify-the-image):
+
+          \`\`\`
+          gh attestation verify oci://$IMAGE@$DIGEST --repo $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref $GITHUB_REF
+          \`\`\`
+          EOF
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "nocustody $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" "nocustody-$VERSION.spdx.json"
