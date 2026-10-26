@@ -246,7 +246,10 @@ export interface OutboxMessage {
   readonly attempts: number;
 }
 
-/** Delivery side of the outbox. `claim` leases due rows (SKIP LOCKED) so parallel dispatchers never double-send. */
+/**
+ * Delivery side of the outbox. `claim` leases due rows (SKIP LOCKED) so parallel dispatchers never double-send, as
+ * long as `leaseMs` outlives the caller's whole batch. mark* calls are by row id and do not check the lease.
+ */
 export interface OutboxDelivery {
   claim(now: Date, leaseMs: number, limit: number): Promise<OutboxMessage[]>;
   markDelivered(id: string, at: Date): Promise<void>;
