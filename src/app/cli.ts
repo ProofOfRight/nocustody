@@ -15,7 +15,7 @@ import { ALL_SCOPES, newApiKey } from "../adapters/api/keys.ts";
 import { migrate } from "../adapters/persistence/pg/migrate.ts";
 import type { ApiScope } from "../application/ports.ts";
 import { assertPinned, type Config, loadConfigFile } from "./config.ts";
-import { addressValidators, buildContainer, type Container, createPool, runCycle } from "./container.ts";
+import { addressValidators, buildContainer, type Container, createPool, runNetwork } from "./container.ts";
 import { ConfigFilePinGuard } from "./integrity.ts";
 import { logger } from "./logger.ts";
 import { runLoop } from "./loop.ts";
@@ -284,8 +284,11 @@ async function main(argv: string[]): Promise<void> {
         logger.info({ host: config.raw.api.host, port: config.raw.api.port }, "api listening");
       }
       if (roles.has("worker")) {
+        // One loop per network at its own pollInterval: a slow provider delays only its own network.
+        for (const w of container.workers)
+          loop(`worker:${w.adapter.network}`, w.pollIntervalMs, () => runNetwork(container, w));
         const interval = Math.min(...container.workers.map((w) => w.pollIntervalMs));
-        loop("worker", interval, () => runCycle(container));
+        loop("expiry", interval, () => container.expireInvoices.execute());
       }
       if (roles.has("dispatcher")) {
         const dispatcher = container.dispatcher;

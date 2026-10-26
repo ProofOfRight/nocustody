@@ -154,6 +154,8 @@ const opsSchema = z
       .prefault({}),
     /** Alert when a scanner has not completed a cycle for this long. Defaults: TRON 5m, TON 2m. */
     maxScannerLag: z.record(z.string(), duration).default({}),
+    /** With webhooks configured: alert when the dispatcher has not completed a cycle, or an event has been due, this long. */
+    maxDispatcherLag: duration.default("5m"),
     /** Reject candidates still not final this long after their block time. */
     candidateMaxAge: duration.default("24h"),
     reconcile: z

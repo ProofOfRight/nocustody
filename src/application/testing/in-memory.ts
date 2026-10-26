@@ -268,7 +268,7 @@ export class InMemoryStore implements UnitOfWork {
               eventId: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
               event,
               attempts: 0,
-              nextAttemptAt: 0,
+              nextAttemptAt: event.occurredAt.getTime(), // like the SQL: due when it happened
               deliveredAt: null,
               deadAt: null,
               lastError: null,
@@ -306,6 +306,12 @@ export class InMemoryStore implements UnitOfWork {
           if (r) Object.assign(r, { attempts: r.attempts + 1, deadAt: at, lastError: error });
         },
         countDead: async () => d().outboxRows.filter((r) => r.deadAt).length,
+        oldestDue: async (now) => {
+          const due = d()
+            .outboxRows.filter((r) => !r.deliveredAt && !r.deadAt && r.nextAttemptAt <= now.getTime())
+            .map((r) => r.nextAttemptAt);
+          return due.length > 0 ? new Date(Math.min(...due)) : null;
+        },
         pruneDelivered: async (before) => {
           const keep = d().outboxRows.filter((r) => !(r.deliveredAt && r.deliveredAt < before));
           const n = d().outboxRows.length - keep.length;

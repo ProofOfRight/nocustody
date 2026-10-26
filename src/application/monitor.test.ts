@@ -51,6 +51,7 @@ function setup(
     secondary?: SecondarySource[];
     asset?: AssetSettings;
     integrity?: IntegrityGuard;
+    dispatcherLagMs?: number;
   } = {},
 ) {
   let t = T0;
@@ -70,6 +71,7 @@ function setup(
     reconcileSettleDelayMs: 10 * MIN,
     depeg: o.peg ? { symbol: "USDT", sources: o.peg, maxDeviationBps: 150 } : null,
     ...(o.integrity ? { integrity: o.integrity } : {}),
+    ...(o.dispatcherLagMs ? { maxDispatcherLagMs: o.dispatcherLagMs } : {}),
   };
   const monitor = new Monitor(monitorDeps);
   const uniqueAmount = new UniqueAmountStrategy();
@@ -122,6 +124,29 @@ describe("monitor: health", () => {
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("pinned checksum mismatch");
     expect(s.sent.at(-1)).toMatchObject({ key: "address_pin_violation", severity: "critical" });
+  });
+
+  it("with webhooks configured, a dispatcher that stopped or a webhook due for too long is an alert", async () => {
+    const s = setup({ dispatcherLagMs: 5 * MIN });
+    await s.store.run((r) => r.heartbeats.ok(`scanner:${TRON}`, s.clock.now()));
+    // never ran
+    expect(await s.monitor.checkHealth()).toEqual(["dispatcher last succeeded never"]);
+    expect(s.sent.at(-1)).toMatchObject({ key: "dispatcher-lag", severity: "critical" });
+    await s.store.run((r) => r.heartbeats.ok("dispatcher", s.clock.now()));
+    expect(await s.monitor.checkHealth()).toEqual([]);
+    // the dispatcher reports healthy cycles, but an event has been due for longer than the lag (stuck on one send)
+    await s.store.run((r) =>
+      r.outbox.append([{ type: "invoice.paid", aggregateId: "a", occurredAt: new Date(T0), data: {} }]),
+    );
+    s.advance(6 * MIN);
+    await s.store.run((r) => r.heartbeats.ok("dispatcher", s.clock.now()));
+    await s.store.run((r) => r.heartbeats.ok(`scanner:${TRON}`, s.clock.now()));
+    const problems = await s.monitor.checkHealth();
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/due for 360 s/);
+    expect(s.sent.at(-1)).toMatchObject({ key: "webhooks-backlog", severity: "warning" });
+    // without webhooks configured nothing about the dispatcher is checked
+    expect(await setup().monitor.checkHealth()).toEqual(["scanner tron:mainnet last succeeded never"]);
   });
 
   it("alerts on dead-lettered webhooks", async () => {
