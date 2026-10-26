@@ -40,7 +40,16 @@ const assetSchema = z
     priceSymbol: z.string().regex(/^[A-Z][A-Z0-9]{1,9}$/),
     strategy: z.enum(["unique-amount", "memo"]).default("unique-amount"),
     addresses: z
-      .array(z.object({ address: z.string().min(1), status: z.enum(["active", "draining"]) }).strict())
+      .array(
+        z
+          .object({
+            address: z.string().min(1),
+            status: z.enum(["active", "draining"]),
+            /** TON jetton assets: this owner's jetton-wallet; verified with get_wallet_address at startup. */
+            jettonWallet: z.string().min(1).optional(),
+          })
+          .strict(),
+      )
       .min(1),
     amounts: z
       .object({
@@ -72,10 +81,26 @@ const tronSchema = z
   })
   .strict();
 
+const tonSchema = z
+  .object({
+    network: z.string(),
+    apiUrl: httpsUrl,
+    apiKeyEnv: envName.optional(),
+    timeout: duration.default("10s"),
+    pollInterval: duration.default("10s"),
+    overlap: duration.default("10m"),
+    startFrom: z.string().datetime(),
+    /** toncenter allows 1 request/s without a key. */
+    minInterval: duration.default("1100ms"),
+    maxResponseBytes: z.number().int().min(1_024).max(50_000_000).default(5_000_000),
+  })
+  .strict();
+
 export const configSchema = z
   .object({
     database: z.object({ urlEnv: envName.default("DATABASE_URL") }).strict(),
     tron: tronSchema.optional(),
+    ton: tonSchema.optional(),
     assets: z.array(assetSchema).min(1),
     pricing: z
       .object({
@@ -144,11 +169,20 @@ export function parseConfig(json: unknown, validators: AddressValidators): Confi
       symbol: a.symbol,
     });
     const seen = new Set<string>();
+    const needsTokenAccount = network.startsWith("ton:") && a.kind === "token";
     const addresses = a.addresses.map((x) => {
       const address = validate(network, x.address);
       if (seen.has(address.value)) throw new ConfigError(`duplicate address ${address.value} in ${a.id}`);
       seen.add(address.value);
-      return { address, status: x.status };
+      if (needsTokenAccount && !x.jettonWallet)
+        throw new ConfigError(`${a.id}: ${x.address} needs jettonWallet`);
+      if (!needsTokenAccount && x.jettonWallet)
+        throw new ConfigError(`${a.id}: jettonWallet is only for TON jettons`);
+      return {
+        address,
+        status: x.status,
+        tokenAccount: x.jettonWallet ? validate(network, x.jettonWallet) : null,
+      };
     });
     if (!addresses.some((x) => x.status === "active"))
       throw new ConfigError(`asset ${a.id} has no active address`);
@@ -202,7 +236,9 @@ export function pinnedChecksum(assets: readonly AssetSettings[]): string {
     const a = s.asset;
     lines.push(["asset", a.id, a.network, a.kind, a.contract ?? "-", String(a.decimals)].join("\t"));
     for (const x of [...s.addresses].sort((p, q) => (p.address.value < q.address.value ? -1 : 1))) {
-      lines.push(["address", a.id, x.address.value, x.status].join("\t"));
+      const fields = ["address", a.id, x.address.value, x.status];
+      if (x.tokenAccount) fields.push(x.tokenAccount.value);
+      lines.push(fields.join("\t"));
     }
   }
   return createHash("sha256")

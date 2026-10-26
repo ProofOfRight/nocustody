@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { chainAddress } from "../domain/chain-address.ts";
 import type { NetworkId } from "../domain/network.ts";
 import { type AddressValidators, assertPinned, ConfigError, parseConfig } from "./config.ts";
+import { addressValidators } from "./container.ts";
 import { parseDuration } from "./duration.ts";
 import { ConfigFilePinGuard } from "./integrity.ts";
 
@@ -149,5 +150,54 @@ describe("config", () => {
     expect(parseDuration("2h")).toBe(7_200_000);
     expect(() => parseDuration("1.5h")).toThrow();
     expect(() => parseDuration("10")).toThrow();
+  });
+});
+
+describe("TON config", () => {
+  const OWNER = "0:326bcaf1f252ca9e3458fe73348566afe805f7c5b40339277260bcb2fc8762b0";
+  const JW = "0:58594ddbf5aae9eff2baf115da69590be38e07e89e79768915fda3089c190f6b";
+  const MASTER = "0:f418a04cf196ebc959366844a6cdf53a6fd6fff1eadafc892f05210bba31593e";
+  const ton = (address: Record<string, unknown>, kind: "token" | "native" = "token") => ({
+    database: {},
+    ton: {
+      network: "ton:testnet",
+      apiUrl: "https://testnet.toncenter.com",
+      startFrom: "2026-10-25T00:00:00Z",
+    },
+    assets: [
+      {
+        id: "usdt-ton",
+        network: "ton:testnet",
+        kind,
+        contract: kind === "token" ? MASTER : null,
+        decimals: kind === "token" ? 6 : 9,
+        symbol: "USDT",
+        priceSymbol: "USDT",
+        strategy: "memo",
+        addresses: [{ status: "active", ...address }],
+        amounts: { step: "0.01", maxSlots: 99 },
+      },
+    ],
+    pricing: {},
+  });
+
+  it("requires a jetton-wallet for jettons, forbids it elsewhere, and pins it", () => {
+    const cfg = parseConfig(ton({ address: OWNER, jettonWallet: JW }), addressValidators);
+    expect(cfg.assets[0]?.addresses[0]?.tokenAccount?.value).toBe(JW);
+    expect(cfg.assets[0]?.strategy).toBe("memo");
+    expect(() => parseConfig(ton({ address: OWNER }), addressValidators)).toThrow("needs jettonWallet");
+    expect(() => parseConfig(ton({ address: OWNER, jettonWallet: JW }, "native"), addressValidators)).toThrow(
+      "only for TON jettons",
+    );
+    const other = parseConfig(ton({ address: OWNER, jettonWallet: MASTER }), addressValidators);
+    expect(other.pinnedChecksum).not.toBe(cfg.pinnedChecksum);
+  });
+
+  it("accepts friendly addresses and pins their canonical raw form", () => {
+    const friendly = parseConfig(
+      ton({ address: "0QAya8rx8lLKnjRY_nM0hWav6AX3xbQDOSdyYLyy_IdisOvo", jettonWallet: JW }),
+      addressValidators,
+    );
+    expect(friendly.assets[0]?.addresses[0]?.address.value).toBe(OWNER);
   });
 });

@@ -15,8 +15,8 @@ import { type ChainAddress, chainAddress } from "../../../domain/chain-address.t
 import { Money } from "../../../domain/money.ts";
 import type { NetworkId } from "../../../domain/network.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
+import type { JsonHttpClient } from "../../http/json-client.ts";
 import { parseTronAddress, tronAddressFromHex, tronAddressToHex20 } from "./address.ts";
-import type { TronHttpClient } from "./http.ts";
 import { solidTxInfoSchema, trc20HistorySchema } from "./schemas.ts";
 
 /** keccak256("Transfer(address,address,uint256)") */
@@ -24,7 +24,7 @@ export const TRANSFER_TOPIC = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a1162
 
 export interface TronAdapterOptions {
   readonly network: NetworkId;
-  readonly client: TronHttpClient;
+  readonly client: JsonHttpClient;
   /** Scan start when there is no cursor yet. */
   readonly startFrom: Date;
   /** Each scan re-reads this much before the cursor, so late-indexed transfers are not skipped. */

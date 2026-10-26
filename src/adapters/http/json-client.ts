@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Minimal HTTPS JSON client for TRON providers: https only, no redirects, timeout, response size limit,
-// schema validation, retries with exponential backoff and jitter. The API key is sent only in its header.
+// Minimal HTTPS JSON client for blockchain providers: https only, no redirects, never leaves the configured host,
+// timeout, response size limit, schema validation, client-side rate limit, retries with exponential backoff and
+// jitter. The API key is sent only in its header.
 import { randomInt } from "node:crypto";
 import type { z } from "zod";
 
@@ -9,6 +10,10 @@ export type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 export interface HttpOptions {
   readonly baseUrl: string;
   readonly apiKey?: string | undefined;
+  /** Header that carries the API key, e.g. TRON-PRO-API-KEY (TronGrid) or X-API-Key (toncenter). */
+  readonly apiKeyHeader?: string;
+  /** Minimum interval between requests (provider rate limit without a key). */
+  readonly minIntervalMs?: number;
   readonly timeoutMs: number;
   readonly maxResponseBytes: number;
   readonly maxAttempts?: number;
@@ -31,15 +36,18 @@ export class ProviderError extends Error {
 
 const RETRY_STATUS = new Set([403, 408, 429, 500, 502, 503, 504]);
 
-export class TronHttpClient {
+export class JsonHttpClient {
   readonly #base: URL;
   readonly #o: Required<Omit<HttpOptions, "apiKey">> & { apiKey: string | undefined };
+  #next = 0;
 
   constructor(o: HttpOptions) {
     const base = new URL(o.baseUrl);
-    if (base.protocol !== "https:") throw new Error("TRON provider URL must use https");
+    if (base.protocol !== "https:") throw new Error("provider URL must use https");
     this.#base = base;
     this.#o = {
+      apiKeyHeader: "X-API-Key",
+      minIntervalMs: 0,
       maxAttempts: 4,
       baseDelayMs: 500,
       fetch: (url, init) => fetch(url, init),
@@ -87,10 +95,19 @@ export class TronHttpClient {
     throw last ?? new ProviderError("request failed", true);
   }
 
+  async #throttle(): Promise<void> {
+    if (this.#o.minIntervalMs <= 0) return;
+    const now = Date.now();
+    const wait = this.#next - now;
+    this.#next = Math.max(now, this.#next) + this.#o.minIntervalMs;
+    if (wait > 0) await this.#o.sleep(wait);
+  }
+
   async #once<T>(url: URL, init: RequestInit, schema: z.ZodType<T>): Promise<T> {
+    await this.#throttle();
     const headers = new Headers(init.headers);
     headers.set("accept", "application/json");
-    if (this.#o.apiKey) headers.set("TRON-PRO-API-KEY", this.#o.apiKey);
+    if (this.#o.apiKey) headers.set(this.#o.apiKeyHeader, this.#o.apiKey);
     let res: Response;
     try {
       res = await this.#o.fetch(url.toString(), {

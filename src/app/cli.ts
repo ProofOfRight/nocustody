@@ -25,7 +25,7 @@ function databaseUrl(config: Config): string {
   return url;
 }
 
-function start(): { config: Config; container: Container } {
+async function start(): Promise<{ config: Config; container: Container }> {
   const path = configPath();
   const config = loadConfigFile(path, addressValidators);
   const expected = process.env.NOCUSTODY_PINNED_SHA256;
@@ -36,7 +36,14 @@ function start(): { config: Config; container: Container } {
       "pinned config changed: new invoices are blocked",
     ),
   );
-  return { config, container: buildContainer({ config, databaseUrl: databaseUrl(config), integrity }) };
+  const container = buildContainer({ config, databaseUrl: databaseUrl(config), integrity });
+  try {
+    await container.verifyStartup();
+  } catch (e) {
+    await container.pool.end();
+    throw e;
+  }
+  return { config, container };
 }
 
 async function main(argv: string[]): Promise<void> {
@@ -71,7 +78,7 @@ async function main(argv: string[]): Promise<void> {
           "usage: invoice:create --order <id> --amount <decimal> --currency <code> --asset <id>",
         );
       }
-      const { container } = start();
+      const { container } = await start();
       try {
         const { invoice, created } = await container.createInvoice.execute({
           merchantOrderId: values.order,
@@ -105,7 +112,7 @@ async function main(argv: string[]): Promise<void> {
     case "invoice:show": {
       const id = rest[0];
       if (!id) throw new Error("usage: invoice:show <id>");
-      const { container } = start();
+      const { container } = await start();
       try {
         const inv = await container.uow.run((r) => r.invoices.findById(id));
         if (!inv) throw new Error(`invoice ${id} not found`);
@@ -133,7 +140,7 @@ async function main(argv: string[]): Promise<void> {
       return;
     }
     case "run": {
-      const { container } = start();
+      const { container } = await start();
       const interval = Math.min(...container.workers.map((w) => w.pollIntervalMs));
       let stopping = false;
       const stop = () => {

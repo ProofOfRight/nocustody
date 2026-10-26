@@ -71,7 +71,7 @@ function settings(over: Partial<AssetSettings> = {}): AssetSettings {
     asset: USDT_TRON,
     priceSymbol: "USDT",
     strategy: "unique-amount",
-    addresses: [{ address: ADDR_A, status: "active" }],
+    addresses: [{ address: ADDR_A, status: "active", tokenAccount: null }],
     amountPolicy: STRICT_AMOUNT_POLICY,
     uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 99 }),
     ttlMs: 30 * MIN,
@@ -229,9 +229,13 @@ describe("CreateInvoice", () => {
       assets: [
         settings({
           addresses: [
-            { address: ADDR_A, status: "active" },
-            { address: chainAddress(TRON, "TDrain1111111111111111111111111111"), status: "draining" },
-            { address: ADDR_B, status: "active" },
+            { address: ADDR_A, status: "active", tokenAccount: null },
+            {
+              address: chainAddress(TRON, "TDrain1111111111111111111111111111"),
+              status: "draining",
+              tokenAccount: null,
+            },
+            { address: ADDR_B, status: "active", tokenAccount: null },
           ],
           uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 2 }),
         }),
@@ -529,8 +533,8 @@ describe("memo strategy (one wallet, comment identifies the invoice)", () => {
       assets: [
         memoAsset({
           addresses: [
-            { address: ADDR_A, status: "active" },
-            { address: ADDR_B, status: "draining" },
+            { address: ADDR_A, status: "active", tokenAccount: null },
+            { address: ADDR_B, status: "draining", tokenAccount: null },
           ],
         }),
       ],
