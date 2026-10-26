@@ -231,6 +231,14 @@ project's core).
   connection TLS when the database is remote, and does
   `docs/deployment.md` say that a backup holds API key hashes, webhook
   secrets and payer addresses and must be protected like the server.
+- The runtime database role: in `deploy/compose.yaml` the gateway
+  connects as `nocustody_app` and its environment has no owner password;
+  `deploy/db-roles.sql` grants exactly what the code writes (compare every
+  `INSERT`/`UPDATE`/`DELETE` and `ON CONFLICT … DO UPDATE` in
+  `src/adapters/persistence/pg/` with the grants) and still revokes
+  `UPDATE`/`DELETE` on `audit_log`, `invoice_payments` and `DELETE` on
+  `observed_transfers`; a new table is covered because `db-roles` runs
+  after every migration; `make smoke-image` checks the refusals.
 
 **F. Supply chain, CI and the image** (`.github/`, `Dockerfile`,
 `deploy/`, `compose.yaml`, `package.json`, `.npmrc`, `scripts/`).
