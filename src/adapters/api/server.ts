@@ -11,7 +11,7 @@ import type { CreateInvoice } from "../../application/use-cases/create-invoice.t
 import type { QuotePrice } from "../../application/use-cases/quote-price.ts";
 import { DomainError } from "../../domain/errors.ts";
 import type { Invoice, InvoiceStatus } from "../../domain/invoice.ts";
-import { authenticate } from "./keys.ts";
+import { authenticate, isTokenShaped } from "./keys.ts";
 import { type Lang, pickLanguage } from "./page/i18n.ts";
 import { contentSecurityPolicy, NETWORK_NAMES, renderPaymentPage } from "./page/render.ts";
 
@@ -56,7 +56,7 @@ const createSchema = z
 const listSchema = z
   .object({
     status: z.enum(STATUSES).optional(),
-    since: z.string().datetime().optional(),
+    since: z.string().datetime({ offset: true }).optional(), // RFC 3339, as the OpenAPI format date-time says
     limit: z.coerce.number().int().min(1).max(100).default(50),
   })
   .strict();
@@ -230,7 +230,13 @@ export class ApiServer {
   async listen(host: string, port: number): Promise<AddressInfo> {
     await new Promise<void>((resolve, reject) => {
       this.server.once("error", reject);
-      this.server.listen(port, host, () => resolve());
+      this.server.listen(port, host, () => {
+        // After start-up a server "error" (e.g. accept EMFILE) is reported, not left to crash the process once
+        // the start-up listener has been used up.
+        this.server.removeListener("error", reject);
+        this.server.on("error", (err) => this.#d.onError?.(err));
+        resolve();
+      });
     });
     return this.server.address() as AddressInfo;
   }
@@ -263,7 +269,13 @@ export class ApiServer {
   }
 
   async #dispatch(raw: IncomingMessage): Promise<Reply> {
-    const url = new URL(raw.url ?? "/", "http://localhost");
+    let url: URL;
+    try {
+      url = new URL(raw.url ?? "/", "http://localhost");
+    } catch {
+      // The HTTP parser lets request targets such as "//[" through; they are the client's fault, not a 500.
+      throw new HttpError(400, "invalid_request", "malformed request target");
+    }
     const method = raw.method ?? "GET";
     let found: { route: Route; match: RegExpExecArray } | null = null;
     let pathKnown = false;
@@ -304,7 +316,8 @@ export class ApiServer {
   async #authorize(req: Request, scope: ApiScope): Promise<ApiKeyRecord> {
     const header = req.headers.authorization ?? "";
     const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-    const key = token
+    // Anything that is not shaped like a key is refused here; the database is asked only for well-formed tokens.
+    const key = isTokenShaped(token)
       ? await this.#d.uow.run(async (r) => {
           const k = await authenticate(token, r.apiKeys);
           if (k) await r.apiKeys.touch(k.id, this.#d.clock.now());
@@ -455,9 +468,20 @@ export class ApiServer {
           priceCurrency: body.price.currency,
           assetId: body.asset,
         });
-        await d.uow
-          .run((r) => r.idempotency.insert(key.id, idem, requestSha256, invoice.id))
-          .catch(() => undefined); // a concurrent request with the same key stored it first; the invoice is the same
+        try {
+          await d.uow.run((r) => r.idempotency.insert(key.id, idem, requestSha256, invoice.id));
+        } catch (e) {
+          // A concurrent request with the same key stored its row first: the stored body decides, as for a replay.
+          const stored = await d.uow.run((r) => r.idempotency.find(key.id, idem));
+          if (!stored) throw e;
+          if (stored.requestSha256 !== requestSha256) {
+            throw new HttpError(
+              422,
+              "idempotency_mismatch",
+              "Idempotency-Key was used concurrently with a different request",
+            );
+          }
+        }
         return ok(this.#dto(invoice), created ? 201 : 200);
       }),
 
