@@ -104,6 +104,15 @@ const apiSchema = z
     host: z.string().default("127.0.0.1"),
     port: z.number().int().min(1).max(65_535).default(8080),
     rateLimitPerMinute: z.number().int().min(1).max(100_000).default(120),
+    /** Hosted payment page at /pay/:id. Off by default (headless integration). */
+    paymentPage: z
+      .object({
+        enabled: z.boolean().default(false),
+        defaultLanguage: z.enum(["en", "ru", "fr", "fa", "zh-CN"]).default("en"),
+        publicRateLimitPerMinute: z.number().int().min(1).max(1_000_000).default(600),
+      })
+      .strict()
+      .prefault({}),
   })
   .strict();
 

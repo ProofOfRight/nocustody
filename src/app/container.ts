@@ -297,6 +297,12 @@ export function buildContainer(o: ContainerOptions) {
       adapters: workers.map((w) => w.adapter),
       clock,
       rateLimitPerMinute: o.config.raw.api.rateLimitPerMinute,
+      paymentPage: o.config.raw.api.paymentPage.enabled
+        ? {
+            defaultLanguage: o.config.raw.api.paymentPage.defaultLanguage,
+            publicRateLimitPerMinute: o.config.raw.api.paymentPage.publicRateLimitPerMinute,
+          }
+        : null,
       onError,
     });
 

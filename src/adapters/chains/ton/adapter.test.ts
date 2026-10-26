@@ -345,6 +345,14 @@ describe("verify GRAM (native coin)", () => {
   });
 });
 
+describe("display form", () => {
+  it("shows payers the user-friendly non-bounceable testnet address", () => {
+    const shown = adapter(fake({}).fn).formatAddress(owner);
+    expect(shown).toBe(friendlyTon(OWNER, true));
+    expect(parseTonAddress(shown)).toBe(OWNER);
+  });
+});
+
 describe("payment URI", () => {
   it("ton://transfer with jetton master, amount in minimal units and memo", () => {
     const uri = adapter(fake({}).fn).buildPaymentUri({
