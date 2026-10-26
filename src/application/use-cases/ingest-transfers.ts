@@ -3,7 +3,7 @@ import { isDust } from "../../domain/amount-policy.ts";
 import { sameAsset } from "../../domain/asset.ts";
 import { sameAddress } from "../../domain/chain-address.ts";
 import { type AssetCatalog, watchedAddresses } from "../catalog.ts";
-import type { ChainAdapter, Clock, UnitOfWork } from "../ports.ts";
+import type { AlertSink, ChainAdapter, Clock, UnitOfWork } from "../ports.ts";
 import type { StrategyResolver } from "../strategies/strategy.ts";
 
 export interface IngestStats {
@@ -12,6 +12,8 @@ export interface IngestStats {
   duplicates: number;
   dust: number;
   ignored: number;
+  /** Scans that used their whole page budget: the scanner lags behind the chain (an alert is raised). */
+  exhausted: number;
 }
 
 export interface IngestTransfersDeps {
@@ -22,6 +24,7 @@ export interface IngestTransfersDeps {
   readonly clock: Clock;
   readonly pageSize: number;
   readonly maxPages: number;
+  readonly alerts?: AlertSink;
 }
 
 /**
@@ -38,7 +41,7 @@ export class IngestTransfers {
 
   async execute(): Promise<IngestStats> {
     const { adapter, catalog, strategies, uow, clock, pageSize, maxPages } = this.#deps;
-    const stats: IngestStats = { fetched: 0, inserted: 0, duplicates: 0, dust: 0, ignored: 0 };
+    const stats: IngestStats = { fetched: 0, inserted: 0, duplicates: 0, dust: 0, ignored: 0, exhausted: 0 };
     for (const settings of catalog.forNetwork(adapter.network)) {
       const watched = watchedAddresses(settings);
       const stream = settings.asset.id;
@@ -46,6 +49,14 @@ export class IngestTransfers {
         const cursor = await uow.run((r) => r.cursors.get(adapter.network, stream));
         const result = await adapter.fetchIncoming(settings.asset, watched, cursor, pageSize);
         stats.fetched += result.candidates.length;
+        if (result.exhausted) {
+          stats.exhausted++;
+          await this.#deps.alerts?.send({
+            key: `scanner-budget:${stream}`,
+            severity: "warning",
+            message: `${adapter.network} ${stream}: more transactions than one scan reads; the scanner is catching up and may lag behind the chain`,
+          });
+        }
         await uow.run(async (repos) => {
           const now = clock.now();
           for (const c of result.candidates) {

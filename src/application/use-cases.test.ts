@@ -10,7 +10,7 @@ import { TRON, USDT_TRON } from "../domain/test-fixtures.ts";
 import { txRef, txRefKey } from "../domain/tx-ref.ts";
 import { AssetCatalog, type AssetSettings } from "./catalog.ts";
 import { ApplicationError } from "./errors.ts";
-import type { AmlScreener, AmlVerdict, Clock, RateProvider, TransferCandidate } from "./ports.ts";
+import type { Alert, AmlScreener, AmlVerdict, Clock, RateProvider, TransferCandidate } from "./ports.ts";
 import { RateService } from "./rates.ts";
 import { MemoStrategy } from "./strategies/memo.ts";
 import { UniqueAmountStrategy } from "./strategies/unique-amount.ts";
@@ -136,6 +136,7 @@ function setup(
     integrity,
     depeg: opts.depeg ?? null,
   });
+  const alerts: Alert[] = [];
   const ingest = new IngestTransfers({
     adapter: chain,
     catalog,
@@ -144,6 +145,7 @@ function setup(
     clock,
     pageSize: 2,
     maxPages: 5,
+    alerts: { send: async (a) => void alerts.push(a) },
   });
   const verify = new VerifyTransfers({ adapter: chain, catalog, uow: store, clock, batchSize: 50 });
   const settle = new SettlePayments({
@@ -163,7 +165,21 @@ function setup(
   };
   const order = (id: string, amount = "10", cur = "USD") =>
     create.execute({ merchantOrderId: id, priceAmount: amount, priceCurrency: cur, assetId: "usdt-tron" });
-  return { store, clock, chain, aml, create, ingest, verify, settle, expire, cycle, order, integrity };
+  return {
+    store,
+    clock,
+    chain,
+    aml,
+    create,
+    ingest,
+    verify,
+    settle,
+    expire,
+    cycle,
+    order,
+    integrity,
+    alerts,
+  };
 }
 
 const errCode = async (p: Promise<unknown>) => {
@@ -578,6 +594,13 @@ describe("payment flow", () => {
     await d.cycle();
     expect([...d.store.data.candidates.values()][0]?.status).toBe("dust");
     expect(d.store.data.transfers.size).toBe(0);
+  });
+
+  it("alerts when a scan used its whole page budget: the scanner lags behind the chain", async () => {
+    s.chain.exhausted = true;
+    s.chain.pages = [[]];
+    expect(await s.ingest.execute()).toMatchObject({ exhausted: 1 });
+    expect(s.alerts.at(-1)).toMatchObject({ key: "scanner-budget:usdt-tron", severity: "warning" });
   });
 
   it("does not advance the cursor when storing candidates fails", async () => {

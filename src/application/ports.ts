@@ -66,6 +66,11 @@ export interface FetchResult {
   readonly candidates: readonly TransferCandidate[];
   /** Opaque adapter-defined cursor to persist after the candidates are stored. */
   readonly next: string;
+  /**
+   * The scan read its whole page budget for at least one account: more transactions arrived than one cycle reads,
+   * so the scanner lags behind the chain (the cursor still advances; the application alerts the operator).
+   */
+  readonly exhausted?: boolean;
 }
 
 /** Chain adapter. See CONTRIBUTING.md, "Network adapter checklist". */

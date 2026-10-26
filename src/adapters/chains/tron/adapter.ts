@@ -16,7 +16,7 @@ import { Money } from "../../../domain/money.ts";
 import type { NetworkId } from "../../../domain/network.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
 import type { JsonHttpClient } from "../../http/json-client.ts";
-import { parseTimeCursor, type TimeCursor } from "../cursor.ts";
+import { parseTimeCursor, recordProgress, type TimeCursor, windowStart } from "../cursor.ts";
 import { parseTronAddress, tronAddressFromHex, tronAddressToHex20 } from "./address.ts";
 import { solidTxInfoSchema, trc20HistorySchema } from "./schemas.ts";
 
@@ -72,8 +72,12 @@ export class TronAdapter implements ChainAdapter {
     // One candidate per transaction, carrying its largest transfer to us: a dust row listed first must not hide a
     // real payment in the same transaction (the verifier reads every log anyway).
     const byTx = new Map<string, TransferCandidate>();
+    let exhausted = false;
     for (const address of addresses) {
-      const from = Math.max(this.#o.startFrom.getTime(), (state[address.value] ?? 0) - this.#o.overlapMs);
+      const seen = state[address.value] ?? 0;
+      const from = windowStart(state, address.value, seen, this.#o.overlapMs, this.#o.startFrom.getTime());
+      let rows = 0;
+      let full = true;
       const query: Record<string, string> = {
         only_to: "true",
         only_confirmed: "true",
@@ -88,6 +92,7 @@ export class TronAdapter implements ChainAdapter {
           query,
           trc20HistorySchema,
         );
+        rows += res.data.length;
         for (const row of res.data) {
           next[address.value] = Math.max(next[address.value] ?? 0, row.block_timestamp);
           // Hint filtering only; the verifier re-checks everything against solidified state.
@@ -107,11 +112,16 @@ export class TronAdapter implements ChainAdapter {
             memo: null,
           });
         }
-        if (!res.meta.fingerprint || res.data.length === 0) break;
+        if (!res.meta.fingerprint || res.data.length === 0) {
+          full = false;
+          break;
+        }
         query.fingerprint = res.meta.fingerprint; // all other parameters must stay the same
       }
+      if (full) exhausted = true;
+      recordProgress(next, state, address.value, seen, full, rows);
     }
-    return { candidates: [...byTx.values()], next: JSON.stringify(next) };
+    return { candidates: [...byTx.values()], next: JSON.stringify(next), exhausted };
   }
 
   async verify(
