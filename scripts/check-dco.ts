@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Developer Certificate of Origin check: every commit in the given range must carry
-// "Signed-off-by: <author name> <author email>". Usage: node scripts/check-dco.ts <base>..<head>
+// "Signed-off-by: <author name> <author email>" (Dependabot excepted). Usage: node scripts/check-dco.ts <base>..<head>
 import { execFileSync } from "node:child_process";
 
 export interface CommitInfo {
@@ -9,8 +9,16 @@ export interface CommitInfo {
   signoffs: string[];
 }
 
+/**
+ * Dependency bumps by Dependabot carry no authored content to certify. Matching is by author identity only, so a
+ * contributor could pose as the bot to skip the sign-off; such a commit still needs code owner review to merge.
+ */
+export const BOT_AUTHORS: ReadonlySet<string> = new Set([
+  "dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+]);
+
 export function missingSignoff(commits: readonly CommitInfo[]): CommitInfo[] {
-  return commits.filter((c) => !c.signoffs.includes(c.author));
+  return commits.filter((c) => !BOT_AUTHORS.has(c.author) && !c.signoffs.includes(c.author));
 }
 
 function readCommits(range: string): CommitInfo[] {

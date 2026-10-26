@@ -12,7 +12,7 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "typecheck": "tsc -p tsconfig.json",
-    "layers": "depcruise src --config .dependency-cruiser.mjs",
+    "layers": "node scripts/check-layers.ts",
     "licenses": "node scripts/check-licenses.ts",
     "source-policy": "node scripts/check-source.ts",
     "dco": "node scripts/check-dco.ts",
