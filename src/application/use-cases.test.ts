@@ -93,8 +93,8 @@ const manual = (rates: Array<[string, string, string]>, ageMs = 0, maxAgeMs = 60
   );
 
 function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[]; memos?: string[] } = {}) {
-  const store = new InMemoryStore();
   const clock = new FakeClock();
+  const store = new InMemoryStore(() => clock.now());
   const chain = new FakeChain(TRON);
   const aml = new ScriptedAml();
   const catalog = new AssetCatalog(opts.assets ?? [settings()]);
@@ -353,6 +353,51 @@ describe("payment flow", () => {
       ["seen", 1],
       ["seen", 1],
     ]);
+  });
+
+  it("one candidate whose result cannot be stored does not stop the others or the settlement", async () => {
+    const a = await s.order("o1");
+    const b = await s.order("o2");
+    s.clock.advance(MIN);
+    const bad = candidate("c1", "10.01", s.clock.now());
+    const good = candidate("c2", "10.02", s.clock.now());
+    s.chain.pages = [[bad, good]];
+    // PostgreSQL refuses some values (e.g. U+0000 in text): emulate a failing insert for one transfer only.
+    const run = s.store.run.bind(s.store);
+    s.store.run = async (work) =>
+      run((repos) =>
+        work({
+          ...repos,
+          transfers: {
+            ...repos.transfers,
+            insert: async (t, status, reason) => {
+              if (t.ref.txHash === bad.txHash)
+                throw new Error("invalid byte sequence for encoding UTF8: 0x00");
+              return repos.transfers.insert(t, status, reason);
+            },
+          },
+        }),
+      );
+    expect(await s.cycle()).toMatchObject({ matched: 1 });
+    expect(s.store.data.invoices.get(b.invoice.id)?.status).toBe("completed");
+    expect(s.store.data.invoices.get(a.invoice.id)?.status).toBe("confirming");
+    const stored = s.store.data.candidates.get(`${TRON}/${bad.txHash}`);
+    expect(stored).toMatchObject({ status: "seen", attempts: 1 });
+    expect(stored?.reason).toContain("store error");
+    expect(s.store.data.candidates.get(`${TRON}/${good.txHash}`)?.status).toBe("verified");
+  });
+
+  it("rejects a transfer the adapter returns for a foreign address or another asset", async () => {
+    await s.order("o1");
+    s.clock.advance(MIN);
+    const c = candidate("c3", "10.01", s.clock.now());
+    s.chain.pages = [[c]];
+    s.chain.verdicts.set(c.txHash, { status: "final", transfers: [verified(c, 0n, "10.01", ADDR_B)] });
+    expect(await s.cycle()).toMatchObject({ matched: 0, unmatched: 0 });
+    const stored = s.store.data.candidates.get(`${TRON}/${c.txHash}`);
+    expect(stored?.status).toBe("rejected");
+    expect(stored?.reason).toContain(ADDR_B.value);
+    expect(s.store.data.transfers.size).toBe(0);
   });
 
   it("quarantines transfers that match no invoice", async () => {

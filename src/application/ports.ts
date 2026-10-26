@@ -188,8 +188,11 @@ export type CandidateStatus = "seen" | "dust" | "verified" | "rejected";
 export interface StoredCandidate {
   readonly candidate: TransferCandidate;
   readonly status: CandidateStatus;
+  /** Verification attempts that ended without a decision (provider error, not final yet). */
   readonly attempts: number;
   readonly reason: string | null;
+  /** When the scanner first stored it; `candidateMaxAge` counts from here when the block time is older (downtime). */
+  readonly seenAt: Date;
 }
 
 export interface CandidateRepository {
