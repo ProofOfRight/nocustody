@@ -81,6 +81,40 @@ section "Images and base images without a digest (Dockerfile, compose files, wor
 grep -nE '^\s*(image:|FROM |[A-Z_]*IMAGE\s*:?=)' Dockerfile compose.yaml deploy/compose.yaml .github/workflows/*.yml scripts/*.sh Makefile 2>/dev/null \
     | grep -vE '@sha256:[0-9a-f]{64}' | verdict digests
 
+section "Image digests Dependabot does not update (ci.yml services, release.yml BuildKit, Makefile, scripts): drift from the watched files, or pinned over 90 days ago"
+# Dependabot watches Dockerfile and the compose files (.github/dependabot.yml), not images named in workflow
+# services, docker commands in run steps, the Makefile or scripts. An image that also appears in a watched file must
+# carry the same tag and digest; one that does not is printed once its pin is older than 90 days.
+python3 - <<'PY' | verdict stale-digests
+import datetime, glob, re, subprocess
+WATCHED = ["Dockerfile", "compose.yaml", "deploy/compose.yaml"]
+UNWATCHED = [".github/workflows/ci.yml", ".github/workflows/release.yml", "Makefile", *sorted(glob.glob("scripts/*.sh"))]
+REF = re.compile(r"([a-z0-9][a-z0-9./_-]*):([A-Za-z0-9._-]+)@(sha256:[0-9a-f]{64})")
+
+def refs(path):
+    with open(path, encoding="utf-8") as fh:
+        for n, line in enumerate(fh, 1):
+            for m in REF.finditer(line):
+                yield n, m.groups()
+
+pins = {}
+for path in WATCHED:
+    for _, (name, tag, digest) in refs(path):
+        pins.setdefault(name, set()).add((tag, digest))
+today = datetime.date.today()
+for path in UNWATCHED:
+    for n, (name, tag, digest) in refs(path):
+        if name in pins:
+            if (tag, digest) not in pins[name]:
+                watched = ", ".join(f"{t}@{d[:19]}" for t, d in sorted(pins[name]))
+                print(f"{path}:{n}:{name}:{tag}@{digest[:19]} differs from the watched files ({watched})")
+            continue
+        out = subprocess.run(["git", "log", "-1", "--format=%cs", "-S", digest, "--", path], capture_output=True, text=True)
+        pinned = out.stdout.strip()
+        if pinned and (today - datetime.date.fromisoformat(pinned)).days > 90:
+            print(f"{path}:{n}:{name}:{tag} pinned {pinned}, not watched by Dependabot: look for a newer release")
+PY
+
 section "Dependency ranges and install scripts (exact versions only; lifecycle scripts never run)"
 { python3 -c '
 import json, re
