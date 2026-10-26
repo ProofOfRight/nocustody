@@ -10,6 +10,11 @@ export interface ReceivingAddress {
   readonly address: ChainAddress;
   /** active: used for new invoices and watched; draining: watched only. */
   readonly status: "active" | "draining";
+  /**
+   * Account that holds the token for this owner, where the network has one (TON jetton-wallet, later Solana ATA).
+   * Pinned like the address itself; null when not applicable.
+   */
+  readonly tokenAccount: ChainAddress | null;
 }
 
 /** Everything the application needs to know about one accepted asset; built from the pinned config. */

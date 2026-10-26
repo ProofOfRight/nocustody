@@ -2,9 +2,11 @@
 // Composition root: wires config, adapters and use cases. The only place that knows concrete implementations.
 import pg from "pg";
 import { NoopAmlScreener } from "../adapters/aml/noop.ts";
+import { TonAdapter } from "../adapters/chains/ton/adapter.ts";
+import { parseTonAddress } from "../adapters/chains/ton/address.ts";
 import { TronAdapter } from "../adapters/chains/tron/adapter.ts";
 import { parseTronAddress } from "../adapters/chains/tron/address.ts";
-import { TronHttpClient } from "../adapters/chains/tron/http.ts";
+import { JsonHttpClient } from "../adapters/http/json-client.ts";
 import { PgUnitOfWork } from "../adapters/persistence/pg/unit-of-work.ts";
 import { ManualRateTable } from "../adapters/pricing/manual-table.ts";
 import { cryptoIds, cryptoMemos, systemClock } from "../adapters/system/system.ts";
@@ -25,6 +27,7 @@ import { parseDuration } from "./duration.ts";
 
 export const addressValidators: AddressValidators = new Map([
   ["tron", (network, raw) => chainAddress(network, parseTronAddress(raw))],
+  ["ton", (network, raw) => chainAddress(network, parseTonAddress(raw))],
 ]);
 
 export interface ContainerOptions {
@@ -77,9 +80,10 @@ export function buildContainer(o: ContainerOptions) {
   const tron = o.config.raw.tron;
   if (tron) {
     const apiKey = tron.apiKeyEnv ? env[tron.apiKeyEnv] : undefined;
-    const client = new TronHttpClient({
+    const client = new JsonHttpClient({
       baseUrl: tron.apiUrl,
       apiKey: apiKey || undefined,
+      apiKeyHeader: "TRON-PRO-API-KEY",
       timeoutMs: parseDuration(tron.timeout),
       maxResponseBytes: tron.maxResponseBytes,
     });
@@ -109,12 +113,64 @@ export function buildContainer(o: ContainerOptions) {
       pollIntervalMs: parseDuration(tron.pollInterval),
     });
   }
+  const startupChecks: Array<() => Promise<string[]>> = [];
+  const ton = o.config.raw.ton;
+  if (ton) {
+    const apiKey = ton.apiKeyEnv ? env[ton.apiKeyEnv] : undefined;
+    const client = new JsonHttpClient({
+      baseUrl: ton.apiUrl,
+      apiKey: apiKey || undefined,
+      apiKeyHeader: "X-API-Key",
+      timeoutMs: parseDuration(ton.timeout),
+      maxResponseBytes: ton.maxResponseBytes,
+      minIntervalMs: apiKey ? 0 : parseDuration(ton.minInterval),
+    });
+    const network = ton.network as ChainAdapter["network"];
+    const jettonWallets = new Map(
+      catalog
+        .forNetwork(network)
+        .map((s) => [
+          s.asset.id,
+          new Map(
+            s.addresses.flatMap((a) =>
+              a.tokenAccount ? [[a.address.value, a.tokenAccount.value] as const] : [],
+            ),
+          ),
+        ]),
+    );
+    const adapter = new TonAdapter({
+      network,
+      client,
+      startFrom: new Date(ton.startFrom),
+      overlapMs: parseDuration(ton.overlap),
+      jettonWallets,
+    });
+    const tonAssets = catalog.forNetwork(network);
+    for (const s of tonAssets) {
+      if (!adapter.supports(s.asset))
+        throw new Error(`asset ${s.asset.id} is not supported by the TON adapter`);
+    }
+    startupChecks.push(() => adapter.checkJettonWallets(tonAssets.map((s) => s.asset)));
+    workers.push({
+      adapter,
+      ingest: new IngestTransfers({ adapter, catalog, strategies, uow, clock, pageSize: 100, maxPages: 5 }),
+      verify: new VerifyTransfers({ adapter, catalog, uow, clock, batchSize: 50 }),
+      settle: new SettlePayments({ network, catalog, strategies, aml, uow, clock, batchSize: 100 }),
+      pollIntervalMs: parseDuration(ton.pollInterval),
+    });
+  }
   for (const s of o.config.assets) {
     if (!workers.some((w) => w.adapter.network === s.asset.network)) {
       throw new Error(`asset ${s.asset.id}: no provider configured for ${s.asset.network}`);
     }
   }
-  return { pool, uow, catalog, createInvoice, expireInvoices, workers, clock };
+  /** Network-level startup checks (e.g. TON jetton-wallet binding); throws if any fails. */
+  const verifyStartup = async (): Promise<void> => {
+    const problems = (await Promise.all(startupChecks.map((c) => c()))).flat();
+    if (problems.length > 0)
+      throw new Error(`startup check failed, refusing to run:\n  ${problems.join("\n  ")}`);
+  };
+  return { pool, uow, catalog, createInvoice, expireInvoices, workers, clock, verifyStartup };
 }
 
 export type Container = ReturnType<typeof buildContainer>;

@@ -8,9 +8,9 @@ import { defineAsset } from "../../../domain/asset.ts";
 import { chainAddress } from "../../../domain/chain-address.ts";
 import { Money } from "../../../domain/money.ts";
 import { networkId } from "../../../domain/network.ts";
+import { type FetchFn, JsonHttpClient, ProviderError } from "../../http/json-client.ts";
 import { TRANSFER_TOPIC, TronAdapter } from "./adapter.ts";
 import { parseTronAddress, tronAddressFromHex, tronAddressToHex20 } from "./address.ts";
-import { type FetchFn, ProviderError, TronHttpClient } from "./http.ts";
 
 const fixture = (name: string): Record<string, unknown> =>
   JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", name), "utf8"));
@@ -47,9 +47,10 @@ function fakeFetch(handler: (url: URL, body: unknown) => { status?: number; json
   return { fn, calls };
 }
 
-function adapter(fetch: FetchFn, extra: Partial<ConstructorParameters<typeof TronHttpClient>[0]> = {}) {
-  const client = new TronHttpClient({
+function adapter(fetch: FetchFn, extra: Partial<ConstructorParameters<typeof JsonHttpClient>[0]> = {}) {
+  const client = new JsonHttpClient({
     baseUrl: "https://nile.trongrid.io",
+    apiKeyHeader: "TRON-PRO-API-KEY",
     timeoutMs: 1_000,
     maxResponseBytes: 1_000_000,
     fetch,
@@ -255,10 +256,10 @@ describe("verify (solidified truth)", () => {
 describe("HTTP client", () => {
   it("accepts only https and never leaves the configured host", async () => {
     expect(
-      () => new TronHttpClient({ baseUrl: "http://nile.trongrid.io", timeoutMs: 1, maxResponseBytes: 1 }),
+      () => new JsonHttpClient({ baseUrl: "http://nile.trongrid.io", timeoutMs: 1, maxResponseBytes: 1 }),
     ).toThrow("https");
     const { fn } = fakeFetch(() => ({ json: {} }));
-    const client = new TronHttpClient({
+    const client = new JsonHttpClient({
       baseUrl: "https://nile.trongrid.io",
       timeoutMs: 1_000,
       maxResponseBytes: 1_000,
