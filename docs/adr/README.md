@@ -40,3 +40,4 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0031](0031-pinned-config-scope.md) | 2026-10-26 | The pinned checksum covers everything that decides money, not only addresses | accepted |
 | [0032](0032-repository-hosting.md) | 2026-10-26 | The repository is hosted under the maintainer's account | accepted |
 | [0033](0033-release-isolated-signing.md) | 2026-10-27 | Release: build, attest and publish in separate jobs | accepted |
+| [0034](0034-untrusted-code-sandbox.md) | 2026-10-27 | Code from others runs only in a sandbox | accepted |

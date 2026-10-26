@@ -38,6 +38,7 @@ Everything runs in Docker (`compose.yaml`); the host needs only Docker and `make
 | `make php-selftest` | PHP and Laravel examples: syntax and webhook signature check |
 | `make e2e-nile`, `make e2e-ton`, `make e2e-api`, `make e2e-ops` | end-to-end scenarios on the testnets ([testnet.md](docs/testnet.md), [ton-testnet.md](docs/ton-testnet.md)) |
 | `make e2e-mainnet` | read-only replay of real mainnet payments ([going-live.md](docs/going-live.md)) |
+| `make check-untrusted PR_DIR=…` / `make install-untrusted PR_DIR=…` | `make check` on someone else's code in the sandbox ([below](#reviewing-pull-requests)) |
 
 Run `make check` before every commit.
 
@@ -77,6 +78,32 @@ A pull request adding or changing a chain adapter must satisfy all of the follow
 8. External hosts, rate limits and costs are documented.
 
 Changes to `src/domain`, `src/application` and `src/adapters/chains` require maintainer review.
+
+## Reviewing pull requests
+
+`make check` runs the code under test — tests, `vitest.config.ts`, `scripts/`, every dev dependency — with write
+access to the whole repository (`.git`, `.claude/`, untracked notes) and the network. A malicious pull request, or a
+compromised package in a dependency update (Dependabot included), could write `.git/hooks` or `.git/config`
+(executed by the host's git), change agent settings, or send keys and notes away. So code you did not write runs
+only in the sandbox ([ADR-0034](docs/adr/0034-untrusted-code-sandbox.md)):
+
+```bash
+git fetch origin pull/<N>/head:pr-<N>
+git worktree add ../nocustody-pr-<N> pr-<N>
+make check-untrusted PR_DIR=../nocustody-pr-<N>
+```
+
+The sandbox (`compose.yaml`, profile `untrusted`) mounts the worktree read-only and nothing of this repository, has
+no route out of its internal network (DNS included), no API keys, no Linux capabilities, a read-only root file
+system and its own in-memory PostgreSQL. If the pull request changes `package.json` or `package-lock.json`, read
+`git -C ../nocustody-pr-<N> diff main -- package-lock.json` first; `make install-untrusted PR_DIR=…` then installs
+its dependencies into the worktree (`npm ci --ignore-scripts`, the only sandbox step with network), and
+`make check-untrusted` uses them. Remove the worktree afterwards: `git worktree remove ../nocustody-pr-<N>`.
+
+With an AI agent, run it in this repository and give it the pull request as data (`git diff main...pr-<N>`); do not
+start it inside the worktree, where the pull request's own `CLAUDE.md` and `.claude/` would apply. The sandbox does
+not protect against code that is merged after review, kernel or Docker escapes, or instructions planted in test
+output that an agent reads (CLAUDE.md, "Untrusted input").
 
 ## Agent instructions and audit skill
 

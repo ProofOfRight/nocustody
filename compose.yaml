@@ -38,5 +38,104 @@ services:
       timeout: 3s
       retries: 30
 
+  # ---- Sandbox for code from pull requests: `make check-untrusted PR_DIR=…` (CONTRIBUTING.md, "Reviewing pull
+  # requests"). The pull request's worktree is mounted read-only, there is no route out of the internal network, no
+  # API keys, no capabilities, and the database lives in memory. Nothing of this repository (.git, .claude/,
+  # internal notes, .env) is mounted.
+  untrusted:
+    profiles: [untrusted]
+    image: node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797
+    user: node
+    working_dir: /app
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 2g
+    pids_limit: 512
+    networks: [untrusted]
+    # Set by the Makefile; the defaults do not exist, so a bare `docker compose run untrusted` fails instead of
+    # mounting something else.
+    volumes:
+      - type: bind
+        source: ${PR_DIR:-/nonexistent-set-PR_DIR}
+        target: /app
+        read_only: true
+        bind: { create_host_path: false }
+      # this repository's dependencies, unless the pull request changes them (then its own, see the Makefile)
+      - type: bind
+        source: ${PR_NODE_MODULES:-/nonexistent-set-PR_NODE_MODULES}
+        target: /app/node_modules
+        read_only: true
+        bind: { create_host_path: false }
+    tmpfs:
+      - /tmp:size=512m
+      # vite bundles vitest.config.ts into .vite-temp, vitest keeps its results in .vite and its module cache in
+      # .vitest-cache; the mount above is read-only
+      - /app/node_modules/.vite:size=64m,uid=1000,gid=1000
+      - /app/node_modules/.vite-temp:size=16m,uid=1000,gid=1000
+      - /app/node_modules/.vitest-cache:size=256m,uid=1000,gid=1000
+    environment:
+      HOME: /tmp
+      npm_config_cache: /tmp/npm
+      npm_config_update_notifier: "false"
+      DATABASE_URL: postgres://nocustody:nocustody@postgres-untrusted:5432/nocustody
+      TEST_DATABASE_URL: postgres://nocustody:nocustody@postgres-untrusted:5432/nocustody_test
+    depends_on:
+      postgres-untrusted:
+        condition: service_healthy
+
+  # Installs a pull request's changed dependencies into its own node_modules, lifecycle scripts disabled. The only
+  # sandbox service with network access (the npm registry); run it only after reading the lockfile diff.
+  untrusted-install:
+    profiles: [untrusted]
+    image: node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797
+    user: node
+    working_dir: /app
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 2g
+    pids_limit: 512
+    volumes:
+      - type: bind
+        source: ${PR_DIR:-/nonexistent-set-PR_DIR}
+        target: /app
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${PR_NODE_MODULES:-/nonexistent-set-PR_NODE_MODULES}
+        target: /app/node_modules
+        bind: { create_host_path: false }
+    tmpfs:
+      - /tmp:size=1g
+    environment:
+      HOME: /tmp
+      npm_config_cache: /tmp/npm
+      npm_config_update_notifier: "false"
+
+  postgres-untrusted:
+    profiles: [untrusted]
+    image: postgres:18.6-alpine3.24@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
+    environment:
+      POSTGRES_USER: nocustody
+      POSTGRES_PASSWORD: nocustody
+      POSTGRES_DB: nocustody
+    networks: [untrusted]
+    tmpfs:
+      - /var/lib/postgresql:size=512m
+    volumes:
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nocustody -d nocustody"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+networks:
+  untrusted:
+    internal: true
+
 volumes:
   pgdata:
