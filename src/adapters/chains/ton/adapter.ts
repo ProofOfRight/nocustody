@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // TON chain adapter: USDT (and other) jettons and the native coin GRAM, one wallet per merchant, invoice by memo.
-//  - candidates: transactions of the receiving wallet from toncenter v3 (indexer; untrusted hint);
-//  - truth: the same transaction re-read by hash must be finalized (masterchain), not emulated, without outgoing
-//    messages (no bounce). Jettons: the notification must come from OUR jetton-wallet (pinned, checked with
-//    get_wallet_address at startup), and the jetton-wallet transaction that credited the balance (internal_transfer)
-//    must be finalized and successful, with the same amount. GRAM: the amount is what the credit phase credited.
-// The notification transaction itself is usually "aborted" (no gas for 1 nanoton) — that is normal and not checked.
+//  - candidates: transactions from toncenter v3 (indexer; untrusted hint). GRAM: the receiving wallet's own
+//    transactions. Jettons: the transactions of OUR jetton-wallet (pinned, checked with get_wallet_address at startup)
+//    that process internal_transfer. The owner's transfer_notification is not used: the jetton wallet sends it only
+//    when the payer sets forward_ton_amount > 0 (TEP-74), so a payment without it would be missed.
+//  - truth: the same transaction re-read by hash must be finalized (masterchain) and not emulated.
+//    Jettons: it must be on our pinned jetton-wallet, process internal_transfer and succeed (compute and action).
+//    The standard jetton-wallet code accepts internal_transfer only from the master or from a wallet of the same
+//    master, so a forged one fails there. Amount, sender and memo come from the internal_transfer body.
+//    GRAM: no outgoing messages (no bounce); the amount is what the credit phase credited.
 import { Address, beginCell, Cell } from "@ton/core";
 import type {
   ChainAdapter,
@@ -22,20 +25,8 @@ import type { NetworkId } from "../../../domain/network.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
 import type { JsonHttpClient } from "../../http/json-client.ts";
 import { canonicalTon, friendlyTon, parseTonAddress } from "./address.ts";
-import {
-  OP_INTERNAL_TRANSFER,
-  OP_TRANSFER_NOTIFICATION,
-  parseInternalTransferAmount,
-  parsePlainComment,
-  parseTransferNotification,
-} from "./payload.ts";
-import {
-  isFinalized,
-  runGetMethodSchema,
-  type TonTransaction,
-  tonTransactionSchema,
-  tonTransactionsSchema,
-} from "./schemas.ts";
+import { OP_INTERNAL_TRANSFER, parseInternalTransfer, parsePlainComment } from "./payload.ts";
+import { isFinalized, runGetMethodSchema, type TonTransaction, tonTransactionsSchema } from "./schemas.ts";
 
 export interface TonAdapterOptions {
   readonly network: NetworkId;
@@ -47,7 +38,7 @@ export interface TonAdapterOptions {
   readonly maxPagesPerAddress?: number;
 }
 
-type Cursor = Record<string, number>; // owner → last seen utime (seconds)
+type Cursor = Record<string, number>; // scanned account (wallet or jetton-wallet) → last seen utime (seconds)
 
 const opcode = (n: number) => `0x${n.toString(16).padStart(8, "0")}`;
 const b64ToHex = (b64: string) => Buffer.from(b64, "base64").toString("hex");
@@ -137,15 +128,21 @@ export class TonAdapter implements ChainAdapter {
     const out: TransferCandidate[] = [];
     const pageSize = Math.min(256, Math.max(1, limit));
     for (const owner of addresses) {
+      const token = asset.kind === "token";
+      const account = token ? this.#jettonWallet(asset, owner.value) : owner.value;
+      if (!account) continue;
+      // 0.1.0 scanned jetton assets on the owner's wallet: resume from that cursor rather than from startFrom.
+      const seen = state[account] ?? (token ? state[owner.value] : undefined) ?? 0;
+      if (token) delete next[owner.value];
       const fromUtime = Math.max(
         Math.floor(this.#o.startFrom.getTime() / 1000),
-        (state[owner.value] ?? 0) - Math.ceil(this.#o.overlapMs / 1000),
+        seen - Math.ceil(this.#o.overlapMs / 1000),
       );
       for (let page = 0; page < (this.#o.maxPagesPerAddress ?? 10); page++) {
         const res = await this.#o.client.get(
           "/api/v3/transactions",
           {
-            account: owner.value,
+            account,
             start_utime: String(fromUtime),
             sort: "asc",
             limit: String(pageSize),
@@ -154,7 +151,7 @@ export class TonAdapter implements ChainAdapter {
           tonTransactionsSchema,
         );
         for (const t of res.transactions) {
-          next[owner.value] = Math.max(next[owner.value] ?? 0, t.now);
+          next[account] = Math.max(next[account] ?? 0, t.now);
           const c = this.#candidate(asset, owner, t);
           if (c) out.push(c);
         }
@@ -170,11 +167,10 @@ export class TonAdapter implements ChainAdapter {
     if (!m?.source || m.bounced) return null;
     const base = { network: this.network, txHash: b64ToHex(t.hash), to: owner, at: new Date(t.now * 1000) };
     if (asset.kind === "token") {
-      const jw = this.#jettonWallet(asset, owner.value);
-      if (!jw || canonicalTon(m.source) !== jw || m.opcode !== opcode(OP_TRANSFER_NOTIFICATION)) return null;
-      const n = m.message_content?.body ? parseTransferNotification(m.message_content.body) : null;
-      if (!n) return null;
-      return { ...base, from: n.sender ?? "", amount: Money.of(asset, n.amount), memo: n.comment };
+      if (m.opcode !== opcode(OP_INTERNAL_TRANSFER)) return null;
+      const it = m.message_content?.body ? parseInternalTransfer(m.message_content.body) : null;
+      if (!it || it.amount <= 0n) return null;
+      return { ...base, from: it.from ?? "", amount: Money.of(asset, it.amount), memo: it.comment };
     }
     if (m.opcode !== null && m.opcode !== opcode(0)) return null;
     const value = BigInt(m.value ?? "0");
@@ -203,6 +199,10 @@ export class TonAdapter implements ChainAdapter {
       return { status: "rejected", reason: "response for another transaction" };
     if (!isFinalized(t))
       return { status: "pending", reason: `not finalized (finality ${t.finality ?? "unknown"})` };
+    const ref = txRef(this.network, c.txHash, BigInt(t.lt));
+    const at = new Date(t.now * 1000);
+    if (asset.kind === "token") return this.#verifyJetton(asset, receiving, t, ref, at);
+
     const owner = receiving.find((a) => a.value === canonicalTon(t.account));
     if (!owner) return { status: "rejected", reason: "transaction is not on a watched wallet" };
     const m = t.in_msg;
@@ -210,10 +210,6 @@ export class TonAdapter implements ChainAdapter {
     if (m.bounced) return { status: "rejected", reason: "inbound message is a bounce" };
     if (t.out_msgs.length !== 0)
       return { status: "rejected", reason: "wallet sent messages back (bounce or reply)" };
-    const ref = txRef(this.network, c.txHash, BigInt(t.lt));
-    const at = new Date(t.now * 1000);
-
-    if (asset.kind === "token") return this.#verifyJetton(asset, owner, t, ref, at);
 
     // Native coin: what the credit phase actually credited.
     if (m.opcode !== null && m.opcode !== opcode(0)) return { status: "final", transfers: [] };
@@ -233,45 +229,31 @@ export class TonAdapter implements ChainAdapter {
 
   async #verifyJetton(
     asset: Asset,
-    owner: ChainAddress,
+    receiving: readonly ChainAddress[],
     t: TonTransaction,
     ref: VerifiedTransfer["ref"],
     at: Date,
   ): Promise<VerificationResult> {
-    const m = t.in_msg;
-    const jw = this.#jettonWallet(asset, owner.value);
     // The asset is identified by OUR jetton-wallet of the pinned master — never by the indexer's jetton_master or metadata.
-    if (!m?.source || !jw || canonicalTon(m.source) !== jw) return { status: "final", transfers: [] };
-    if (m.opcode !== opcode(OP_TRANSFER_NOTIFICATION)) return { status: "final", transfers: [] };
-    const n = m.message_content?.body ? parseTransferNotification(m.message_content.body) : null;
-    if (!n) return { status: "rejected", reason: "malformed transfer_notification" };
-
-    const parents = await this.#o.client.get(
-      "/api/v3/transactionsByMessage",
-      { msg_hash: m.hash, direction: "out" },
-      tonTransactionsSchema,
-    );
-    const p = parents.transactions.find((x) => canonicalTon(x.account) === jw);
-    if (!p) return { status: "pending", reason: "jetton-wallet transaction not indexed yet" };
-    const parsed = tonTransactionSchema.parse(p);
-    if (!isFinalized(parsed)) return { status: "pending", reason: "jetton-wallet transaction not finalized" };
-    const d = parsed.description;
+    const account = canonicalTon(t.account);
+    const owner = receiving.find((a) => this.#jettonWallet(asset, a.value) === account);
+    if (!owner) return { status: "rejected", reason: "transaction is not on a pinned jetton-wallet" };
+    const m = t.in_msg;
+    if (!m?.source) return { status: "rejected", reason: "no internal inbound message" };
+    if (m.bounced) return { status: "rejected", reason: "inbound message is a bounce" };
+    // Outgoing transfers, excesses and other messages to the jetton-wallet credit nothing.
+    if (m.opcode !== opcode(OP_INTERNAL_TRANSFER)) return { status: "final", transfers: [] };
+    const d = t.description;
     if (d.aborted || d.compute_ph.success !== true || d.action?.success !== true) {
       return { status: "rejected", reason: "jetton-wallet transaction failed" };
     }
-    if (parsed.in_msg?.opcode !== opcode(OP_INTERNAL_TRANSFER)) {
-      return { status: "rejected", reason: "jetton-wallet transaction is not internal_transfer" };
-    }
-    const credited = parsed.in_msg.message_content?.body
-      ? parseInternalTransferAmount(parsed.in_msg.message_content.body)
-      : null;
-    if (credited === null || credited !== n.amount) {
-      return { status: "rejected", reason: "notification amount differs from credited amount" };
-    }
+    const it = m.message_content?.body ? parseInternalTransfer(m.message_content.body) : null;
+    if (!it) return { status: "rejected", reason: "malformed internal_transfer" };
+    if (it.amount <= 0n) return { status: "final", transfers: [] };
     return {
       status: "final",
       transfers: [
-        { ref, from: n.sender ?? "", to: owner, amount: Money.of(asset, n.amount), at, memo: n.comment },
+        { ref, from: it.from ?? "", to: owner, amount: Money.of(asset, it.amount), at, memo: it.comment },
       ],
     };
   }

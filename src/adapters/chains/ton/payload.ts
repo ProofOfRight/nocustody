@@ -3,7 +3,6 @@
 // that could be mistaken for a decision.
 import { Cell, type Slice } from "@ton/core";
 
-export const OP_TRANSFER_NOTIFICATION = 0x7362d09c;
 export const OP_INTERNAL_TRANSFER = 0x178d4519;
 export const OP_TEXT_COMMENT = 0;
 
@@ -34,43 +33,43 @@ function forwardPayloadComment(s: Slice): string | null {
   return textComment(s);
 }
 
-export interface TransferNotification {
+export interface InternalTransfer {
   readonly queryId: bigint;
   readonly amount: bigint;
-  /** Owner of the sending jetton wallet (raw form), or null for addr_none. */
-  readonly sender: string | null;
+  /** Owner of the sending jetton wallet (raw form), or null for addr_none (e.g. a mint). */
+  readonly from: string | null;
+  readonly forwardTonAmount: bigint;
   readonly comment: string | null;
 }
 
-/** transfer_notification#7362d09c query_id:uint64 amount:(VarUInteger 16) sender:MsgAddress forward_payload:(Either Cell ^Cell) */
-export function parseTransferNotification(bodyBase64: string): TransferNotification | null {
+/**
+ * internal_transfer#178d4519 query_id:uint64 amount:(VarUInteger 16) from:MsgAddress response_address:MsgAddress
+ * forward_ton_amount:(VarUInteger 16) forward_payload:(Either Cell ^Cell) — the message that credits a jetton
+ * wallet. It reaches our jetton wallet for every transfer, whatever forward_ton_amount the sender chose.
+ */
+export function parseInternalTransfer(bodyBase64: string): InternalTransfer | null {
   const s = slice(bodyBase64);
   if (!s) return null;
   try {
-    if (s.loadUint(32) !== OP_TRANSFER_NOTIFICATION) return null;
+    if (s.loadUint(32) !== OP_INTERNAL_TRANSFER) return null;
     const queryId = s.loadUintBig(64);
     const amount = s.loadCoins();
-    const sender = s.loadMaybeAddress();
+    const from = s.loadMaybeAddress();
+    s.loadMaybeAddress(); // response_address
+    const forwardTonAmount = s.loadCoins();
     let comment: string | null = null;
     try {
       comment = forwardPayloadComment(s);
     } catch {
       comment = null; // a malformed payload must not hide a valid transfer; it just carries no memo
     }
-    return { queryId, amount, sender: sender ? sender.toRawString().toLowerCase() : null, comment };
-  } catch {
-    return null;
-  }
-}
-
-/** internal_transfer#178d4519 query_id:uint64 amount:(VarUInteger 16) from:MsgAddress … — amount only. */
-export function parseInternalTransferAmount(bodyBase64: string): bigint | null {
-  const s = slice(bodyBase64);
-  if (!s) return null;
-  try {
-    if (s.loadUint(32) !== OP_INTERNAL_TRANSFER) return null;
-    s.loadUintBig(64);
-    return s.loadCoins();
+    return {
+      queryId,
+      amount,
+      from: from ? from.toRawString().toLowerCase() : null,
+      forwardTonAmount,
+      comment,
+    };
   } catch {
     return null;
   }

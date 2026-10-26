@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 Before 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
+## [Unreleased]
+
+### Fixed
+
+- TON: jetton payments sent with `forward_ton_amount = 0` were never detected. The jetton wallet sends the owner no
+  `transfer_notification` in that case (TEP-74), and the scanner relied on it. Jetton payments are now read from the
+  transactions of the pinned jetton-wallet (`internal_transfer`), by the scanner and by tonapi reconciliation alike.
+  Found with a read-only mainnet replay of real payments.
+
+### Changed
+
+- TON jetton transfers are identified by the jetton-wallet transaction (hash and lt) instead of the owner's
+  notification transaction. Upgrading from 0.1.0 with TON jetton assets: do it while no TON jetton invoice is
+  `underpaid`. A payment already seen by 0.1.0 within the scanner overlap window (default 10 minutes) is seen again
+  under the new key; a completed invoice does not accept it, so it is reported as `transfer.unmatched`.
+
 ## [0.1.0] - 2026-10-26
 
 First release. Verified end to end with real TRON Nile and TON testnet transactions; **not yet run against

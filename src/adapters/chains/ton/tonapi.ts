@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Second source for TON reconciliation: tonapi GET /v2/blockchain/accounts/{id}/transactions. Applies the same
-// filters as the primary adapter (notification from OUR jetton-wallet; plain native transfers) and returns hints
-// only — every reconciled transaction is still verified through toncenter by the primary adapter.
+// filters as the primary adapter (internal_transfer on OUR jetton-wallet; plain native transfers to the wallet) and
+// returns hints only — every reconciled transaction is still verified through toncenter by the primary adapter.
 import { z } from "zod";
 import type { ReceivingAddress } from "../../../application/catalog.ts";
 import type { SecondarySource, TransferCandidate } from "../../../application/ports.ts";
@@ -29,9 +29,9 @@ const tx = z.object({
     .optional(),
 });
 const page = z.object({ transactions: z.array(tx) });
-const notifyBody = z.object({
+const internalTransferBody = z.object({
   amount: z.string().regex(/^\d{1,40}$/),
-  sender: z.string().optional(),
+  from: z.string().nullable().optional(),
   forward_payload: z
     .object({
       value: z.object({ sum_type: z.string(), value: z.object({ text: z.string() }).optional() }).optional(),
@@ -71,7 +71,8 @@ export class TonapiSource implements SecondarySource {
     for (let i = 0; i < this.#maxPages; i++) {
       const query: Record<string, string> = { limit: String(this.#pageSize), sort_order: "desc" };
       if (beforeLt !== null) query.before_lt = String(beforeLt);
-      const r = await this.#client.get(`/v2/blockchain/accounts/${address.value}/transactions`, query, page);
+      const account = asset.kind === "token" ? (jettonWallet as string) : address.value;
+      const r = await this.#client.get(`/v2/blockchain/accounts/${account}/transactions`, query, page);
       let crossed = false;
       for (const t of r.transactions) {
         beforeLt = t.lt;
@@ -79,7 +80,7 @@ export class TonapiSource implements SecondarySource {
           crossed = true;
           continue;
         }
-        const c = this.#candidate(asset, address, jettonWallet, t);
+        const c = this.#candidate(asset, address, t);
         if (c) out.push(c);
       }
       if (crossed || r.transactions.length < this.#pageSize) break;
@@ -87,23 +88,18 @@ export class TonapiSource implements SecondarySource {
     return out;
   }
 
-  #candidate(
-    asset: Asset,
-    address: ChainAddress,
-    jettonWallet: string | null,
-    t: z.infer<typeof tx>,
-  ): TransferCandidate | null {
+  #candidate(asset: Asset, address: ChainAddress, t: z.infer<typeof tx>): TransferCandidate | null {
     const m = t.in_msg;
     if (m?.msg_type !== "int_msg" || !m.source?.address || m.bounced) return null;
     const base = { network: this.network, txHash: t.hash, to: address, at: new Date(t.utime * 1000) };
     if (asset.kind === "token") {
-      if (m.op_code !== "0x7362d09c" || canonicalTon(m.source.address) !== jettonWallet) return null;
-      const body = notifyBody.safeParse(m.decoded_body);
-      if (!body.success) return null;
+      if (m.op_code !== "0x178d4519") return null;
+      const body = internalTransferBody.safeParse(m.decoded_body);
+      if (!body.success || BigInt(body.data.amount) <= 0n) return null;
       const fp = body.data.forward_payload?.value;
       return {
         ...base,
-        from: body.data.sender ? canonicalTon(body.data.sender) : "",
+        from: body.data.from ? canonicalTon(body.data.from) : "",
         amount: Money.of(asset, BigInt(body.data.amount)),
         memo: fp?.sum_type === "TextComment" ? (fp.value?.text ?? null) : null,
       };
