@@ -63,11 +63,13 @@ const hexToB64 = (hex: string) => Buffer.from(hex, "hex").toString("base64");
 
 export class TonAdapter implements ChainAdapter {
   readonly network: NetworkId;
+  readonly displayName: string;
   readonly #o: TonAdapterOptions;
 
   constructor(o: TonAdapterOptions) {
     if (!o.network.startsWith("ton:")) throw new Error(`not a TON network: ${o.network}`);
     this.network = o.network;
+    this.displayName = o.network === "ton:mainnet" ? "TON" : `TON ${o.network.slice("ton:".length)}`;
     this.#o = o;
   }
 

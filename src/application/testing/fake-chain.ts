@@ -6,6 +6,7 @@ import type { ChainAdapter, FetchResult, TransferCandidate, VerificationResult }
 
 export class FakeChain implements ChainAdapter {
   readonly network: NetworkId;
+  readonly displayName: string;
   pages: TransferCandidate[][] = [];
   verdicts = new Map<string, VerificationResult | Error>();
   /** Every fetch reports `more`, as if the indexer always had another page. */
@@ -15,6 +16,7 @@ export class FakeChain implements ChainAdapter {
 
   constructor(network: NetworkId) {
     this.network = network;
+    this.displayName = `Fake ${network}`;
   }
 
   supports(): boolean {

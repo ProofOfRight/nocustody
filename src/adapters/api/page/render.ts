@@ -40,14 +40,6 @@ const esc = (s: string) =>
 const jsonForHtml = (v: unknown) =>
   JSON.stringify(v).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 
-export const NETWORK_NAMES: Readonly<Record<string, string>> = {
-  "tron:mainnet": "TRON (TRC-20)",
-  "tron:nile": "TRON Nile testnet",
-  "tron:shasta": "TRON Shasta testnet",
-  "ton:mainnet": "TON",
-  "ton:testnet": "TON testnet",
-};
-
 export function contentSecurityPolicy(nonce: string): string {
   return [
     "default-src 'none'",

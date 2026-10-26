@@ -77,6 +77,8 @@ export interface FetchResult {
 /** Chain adapter. See CONTRIBUTING.md, "Network adapter checklist". */
 export interface ChainAdapter {
   readonly network: NetworkId;
+  /** Human name of the network shown to payers (payment page), e.g. "TRON (TRC-20)", "TON testnet". */
+  readonly displayName: string;
   /**
    * Addresses are validated and normalised once, when the config is loaded (src/app: addressValidators per network
    * family), so every address an adapter receives is already canonical.

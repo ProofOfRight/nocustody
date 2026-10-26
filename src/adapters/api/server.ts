@@ -13,7 +13,7 @@ import { DomainError } from "../../domain/errors.ts";
 import { INVOICE_STATUSES, type Invoice } from "../../domain/invoice.ts";
 import { authenticate, isTokenShaped } from "./keys.ts";
 import { type Lang, pickLanguage } from "./page/i18n.ts";
-import { contentSecurityPolicy, isPayable, NETWORK_NAMES, renderPaymentPage } from "./page/render.ts";
+import { contentSecurityPolicy, isPayable, renderPaymentPage } from "./page/render.ts";
 
 export interface ApiDeps {
   readonly uow: UnitOfWork;
@@ -427,21 +427,17 @@ export class ApiServer {
             const s = inv.state;
             const lang = pickLanguage(req.query.lang, req.headers["accept-language"], page.defaultLanguage);
             const nonce = randomBytes(18).toString("base64");
+            const adapter = d.adapters.find((x) => x.network === s.asset.network);
             const html = renderPaymentPage(
               {
                 id: s.id,
                 status: s.status,
                 assetSymbol: s.asset.symbol,
-                networkName: NETWORK_NAMES[s.asset.network] ?? s.asset.network,
+                networkName: adapter?.displayName ?? s.asset.network,
                 amount: s.instructions.amount.toDecimalString(),
-                address: (() => {
-                  const a = d.adapters.find((x) => x.network === s.asset.network);
-                  return a?.formatAddress?.(s.instructions.address) ?? s.instructions.address.value;
-                })(),
+                address: adapter?.formatAddress?.(s.instructions.address) ?? s.instructions.address.value,
                 memo: s.instructions.memo,
-                uri:
-                  d.adapters.find((a) => a.network === s.asset.network)?.buildPaymentUri(s.instructions) ??
-                  null,
+                uri: adapter?.buildPaymentUri(s.instructions) ?? null,
                 expiresAt: s.expiresAt.toISOString(),
                 graceUntil: s.graceUntil.toISOString(),
                 statusUrl: `/pay/${encodeURIComponent(s.id)}/status`,

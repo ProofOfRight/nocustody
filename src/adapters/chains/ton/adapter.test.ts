@@ -215,6 +215,12 @@ describe("jetton-wallet binding", () => {
   });
 });
 
+describe("display", () => {
+  it("names its network for payers", () => {
+    expect(adapter(fake({}).fn).displayName).toBe("TON testnet");
+  });
+});
+
 describe("fetchIncoming (indexer candidates)", () => {
   it("jetton: internal_transfer on our jetton-wallet, with amount, sender and memo hints", async () => {
     const { fn, calls } = fake({ list: () => fixture("testnet-jetton-wallet-transactions.json") });
