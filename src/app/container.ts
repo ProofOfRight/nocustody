@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Composition root: wires config, adapters and use cases. The only place that knows concrete implementations.
+import { randomInt } from "node:crypto";
 import pg from "pg";
 import { AlertRouter, LogAlertSink, TelegramAlertSink } from "../adapters/alerts/sinks.ts";
 import { type AddressNormaliser, BlocklistAmlScreener } from "../adapters/aml/blocklist.ts";
@@ -94,8 +95,10 @@ export function buildContainer(o: ContainerOptions) {
   const uow = new PgUnitOfWork(pool, new Map(o.config.assets.map((s) => [s.asset.id, s.asset])));
   const onSettleError = (subject: string, err: unknown) =>
     logger.error({ subject, err: err instanceof Error ? err.message : String(err) }, "settlement failed");
-  const uniqueAmount = new UniqueAmountStrategy();
-  const memo = new MemoStrategy(o.memos ?? cryptoMemos);
+  // A random first slot: the pair a previous invoice just released is not the next one handed out.
+  const randomSlot = (n: number) => (n > 1 ? randomInt(n) : 0);
+  const uniqueAmount = new UniqueAmountStrategy(randomSlot);
+  const memo = new MemoStrategy(o.memos ?? cryptoMemos, randomSlot);
   const strategies: StrategyResolver = (s) => {
     switch (s.strategy) {
       case "memo":
@@ -131,6 +134,9 @@ export function buildContainer(o: ContainerOptions) {
     clock,
     ids: cryptoIds,
     integrity: o.integrity,
+    depeg: ops.depeg
+      ? { symbol: ops.depeg.symbol, maxGuardAgeMs: 3 * parseDuration(ops.depeg.interval) }
+      : null,
   });
   const expireInvoices = new ExpireInvoices({ uow, clock, batchSize: 100 });
 

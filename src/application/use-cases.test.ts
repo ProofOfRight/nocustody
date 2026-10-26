@@ -92,15 +92,23 @@ const manual = (rates: Array<[string, string, string]>, ageMs = 0, maxAgeMs = 60
     })),
   );
 
-function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[]; memos?: string[] } = {}) {
+function setup(
+  opts: {
+    assets?: AssetSettings[];
+    providers?: RateProvider[];
+    memos?: string[];
+    slotStart?: (n: number) => number;
+    depeg?: { symbol: string; maxGuardAgeMs: number };
+  } = {},
+) {
   const clock = new FakeClock();
   const store = new InMemoryStore(() => clock.now());
   const chain = new FakeChain(TRON);
   const aml = new ScriptedAml();
   const catalog = new AssetCatalog(opts.assets ?? [settings()]);
-  const uniqueAmount = new UniqueAmountStrategy();
+  const uniqueAmount = new UniqueAmountStrategy(opts.slotStart);
   const memoQueue = [...(opts.memos ?? [])];
-  const memo = new MemoStrategy({ newMemo: () => memoQueue.shift() ?? "ZZZZ9999" });
+  const memo = new MemoStrategy({ newMemo: () => memoQueue.shift() ?? "ZZZZ9999" }, opts.slotStart);
   const strategies = (s: AssetSettings) => (s.strategy === "memo" ? memo : uniqueAmount);
   const integrity = {
     ok: true,
@@ -126,6 +134,7 @@ function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[]; mem
     clock,
     ids: { newId: () => `inv-${++n}` },
     integrity,
+    depeg: opts.depeg ?? null,
   });
   const ingest = new IngestTransfers({
     adapter: chain,
@@ -177,6 +186,32 @@ describe("CreateInvoice", () => {
     expect(again.created).toBe(false);
     expect(again.invoice.id).toBe(a.invoice.id);
     expect(s.store.data.outbox.map((e) => e.type)).toEqual(["invoice.created", "invoice.created"]);
+  });
+
+  it("starts at a chosen slot and wraps around, so a just-freed pair is not the next one handed out", async () => {
+    const starts = [5, 98, 0];
+    const s = setup({ slotStart: () => starts.shift() ?? 0 });
+    expect((await s.order("o1")).invoice.state.instructions.amount.toDecimalString()).toBe("10.060000");
+    expect((await s.order("o2")).invoice.state.instructions.amount.toDecimalString()).toBe("10.990000");
+    expect((await s.order("o3")).invoice.state.instructions.amount.toDecimalString()).toBe("10.010000");
+    // the wrap-around finds the free slots before the start when the ones after it are taken
+    const wrap = setup({ slotStart: () => 98 });
+    await wrap.order("a");
+    expect((await wrap.order("b")).invoice.state.instructions.amount.toDecimalString()).toBe("10.010000");
+  });
+
+  it("with depeg protection configured, a missing or stale guard reading blocks new invoices (fail closed)", async () => {
+    const s = setup({ depeg: { symbol: "USDT", maxGuardAgeMs: 15 * MIN } });
+    expect(await errCode(s.order("o1"))).toBe("pricing.depeg_block"); // no reading yet
+    await s.store.run((r) => r.guards.set("depeg:USDT", false, "within 150 bps", s.clock.now()));
+    expect((await s.order("o1")).created).toBe(true);
+    s.clock.advance(16 * MIN); // the monitor stopped writing
+    expect(await errCode(s.order("o2"))).toBe("pricing.depeg_block");
+    await s.store.run((r) => r.guards.set("depeg:USDT", true, "off the peg", s.clock.now()));
+    expect(await errCode(s.order("o3"))).toBe("pricing.depeg_block");
+    // not configured: only an explicit block counts (nothing to be stale)
+    const plain = setup();
+    expect((await plain.order("o1")).created).toBe(true);
   });
 
   it("refuses the same merchant order with another price, currency or asset", async () => {
@@ -448,6 +483,22 @@ describe("payment flow", () => {
     expect(await s.settle.execute()).toMatchObject({ matched: 0, unmatched: 0, errors: 0 });
     expect(s.store.data.outbox.length).toBe(outboxBefore); // no second transfer.unmatched, no second credit
     expect(s.store.data.invoices.get(invoice.id)?.status).toBe("confirming");
+  });
+
+  it("a transfer that landed before the invoice existed is never claimed by it (someone else's money)", async () => {
+    // ADR-0030: an attacker watches the address, sees an unmatched 10.01 USDT land at T and opens an invoice for
+    // 10 USD (→ 10.01) 20 s later, inside the old 30 s skew. The transfer must stay unmatched.
+    const c = candidate("at", "10.01", s.clock.now());
+    s.clock.advance(20_000);
+    const { invoice } = await s.order("o1");
+    s.chain.pages = [[c]];
+    expect(await s.cycle()).toMatchObject({ matched: 0, unmatched: 1 });
+    expect(s.store.data.invoices.get(invoice.id)?.status).toBe("awaiting_payment");
+    expect(s.store.data.outbox.at(-1)?.type).toBe("transfer.unmatched");
+    // a genuine payment seconds after the invoice, with the gateway's clock 3 s ahead of the chain, is credited
+    const late = candidate("ok", "10.01", new Date(s.clock.now().getTime() - 3_000));
+    s.chain.pages.push([late]); // the fake's cursor is at page 1 now
+    expect(await s.cycle()).toMatchObject({ matched: 1 });
   });
 
   it("quarantines transfers that match no invoice", async () => {

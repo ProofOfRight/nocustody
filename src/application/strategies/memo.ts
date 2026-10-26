@@ -4,7 +4,7 @@ import { normalizeMemo } from "../../domain/memo.ts";
 import { ApplicationError } from "../errors.ts";
 import type { MemoGenerator, Repositories } from "../ports.ts";
 import type { AllocationRequest, MatchFacts, PaymentInstructionStrategy, StrategyMatch } from "./strategy.ts";
-import { allocateAmountSlot, matchAmountSlot } from "./unique-amount.ts";
+import { allocateAmountSlot, matchAmountSlot, type SlotStart } from "./unique-amount.ts";
 
 const MAX_MEMO_ATTEMPTS = 5;
 
@@ -14,13 +14,15 @@ const MAX_MEMO_ATTEMPTS = 5;
  */
 export class MemoStrategy implements PaymentInstructionStrategy {
   readonly #memos: MemoGenerator;
+  readonly #start: SlotStart;
 
-  constructor(memos: MemoGenerator) {
+  constructor(memos: MemoGenerator, start: SlotStart = () => 0) {
     this.#memos = memos;
+    this.#start = start;
   }
 
   async allocate(req: AllocationRequest, repos: Repositories) {
-    const fallback = await allocateAmountSlot(req, repos);
+    const fallback = await allocateAmountSlot(req, repos, this.#start);
     const address =
       fallback?.instructions.address ?? req.settings.addresses.find((a) => a.status === "active")?.address;
     if (!address)
