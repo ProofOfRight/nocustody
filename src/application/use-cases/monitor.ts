@@ -11,6 +11,7 @@ import type {
   IntegrityGuard,
   PegPriceSource,
   SecondarySource,
+  TransferCandidate,
   UnitOfWork,
 } from "../ports.ts";
 
@@ -55,6 +56,8 @@ export interface ReconcileStats {
   checked: number;
   missedByPrimary: number;
   notInSecondary: number;
+  /** Addresses for which a source returned a partial answer, so credited transfers were not compared. */
+  truncated: number;
   errors: number;
 }
 
@@ -220,7 +223,13 @@ export class Monitor {
    */
   async reconcile(): Promise<ReconcileStats> {
     const { uow, clock, alerts, catalog, secondary, reconcileLookbackMs, reconcileSettleDelayMs } = this.#d;
-    const stats: ReconcileStats = { checked: 0, missedByPrimary: 0, notInSecondary: 0, errors: 0 };
+    const stats: ReconcileStats = {
+      checked: 0,
+      missedByPrimary: 0,
+      notInSecondary: 0,
+      truncated: 0,
+      errors: 0,
+    };
     const now = clock.now().getTime();
     const from = new Date(now - reconcileLookbackMs);
     const until = new Date(now - reconcileSettleDelayMs);
@@ -228,11 +237,12 @@ export class Monitor {
       for (const settings of catalog.forNetwork(source.network)) {
         if (!source.supports(settings.asset)) continue;
         for (const address of watchedAddresses(settings)) {
-          let theirs: Awaited<ReturnType<SecondarySource["incoming"]>>;
+          let theirs: TransferCandidate[];
+          let complete: boolean;
           try {
-            theirs = (await source.incoming(settings.asset, address, settings.addresses, from)).filter(
-              (c) => c.at <= until,
-            );
+            const report = await source.incoming(settings.asset, address, settings.addresses, from, until);
+            theirs = report.transfers.filter((c) => c.at <= until);
+            complete = report.complete;
           } catch (e) {
             stats.errors++;
             await alerts.send({
@@ -272,6 +282,16 @@ export class Monitor {
               severity: "warning",
               message: `${missed.length} transfer(s) to ${address.value} missed by the primary indexer were queued for verification (${source.name})`,
             });
+          }
+          if (!complete) {
+            // Comparing a partial answer would report every transfer it left out as unknown to the source.
+            stats.truncated++;
+            await alerts.send({
+              key: `reconcile-truncated:${source.network}:${address.value}`,
+              severity: "warning",
+              message: `${source.name} returned only part of the transfers to ${address.value} in the reconciliation window; transfers we credited were not compared`,
+            });
+            continue;
           }
           const known = new Set(theirs.map((c) => c.txHash));
           const ours = await uow.run((r) => r.candidates.listVerified(source.network, address, from, until));

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Second source for TRON reconciliation: Tronscan GET /api/new/token_trc20/transfers. Returns hints only — every
-// reconciled transfer is still verified through /walletsolidity by the primary adapter.
+// reconciled transfer is still verified through /walletsolidity by the primary adapter. Tronscan answers newest
+// first and both time bounds are inclusive (checked on Nile); when the page budget runs out, the oldest transfers
+// of the window are missing and the report says so.
 import { z } from "zod";
 import type { ReceivingAddress } from "../../../application/catalog.ts";
-import type { SecondarySource, TransferCandidate } from "../../../application/ports.ts";
+import type { SecondaryReport, SecondarySource, TransferCandidate } from "../../../application/ports.ts";
 import type { Asset } from "../../../domain/asset.ts";
 import type { ChainAddress } from "../../../domain/chain-address.ts";
 import { Money } from "../../../domain/money.ts";
@@ -45,8 +47,10 @@ export class TronscanSource implements SecondarySource {
     address: ChainAddress,
     _receiving: readonly ReceivingAddress[],
     from: Date,
-  ): Promise<TransferCandidate[]> {
+    until: Date,
+  ): Promise<SecondaryReport> {
     const out = new Map<string, TransferCandidate>();
+    let complete = false;
     for (let page = 0; page < this.#maxPages; page++) {
       const r = await this.#client.get(
         "/api/new/token_trc20/transfers",
@@ -54,6 +58,7 @@ export class TronscanSource implements SecondarySource {
           toAddress: address.value,
           contract_address: asset.contract ?? "",
           start_timestamp: String(from.getTime()),
+          end_timestamp: String(until.getTime()),
           limit: String(this.#pageSize),
           start: String(page * this.#pageSize),
         },
@@ -75,8 +80,11 @@ export class TronscanSource implements SecondarySource {
           });
         }
       }
-      if (r.token_transfers.length < this.#pageSize) break;
+      if (r.token_transfers.length < this.#pageSize) {
+        complete = true;
+        break;
+      }
     }
-    return [...out.values()];
+    return { transfers: [...out.values()], complete };
   }
 }

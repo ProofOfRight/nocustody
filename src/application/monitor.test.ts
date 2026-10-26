@@ -238,13 +238,13 @@ describe("monitor: depeg protection", () => {
 });
 
 describe("monitor: reconciliation with a second source", () => {
-  const source = (list: TransferCandidate[] | Error): SecondarySource => ({
+  const source = (list: TransferCandidate[] | Error, complete = true): SecondarySource => ({
     name: "tronscan",
     network: TRON,
     supports: () => true,
     incoming: async () => {
       if (list instanceof Error) throw list;
-      return list;
+      return { transfers: list, complete };
     },
   });
 
@@ -270,6 +270,24 @@ describe("monitor: reconciliation with a second source", () => {
     });
     expect((await s.monitor.reconcile()).notInSecondary).toBe(1);
     expect(s.sent.at(-1)?.key).toBe(`reconcile-unknown:${TRON}:${ADDR.value}`);
+  });
+
+  it("a partial answer from the second source queues what it saw but reports nothing as unknown", async () => {
+    const s = setup({ secondary: [source([cand("aa", "10.01", T0 - 60 * MIN)], false)] });
+    const c = cand("cc", "10.01", T0 - 30 * MIN);
+    await s.store.run(async (r) => {
+      await r.candidates.insert(c, "seen", null);
+      await r.candidates.markVerified(c);
+    });
+    expect(await s.monitor.reconcile()).toMatchObject({
+      missedByPrimary: 1,
+      notInSecondary: 0,
+      truncated: 1,
+    });
+    expect(s.sent.map((a) => a.key)).toEqual([
+      `reconcile-missed:${TRON}:${ADDR.value}`,
+      `reconcile-truncated:${TRON}:${ADDR.value}`,
+    ]);
   });
 
   it("a failing second source is an alert, not a crash", async () => {
