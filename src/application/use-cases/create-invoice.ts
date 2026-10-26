@@ -4,7 +4,7 @@ import { Invoice, type LockedPrice } from "../../domain/invoice.ts";
 import { Money } from "../../domain/money.ts";
 import type { AssetCatalog, AssetSettings, PricingSettings } from "../catalog.ts";
 import { ApplicationError, ConcurrencyError } from "../errors.ts";
-import type { Clock, IdGenerator, IntegrityGuard, Repositories, UnitOfWork } from "../ports.ts";
+import type { AlertSink, Clock, IdGenerator, IntegrityGuard, Repositories, UnitOfWork } from "../ports.ts";
 import type { RateService } from "../rates.ts";
 import type { StrategyResolver } from "../strategies/strategy.ts";
 import { QuotePrice } from "./quote-price.ts";
@@ -73,6 +73,17 @@ export class CreateInvoice {
         return (await existing(repos)) ?? this.#create(repos, input, settings, base, price, now);
       });
     } catch (e) {
+      if (e instanceof ApplicationError && e.code === "allocation.no_free_slot") {
+        // Every active address is full for this price: merchants see 503 until slots free up; the operator must know.
+        await this.#deps.alerts
+          ?.send({
+            key: `slots-exhausted:${settings.asset.id}`,
+            severity: "critical",
+            message: `${settings.asset.id}: no free amount slot (${settings.uniqueAmount.maxSlots} per address, ${settings.addresses.filter((a) => a.status === "active").length} active address(es)); add addresses or shorten ttl/grace`,
+          })
+          .catch(() => undefined);
+        throw e;
+      }
       // A concurrent request for the same order won the insert; answer with its invoice.
       if (!(e instanceof ConcurrencyError)) throw e;
       const won = await uow.run(existing);
@@ -185,4 +196,6 @@ export interface CreateInvoiceDeps {
    * that says "not blocked". Missing or stale (the monitor is not running) fails closed.
    */
   readonly depeg?: { readonly symbol: string; readonly maxGuardAgeMs: number } | null;
+  /** Operator alerts: slots of an asset exhausted (every active address full). */
+  readonly alerts?: AlertSink;
 }

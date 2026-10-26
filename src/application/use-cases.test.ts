@@ -117,6 +117,7 @@ function setup(
       integrity.ok ? { ok: true as const } : { ok: false as const, reason: integrity.reason },
   };
   let n = 0;
+  const alerts: Alert[] = [];
   const create = new CreateInvoice({
     uow: store,
     catalog,
@@ -135,8 +136,8 @@ function setup(
     ids: { newId: () => `inv-${++n}` },
     integrity,
     depeg: opts.depeg ?? null,
+    alerts: { send: async (a) => void alerts.push(a) },
   });
-  const alerts: Alert[] = [];
   const ingest = new IngestTransfers({
     adapter: chain,
     catalog,
@@ -359,6 +360,7 @@ describe("CreateInvoice", () => {
     expect(used).toEqual([ADDR_A.value, ADDR_A.value, ADDR_B.value, ADDR_B.value]);
     expect(await errCode(s.order("o5"))).toBe("allocation.no_free_slot");
     expect(s.store.data.invoices.size).toBe(4); // the failed creation rolled back
+    expect(s.alerts.at(-1)).toMatchObject({ key: "slots-exhausted:usdt-tron", severity: "critical" });
   });
 });
 

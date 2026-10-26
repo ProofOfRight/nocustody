@@ -29,21 +29,26 @@ import { type TxRef, txRef } from "../../../domain/tx-ref.ts";
  */
 export type AssetResolver = ReadonlyMap<string, Asset>;
 
+/** Receiving addresses per asset id (every status), from the pinned config: an invoice must point at one of them. */
+export type PinnedAddresses = ReadonlyMap<string, ReadonlySet<string>>;
+
 /** PostgreSQL unit of work: one transaction per `run`, repositories bound to its connection. */
 export class PgUnitOfWork implements UnitOfWork {
   readonly #pool: Pool;
   readonly #assets: AssetResolver;
+  readonly #pinned: PinnedAddresses | null;
 
-  constructor(pool: Pool, assets: AssetResolver) {
+  constructor(pool: Pool, assets: AssetResolver, pinned: PinnedAddresses | null = null) {
     this.#pool = pool;
     this.#assets = assets;
+    this.#pinned = pinned;
   }
 
   async run<T>(work: (repos: Repositories) => Promise<T>): Promise<T> {
     const client = await this.#pool.connect();
     try {
       await client.query("BEGIN");
-      const result = await work(repositories(client, this.#assets));
+      const result = await work(repositories(client, this.#assets, this.#pinned));
       await client.query("COMMIT");
       return result;
     } catch (e) {
@@ -119,7 +124,7 @@ interface TransferRow {
   reason: string | null;
 }
 
-function repositories(db: PoolClient, assets: AssetResolver): Repositories {
+function repositories(db: PoolClient, assets: AssetResolver, pinned: PinnedAddresses | null): Repositories {
   const assetIds = [...assets.keys()];
   const assetOf = (id: string): Asset => {
     const a = assets.get(id);
@@ -130,6 +135,14 @@ function repositories(db: PoolClient, assets: AssetResolver): Repositories {
   const toInvoice = (r: InvoiceRow, payments: PaymentRow[]): Invoice => {
     const asset = assetOf(r.asset_id);
     const network = r.network as NetworkId;
+    // Defence in depth: the address shown to payers comes from this row. Somebody with write access to the database
+    // must not be able to turn it into an address that is not in the pinned config.
+    if (pinned && !pinned.get(r.asset_id)?.has(r.pay_address)) {
+      throw new ApplicationError(
+        "invoice.address_unpinned",
+        `invoice ${r.id} points at ${r.pay_address}, which is not a pinned address of ${r.asset_id}`,
+      );
+    }
     const state: InvoiceState = {
       id: r.id,
       merchantOrderId: r.merchant_order_id,

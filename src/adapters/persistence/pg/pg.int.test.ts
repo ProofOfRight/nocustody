@@ -322,6 +322,46 @@ describe("PostgreSQL repositories", () => {
     expect((await pool.query("SELECT count(*)::int AS n FROM outbox")).rows[0].n).toBe(1);
   });
 
+  it("an invoice whose stored address is not a pinned address of its asset cannot be read (database tampering)", async () => {
+    const pinnedUow = new PgUnitOfWork(pool, assets, new Map([[USDT_TRON.id, new Set([ADDR.value])]]));
+    const create = new CreateInvoice({
+      uow: pinnedUow,
+      catalog: new AssetCatalog([
+        {
+          asset: USDT_TRON,
+          priceSymbol: "USDT",
+          strategy: "unique-amount",
+          addresses: [{ address: ADDR, status: "active", tokenAccount: null }],
+          amountPolicy: STRICT_AMOUNT_POLICY,
+          uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 9 }),
+          ttlMs: 30 * MIN,
+          graceMs: 60 * MIN,
+          amlThresholdUnits: 0n,
+        },
+      ]),
+      pricing: { currencies: new Set(), markupBps: new Map() },
+      rates: new RateService([new ManualRateTable([])]),
+      strategies: () => new UniqueAmountStrategy(),
+      clock: { now: () => T0 },
+      ids: { newId: () => "inv-pinned" },
+      integrity: { check: async () => ({ ok: true }) },
+    });
+    const { invoice } = await create.execute({
+      merchantOrderId: "o-pin",
+      priceAmount: "10",
+      priceCurrency: "USDT",
+      assetId: USDT_TRON.id,
+    });
+    expect((await pinnedUow.run((r) => r.invoices.findById(invoice.id)))?.id).toBe(invoice.id);
+    await pool.query("UPDATE invoices SET pay_address = $2 WHERE id = $1", [
+      invoice.id,
+      "TAttacker11111111111111111111111111",
+    ]);
+    await expect(pinnedUow.run((r) => r.invoices.findById(invoice.id))).rejects.toMatchObject({
+      code: "invoice.address_unpinned",
+    });
+  });
+
   it("rolls back state, outbox and cursor together", async () => {
     await expect(
       uow.run(async (r) => {

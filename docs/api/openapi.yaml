@@ -136,8 +136,8 @@ components:
                       rate_limited, not_found, method_not_allowed, conflict, internal. Application: asset.unknown,
                       pricing.currency_disabled, pricing.no_rate, pricing.depeg_block, invoice.zero_amount,
                       invoice.order_mismatch, allocation.no_free_slot, allocation.no_address,
-                      allocation.memo_collision, integrity.pin_violation; domain validation codes such as
-                      decimal.precision.
+                      allocation.memo_collision, integrity.pin_violation, invoice.address_unpinned; domain
+                      validation codes such as decimal.precision.
                   message: { type: string }
   schemas:
     Decimal: { type: string, pattern: "^(0|[1-9]\\d*)(\\.\\d+)?$", example: "10.50" }
