@@ -153,6 +153,13 @@ describe("fetchIncoming (indexer candidates)", () => {
     const json = { success: true, data: [row, row, fake], meta: {} };
     const res = await adapter(fakeFetch(() => ({ json })).fn).fetchIncoming(USDT, [ADDR], null, 50);
     expect(res.candidates.map((c) => c.txHash)).toEqual([TX]);
+    // several transfers of one transaction to us: the hint carries the largest, so a dust row listed first cannot
+    // make the whole transaction "dust" and hide the real payment (the verifier reads every log anyway)
+    const dust = { ...row, value: "1" };
+    const big = { ...row, value: "10010000" };
+    const multi = { success: true, data: [dust, big, { ...row, value: "5" }], meta: {} };
+    const r2 = await adapter(fakeFetch(() => ({ json: multi })).fn).fetchIncoming(USDT, [ADDR], null, 50);
+    expect(r2.candidates.map((c) => [c.txHash, c.amount.units])).toEqual([[TX, 10_010_000n]]);
   });
 });
 

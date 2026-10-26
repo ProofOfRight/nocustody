@@ -69,8 +69,9 @@ export class TronAdapter implements ChainAdapter {
     const contract = this.#contract(asset);
     const state = parseTimeCursor(cursor, "TRON");
     const next: Cursor = { ...state };
-    const out: TransferCandidate[] = [];
-    const seen = new Set<string>();
+    // One candidate per transaction, carrying its largest transfer to us: a dust row listed first must not hide a
+    // real payment in the same transaction (the verifier reads every log anyway).
+    const byTx = new Map<string, TransferCandidate>();
     for (const address of addresses) {
       const from = Math.max(this.#o.startFrom.getTime(), (state[address.value] ?? 0) - this.#o.overlapMs);
       const query: Record<string, string> = {
@@ -92,14 +93,16 @@ export class TronAdapter implements ChainAdapter {
           // Hint filtering only; the verifier re-checks everything against solidified state.
           if (row.type !== "Transfer" || row.token_info.address !== contract || row.to !== address.value)
             continue;
-          if (seen.has(row.transaction_id)) continue;
-          seen.add(row.transaction_id);
-          out.push({
+          const txHash = row.transaction_id.toLowerCase();
+          const amount = Money.of(asset, BigInt(row.value));
+          const prev = byTx.get(txHash);
+          if (prev && prev.amount.units >= amount.units) continue;
+          byTx.set(txHash, {
             network: this.network,
-            txHash: row.transaction_id.toLowerCase(),
+            txHash,
             from: row.from,
             to: address,
-            amount: Money.of(asset, BigInt(row.value)),
+            amount,
             at: new Date(row.block_timestamp),
             memo: null,
           });
@@ -108,7 +111,7 @@ export class TronAdapter implements ChainAdapter {
         query.fingerprint = res.meta.fingerprint; // all other parameters must stay the same
       }
     }
-    return { candidates: out, next: JSON.stringify(next) };
+    return { candidates: [...byTx.values()], next: JSON.stringify(next) };
   }
 
   async verify(
