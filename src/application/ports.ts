@@ -77,9 +77,11 @@ export interface FetchResult {
 /** Chain adapter. See CONTRIBUTING.md, "Network adapter checklist". */
 export interface ChainAdapter {
   readonly network: NetworkId;
+  /**
+   * Addresses are validated and normalised once, when the config is loaded (src/app: addressValidators per network
+   * family), so every address an adapter receives is already canonical.
+   */
   supports(asset: Asset): boolean;
-  /** Validates and normalises an address; throws on invalid input. */
-  validateAddress(raw: string): ChainAddress;
   /**
    * Candidates from an indexer for incoming transfers of `asset` to `addresses`, starting at `cursor`. `limit` is
    * the number of rows per indexer request (an adapter may cap it at its provider's maximum), not a bound on the
