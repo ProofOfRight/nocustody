@@ -1,6 +1,6 @@
 # 0011. Project name `nocustody`, separate GitHub organization
 
-- Status: accepted
+- Status: hosting part superseded by [0032](0032-repository-hosting.md); the name still accepted
 - Date: 2026-10-26
 
 ## Context

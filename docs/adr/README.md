@@ -17,7 +17,7 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0008](0008-transactional-outbox.md) | 2026-10-26 | Transactional outbox for webhooks | accepted |
 | [0009](0009-independent-finality-check.md) | 2026-10-26 | Independent "final + successful" verification before crediting | accepted |
 | [0010](0010-multi-currency-pricing.md) | 2026-10-26 | Multi-currency pricing as a first-class requirement | accepted |
-| [0011](0011-project-name.md) | 2026-10-26 | Project name `nocustody`, separate GitHub organization | accepted |
+| [0011](0011-project-name.md) | 2026-10-26 | Project name `nocustody`, separate GitHub organization | superseded in part |
 | [0012](0012-fastify-manual-di.md) | 2026-10-26 | Fastify with a hand-written composition root | superseded in part |
 | [0013](0013-single-package-npm.md) | 2026-10-26 | Single package, npm, enforced layer boundaries | accepted |
 | [0014](0014-postgresql-only.md) | 2026-10-26 | PostgreSQL only, `pg` driver, plain SQL migrations | accepted |
@@ -38,3 +38,4 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0029](0029-release-provenance.md) | 2026-10-26 | Releases: tag-triggered workflow, GitHub artifact attestations, own SBOM | accepted |
 | [0030](0030-early-payment-tolerance.md) | 2026-10-26 | Early-payment tolerance of 5 seconds, separate from the slot margin | accepted |
 | [0031](0031-pinned-config-scope.md) | 2026-10-26 | The pinned checksum covers everything that decides money, not only addresses | accepted |
+| [0032](0032-repository-hosting.md) | 2026-10-26 | The repository is hosted under the maintainer's account | accepted |
