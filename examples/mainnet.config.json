@@ -1,0 +1,91 @@
+{
+  "database": { "urlEnv": "DATABASE_URL" },
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "paymentPage": { "enabled": true, "defaultLanguage": "en" }
+  },
+  "tron": {
+    "network": "tron:mainnet",
+    "apiUrl": "https://api.trongrid.io",
+    "apiKeyEnv": "TRONGRID_API_KEY",
+    "startFrom": "2026-11-01T00:00:00Z",
+    "pollInterval": "10s"
+  },
+  "ton": {
+    "network": "ton:mainnet",
+    "apiUrl": "https://toncenter.com",
+    "apiKeyEnv": "TONCENTER_API_KEY",
+    "startFrom": "2026-11-01T00:00:00Z",
+    "pollInterval": "10s",
+    "minInterval": "200ms"
+  },
+  "assets": [
+    {
+      "id": "usdt-tron",
+      "network": "tron:mainnet",
+      "kind": "token",
+      "contract": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+      "decimals": 6,
+      "symbol": "USDT",
+      "priceSymbol": "USDT",
+      "addresses": [{ "address": "REPLACE_WITH_YOUR_TRON_ADDRESS", "status": "active" }],
+      "amounts": { "step": "0.01", "maxSlots": 99, "dustThreshold": "0.5" },
+      "ttl": "30m",
+      "grace": "60m",
+      "amlThreshold": "0"
+    },
+    {
+      "id": "usdt-ton",
+      "network": "ton:mainnet",
+      "kind": "token",
+      "contract": "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs",
+      "decimals": 6,
+      "symbol": "USDT",
+      "priceSymbol": "USDT",
+      "strategy": "memo",
+      "addresses": [
+        {
+          "address": "REPLACE_WITH_YOUR_TON_WALLET",
+          "status": "active",
+          "jettonWallet": "REPLACE_WITH_ITS_USDT_JETTON_WALLET"
+        }
+      ],
+      "amounts": { "step": "0.01", "maxSlots": 99, "dustThreshold": "0.5" },
+      "ttl": "30m",
+      "grace": "60m",
+      "amlThreshold": "0"
+    }
+  ],
+  "pricing": {
+    "currencies": ["USD", "EUR"],
+    "manualRates": [
+      { "base": "USD", "quote": "USDT", "rate": "1", "setAt": "2026-11-01T00:00:00Z", "maxAge": "30d" },
+      { "base": "EUR", "quote": "USD", "rate": "1.08", "setAt": "2026-11-01T00:00:00Z", "maxAge": "7d" }
+    ]
+  },
+  "webhooks": {
+    "url": "https://shop.example.org/nocustody/webhook",
+    "secretEnv": "NOCUSTODY_WEBHOOK_SECRET"
+  },
+  "ops": {
+    "alerts": {
+      "cooldown": "30m",
+      "telegram": { "botTokenEnv": "NOCUSTODY_TG_TOKEN", "chatId": "-100123456789" }
+    },
+    "reconcile": {
+      "interval": "1h",
+      "lookback": "3h",
+      "settleDelay": "10m",
+      "tron": { "apiUrl": "https://apilist.tronscanapi.com", "apiKeyEnv": "TRONSCAN_API_KEY" },
+      "ton": { "apiUrl": "https://tonapi.io", "apiKeyEnv": "TONAPI_KEY" }
+    },
+    "depeg": {
+      "symbol": "USDT",
+      "maxDeviationBps": 150,
+      "interval": "5m",
+      "sources": ["kraken", "coinbase"]
+    },
+    "aml": { "provider": "noop" }
+  }
+}
