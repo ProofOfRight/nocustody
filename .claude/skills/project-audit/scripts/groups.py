@@ -32,9 +32,13 @@ GROUPS = {
     "infra": r"^(Dockerfile|\.dockerignore|compose\.yaml|Makefile|\.npmrc|package\.json|package-lock\.json|"
              r"biome\.json|tsconfig[a-z.]*\.json|vitest\.config\.ts|\.dependency-cruiser\.mjs)$|"
              r"^(deploy|docker|\.github|\.claude)/",
+    # Integration examples merchants copy: webhook signature verification, replay store, views (edge security agent).
+    "examples": r"^examples/",
+    # What agents and contributors are told (infrastructure security agent, item G).
+    "agents": r"^(CLAUDE|AGENTS|CONTRIBUTING|SECURITY)\.md$",
 }
-# Tracked files that are not reviewed by group: documentation (read by the main session), examples, licences.
-IGNORED = r"^(docs|examples)/|\.md$|^(LICENSE|NOTICE|CHANGELOG\.md|\.gitignore)$"
+# Tracked files that are not reviewed by group: documentation (read by the main session), licences.
+IGNORED = r"^docs/|\.md$|^(LICENSE|NOTICE|CHANGELOG\.md|\.gitignore)$"
 TEST = re.compile(r"\.test\.ts$")
 
 
@@ -73,10 +77,10 @@ def main():
     counts = {name: [0, 0, 0] for name in GROUPS}  # files, lines, test files
     unassigned = []
     for f in files:
-        if re.search(IGNORED, f):
-            continue
         name = group_of(f)
         if name is None:
+            if re.search(IGNORED, f):
+                continue
             unassigned.append(f)
             continue
         if TEST.search(f):

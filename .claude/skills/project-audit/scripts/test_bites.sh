@@ -21,7 +21,8 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 ROOT="$(pwd)"
-SCRATCH="${SCRATCH:-${TMPDIR:-/tmp}/nocustody-bites}"
+# A fresh private directory: a predictable path under /tmp could be pre-created by another user of the host.
+SCRATCH="${SCRATCH:-$(mktemp -d "${TMPDIR:-/tmp}/nocustody-bites.XXXXXX")}"
 PROJECT=nocustody-bites
 TEST_SIDE=(':!*.test.ts' ':!src/**/fixtures/**' ':!src/application/testing/**' ':!src/domain/test-fixtures.ts')
 
@@ -48,7 +49,7 @@ trap cleanup EXIT
 
 run_tests() {   # $1 — JSON report path relative to the worktree, $2… — test files
     local out="$1"; shift
-    compose run --rm -T -v "$ROOT/node_modules:/app/node_modules" dev \
+    compose run --rm -T -v "$ROOT/node_modules:/app/node_modules:ro" dev \
         npx vitest run --reporter=json --outputFile="$out" "$@" >/dev/null 2>&1
 }
 
