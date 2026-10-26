@@ -8,7 +8,9 @@ import { chainAddress } from "../domain/chain-address.ts";
 import { networkId } from "../domain/network.ts";
 import { AlertRouter, TelegramAlertSink } from "./alerts/sinks.ts";
 import { BlocklistAmlScreener } from "./aml/blocklist.ts";
+import { friendlyTon, parseTonAddress } from "./chains/ton/address.ts";
 import { TonapiSource } from "./chains/ton/tonapi.ts";
+import { parseTronAddress } from "./chains/tron/address.ts";
 import { TronscanSource } from "./chains/tron/tronscan.ts";
 import { type FetchFn, JsonHttpClient } from "./http/json-client.ts";
 import { CoinbaseUsdtUsd, KrakenUsdtUsd } from "./pricing/peg-sources.ts";
@@ -191,12 +193,15 @@ describe("second sources (recorded)", () => {
 
 describe("AML blocklist", () => {
   it("holds senders on the list (bare or network-prefixed), ignores comments", async () => {
-    const s = new BlocklistAmlScreener([
-      "# sanctions",
-      "TBad111111111111111111111111111111",
-      "tron:mainnet:TBad2222222222222222222222222222222  # note",
-      "",
-    ]);
+    const s = new BlocklistAmlScreener(
+      [
+        "# sanctions",
+        "TBad111111111111111111111111111111",
+        "tron:mainnet:TBad2222222222222222222222222222222  # note",
+        "",
+      ],
+      (_network, raw) => raw,
+    );
     expect(s.size).toBe(2);
     const input = (from: string) => ({
       network: networkId("tron:mainnet"),
@@ -207,5 +212,35 @@ describe("AML blocklist", () => {
     expect((await s.screen(input("TBad111111111111111111111111111111"))).verdict).toBe("hold");
     expect((await s.screen(input("TBad2222222222222222222222222222222"))).verdict).toBe("hold");
     expect((await s.screen(input("TGood11111111111111111111111111111"))).verdict).toBe("clear");
+  });
+
+  it("normalises entries with the network's address parser: a TON address in friendly form matches the raw form the chain reports", async () => {
+    const OWNER = "0:326bcaf1f252ca9e3458fe73348566afe805f7c5b40339277260bcb2fc8762b0";
+    const TRON_ADDR = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
+    const normalise = (network: string | null, raw: string): string => {
+      if (network?.startsWith("ton:")) return parseTonAddress(raw);
+      if (network?.startsWith("tron:")) return parseTronAddress(raw);
+      try {
+        return parseTronAddress(raw);
+      } catch {
+        return parseTonAddress(raw);
+      }
+    };
+    const s = new BlocklistAmlScreener(
+      [friendlyTon(OWNER, false), `ton:mainnet:${friendlyTon(OWNER, true)}`, TRON_ADDR],
+      normalise,
+    );
+    const input = (network: string, from: string) => ({
+      network: networkId(network),
+      from,
+      txRef: { network: networkId(network), txHash: "a".repeat(64), index: 0n },
+      amount: undefined as never,
+    });
+    expect((await s.screen(input("ton:mainnet", OWNER))).verdict).toBe("hold");
+    expect((await s.screen(input("ton:testnet", OWNER))).verdict).toBe("hold"); // bare entry: any network
+    expect((await s.screen(input("tron:mainnet", TRON_ADDR))).verdict).toBe("hold");
+    expect((await s.screen(input("tron:mainnet", TRON_ADDR.toLowerCase()))).verdict).toBe("clear"); // base58 is case-sensitive
+    // an entry that is no address at all is a start-up error, not a silently useless line
+    expect(() => new BlocklistAmlScreener(["not-an-address"], normalise)).toThrow(/line 1/);
   });
 });
