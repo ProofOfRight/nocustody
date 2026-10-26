@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { currency, isIsoCurrency, parseFiat } from "../../domain/currency.ts";
 import { Invoice, type LockedPrice } from "../../domain/invoice.ts";
-import type { Money } from "../../domain/money.ts";
+import { Money } from "../../domain/money.ts";
 import type { AssetCatalog, AssetSettings, PricingSettings } from "../catalog.ts";
 import { ApplicationError, ConcurrencyError } from "../errors.ts";
 import type { Clock, IdGenerator, IntegrityGuard, Repositories, UnitOfWork } from "../ports.ts";
@@ -32,22 +32,23 @@ export class CreateInvoice {
 
   async execute(input: CreateInvoiceInput): Promise<CreateInvoiceResult> {
     const { uow, catalog, clock, integrity } = this.#deps;
-    // Never hand out payment instructions if the pinned addresses/contracts may have been tampered with.
+    // Never hand out payment instructions if the pinned addresses/contracts may have been tampered with. The reason
+    // (it may name the config path or quote the file) goes to the guard's log and alert, not to the API caller.
     const intact = await integrity.check();
-    if (!intact.ok) throw new ApplicationError("integrity.pin_violation", intact.reason);
+    if (!intact.ok) {
+      throw new ApplicationError(
+        "integrity.pin_violation",
+        "pinned configuration check failed; new invoices are blocked until the operator restores it",
+      );
+    }
     const settings = catalog.get(input.assetId);
     const now = clock.now();
-    const { base, price } = await new QuotePrice(catalog, this.#deps.pricing, this.#deps.rates).execute(
-      { amount: input.priceAmount, currency: input.priceCurrency, assetId: input.assetId },
-      now,
-    );
-    if (base.isZero()) throw new ApplicationError("invoice.zero_amount", "price converts to zero");
 
     // Idempotent creation by merchant order id: the same order returns its invoice, a changed order is refused.
     const existing = async (repos: Repositories): Promise<CreateInvoiceResult | null> => {
       const found = await repos.invoices.findByMerchantOrderId(input.merchantOrderId);
       if (!found) return null;
-      if (!sameOrder(found, input, settings, base)) {
+      if (!sameOrder(found, input, settings)) {
         throw new ApplicationError(
           "invoice.order_mismatch",
           `merchant order ${input.merchantOrderId} already has an invoice with another price or asset`,
@@ -55,6 +56,16 @@ export class CreateInvoice {
       }
       return { invoice: found, created: false };
     };
+    // An existing order is answered before anything is quoted: a rate that went stale or a depeg block since the
+    // invoice was created must not turn a retry into a 503.
+    const known = await uow.run(existing);
+    if (known) return known;
+
+    const { base, price } = await new QuotePrice(catalog, this.#deps.pricing, this.#deps.rates).execute(
+      { amount: input.priceAmount, currency: input.priceCurrency, assetId: input.assetId },
+      now,
+    );
+    if (base.isZero()) throw new ApplicationError("invoice.zero_amount", "price converts to zero");
 
     try {
       return await uow.run(async (repos) => {
@@ -124,12 +135,7 @@ export class CreateInvoice {
  * Whether an existing invoice was created from the same order: same asset and, for a fiat price, the same amount and
  * currency; for a price given in the asset itself, the invoice amount is the base plus a unique-amount step (0..max).
  */
-function sameOrder(
-  invoice: Invoice,
-  input: CreateInvoiceInput,
-  settings: AssetSettings,
-  base: Money,
-): boolean {
+function sameOrder(invoice: Invoice, input: CreateInvoiceInput, settings: AssetSettings): boolean {
   const s = invoice.state;
   if (s.asset.id !== input.assetId) return false;
   if (s.price) {
@@ -138,7 +144,7 @@ function sameOrder(
     return parseFiat(cur, s.price.amount).minor === parseFiat(cur, input.priceAmount).minor;
   }
   if (input.priceCurrency !== settings.priceSymbol) return false;
-  const extra = s.expected.diff(base);
+  const extra = s.expected.diff(Money.parse(settings.asset, input.priceAmount));
   const { stepUnits, maxSlots } = settings.uniqueAmount;
   return extra >= 0n && extra % stepUnits === 0n && extra / stepUnits <= BigInt(maxSlots);
 }
