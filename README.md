@@ -6,7 +6,8 @@ The gateway issues invoices, watches the merchant's own addresses on supported b
 transfers and notifies the merchant's application. It never holds private keys: funds go directly to wallets whose
 keys stay offline. A compromised server does not mean stolen funds.
 
-> **Status: early development (pre-0.1). Not ready for production use.**
+> **Status: 0.1, first release.** Verified end to end on the TRON Nile and TON testnets, not yet run against mainnet.
+> Start with small amounts.
 
 ## Principles
 
@@ -24,9 +25,14 @@ Non-goals: holding funds, signing transactions, payouts, refunds, sweeps, exchan
 
 | Network / asset | Status |
 |---|---|
-| USDT-TRC20 (TRON) | in development |
-| USDT jetton and GRAM (TON) | in development |
+| USDT-TRC20 (TRON) | 0.1, testnet-verified |
+| USDT jetton and GRAM (TON) | 0.1, testnet-verified |
 | EVM, Solana, Bitcoin | later |
+
+## Running
+
+The release image is `ghcr.io/proofofright/nocustody` ([verify it](docs/deployment.md#verify-the-image) before use).
+Start from the example [deploy/compose.yaml](deploy/compose.yaml) and the [deployment guide](docs/deployment.md).
 
 ## Development
 
@@ -41,6 +47,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and rules.
 
 ## Documentation
 
+- [Deployment](docs/deployment.md) and [configuration reference](docs/configuration.md)
 - [Merchant API and webhooks](docs/api.md) ([OpenAPI](docs/api/openapi.yaml), [PHP example](examples/php/))
 - [Hosted payment page](docs/payment-page.md) (optional)
 - [Operations](docs/operations.md) (monitoring, reconciliation, depeg, AML, canary)
@@ -48,6 +55,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and rules.
 - [Security requirements](docs/security.md) and [threat model](docs/threat-model.md)
 - [Architecture decision records](docs/adr/README.md)
 - [Testing on TRON Nile](docs/testnet.md) and [on the TON testnet](docs/ton-testnet.md)
+- [Changelog](CHANGELOG.md), [releasing](docs/releasing.md)
 - Reporting vulnerabilities: [SECURITY.md](SECURITY.md)
 
 ## License

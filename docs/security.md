@@ -48,4 +48,6 @@ These rules are mandatory for all code in this repository. Threats they address:
 - Exact versions, committed lockfile, `npm ci --ignore-scripts`, Dependabot with manual review, `npm audit` in CI.
 - License allowlist checked in CI ([ADR-0006](adr/0006-apache-2-clean-room.md), [ADR-0023](adr/0023-mpl-for-dev-dependencies.md), [ADR-0024](adr/0024-unlicense-allowed.md)).
 - No `latest` tags: images pinned by version and digest; GitHub Actions pinned by commit SHA.
-- Planned for releases: signed artifacts and images, SBOM, provenance attestations.
+- Releases: images built only by the release workflow from a tag, reproducible, with signed SLSA provenance and SPDX
+  SBOM attestations ([ADR-0029](adr/0029-release-provenance.md)); the runtime image has no shell or package manager
+  and runs as non-root ([ADR-0028](adr/0028-container-image.md)).
