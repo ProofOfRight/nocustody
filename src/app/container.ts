@@ -31,7 +31,7 @@ import type {
 import { RateService } from "../application/rates.ts";
 import { MemoStrategy } from "../application/strategies/memo.ts";
 import type { StrategyResolver } from "../application/strategies/strategy.ts";
-import { UniqueAmountStrategy } from "../application/strategies/unique-amount.ts";
+import { type SlotStart, UniqueAmountStrategy } from "../application/strategies/unique-amount.ts";
 import { CreateInvoice } from "../application/use-cases/create-invoice.ts";
 import { DispatchWebhooks } from "../application/use-cases/dispatch-webhooks.ts";
 import { ExpireInvoices } from "../application/use-cases/expire-invoices.ts";
@@ -61,6 +61,8 @@ export interface ContainerOptions {
   readonly aml?: AmlScreener;
   /** Test harnesses only; production uses node:crypto. */
   readonly memos?: MemoGenerator;
+  /** Test harnesses and replay scripts only (a recorded payment has one exact amount); production picks at random. */
+  readonly slotStart?: SlotStart;
 }
 
 export interface NetworkWorker {
@@ -100,7 +102,7 @@ export function buildContainer(o: ContainerOptions) {
   const onSettleError = (subject: string, err: unknown) =>
     logger.error({ subject, err: err instanceof Error ? err.message : String(err) }, "settlement failed");
   // A random first slot: the pair a previous invoice just released is not the next one handed out.
-  const randomSlot = (n: number) => (n > 1 ? randomInt(n) : 0);
+  const randomSlot: SlotStart = o.slotStart ?? ((n) => (n > 1 ? randomInt(n) : 0));
   const uniqueAmount = new UniqueAmountStrategy(randomSlot);
   const memo = new MemoStrategy(o.memos ?? cryptoMemos, randomSlot);
   const strategies: StrategyResolver = (s) => {

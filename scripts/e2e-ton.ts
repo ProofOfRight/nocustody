@@ -91,6 +91,7 @@ async function replay(): Promise<boolean> {
     config,
     databaseUrl: url,
     integrity: noIntegrityCheck,
+    slotStart: () => 0, // replays pay one recorded amount: the first slot, not a random one
     clock: { now: () => new Date(now) },
     memos: { newMemo: () => memos.shift() ?? "ZZZZ9999" },
   });
