@@ -15,7 +15,7 @@ describe("sbom", () => {
 
   it("takes the Node version from the pinned base image only", () => {
     expect(nodeFromImage(IMAGE)).toEqual({ version: "26.12.1", ref: IMAGE });
-    expect(() => nodeFromImage("node:26-alpine")).toThrow();
+    expect(() => nodeFromImage("node:26-alpine")).toThrow(/NODE_IMAGE/);
   });
 
   it("lists the Node runtime and every package, deterministically", () => {

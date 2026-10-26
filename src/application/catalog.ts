@@ -69,10 +69,6 @@ export class AssetCatalog {
   forNetwork(network: NetworkId): AssetSettings[] {
     return [...this.#byId.values()].filter((s) => s.asset.network === network);
   }
-
-  all(): AssetSettings[] {
-    return [...this.#byId.values()];
-  }
 }
 
 export function watchedAddresses(settings: AssetSettings): ChainAddress[] {

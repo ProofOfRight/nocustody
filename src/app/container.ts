@@ -106,7 +106,9 @@ export function buildContainer(o: ContainerOptions) {
         return unreachable(s.strategy);
     }
   };
-  const rates = new RateService([new ManualRateTable(o.config.manualRates)]);
+  const rates = new RateService([new ManualRateTable(o.config.manualRates)], (provider, err) =>
+    logger.warn({ provider, err: err instanceof Error ? err.message : String(err) }, "rate provider failed"),
+  );
   const ops = o.config.raw.ops;
   const sinks: AlertSink[] = [new LogAlertSink((level, fields, msg) => logger[level](fields, msg))];
   if (ops.alerts.telegram) {

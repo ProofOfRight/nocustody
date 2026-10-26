@@ -21,8 +21,6 @@ export const trc20HistorySchema = z.object({
   meta: z.object({ fingerprint: z.string().optional() }).passthrough(),
 });
 
-export type Trc20History = z.infer<typeof trc20HistorySchema>;
-
 /**
  * POST /walletsolidity/gettransactioninfobyid. Solidified state only: an empty object means "not solidified (yet)"
  * or unknown transaction.
@@ -47,5 +45,3 @@ export const solidTxInfoSchema = z.union([
   }),
   z.object({}).strict(),
 ]);
-
-export type SolidTxInfo = z.infer<typeof solidTxInfoSchema>;

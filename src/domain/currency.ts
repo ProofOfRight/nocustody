@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { formatDecimal, parseDecimal } from "./decimal.ts";
+import { parseDecimal } from "./decimal.ts";
 import { DomainError, invariant } from "./errors.ts";
 import { ISO_4217_MINOR_UNITS } from "./iso4217.ts";
 
@@ -34,8 +34,4 @@ export function fiatAmount(cur: Currency, minor: bigint): FiatAmount {
 /** "1234.50" in major units; more fractional digits than the currency has is an error (no rounding). */
 export function parseFiat(cur: Currency, decimal: string): FiatAmount {
   return fiatAmount(cur, parseDecimal(decimal, cur.minorUnits));
-}
-
-export function formatFiat(amount: FiatAmount): string {
-  return formatDecimal(amount.minor, amount.currency.minorUnits);
 }
