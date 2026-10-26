@@ -4,10 +4,14 @@
 //   node src/app/cli.ts db:migrate             apply database migrations
 //   node src/app/cli.ts invoice:create --order <id> --amount <decimal> --currency <code> --asset <id>
 //   node src/app/cli.ts invoice:show <id>
-//   node src/app/cli.ts run                    scanner + verifier + settlement loop
+//   node src/app/cli.ts apikey:create --name <name> --scopes invoices:read,invoices:write,quotes:read
+//   node src/app/cli.ts apikey:list | apikey:revoke <id>
+//   node src/app/cli.ts run [--roles api,worker,dispatcher]   (default: all three)
 import { parseArgs } from "node:util";
 import pg from "pg";
+import { ALL_SCOPES, newApiKey } from "../adapters/api/keys.ts";
 import { migrate } from "../adapters/persistence/pg/migrate.ts";
+import type { ApiScope } from "../application/ports.ts";
 import { assertPinned, type Config, loadConfigFile } from "./config.ts";
 import { addressValidators, buildContainer, type Container, runCycle } from "./container.ts";
 import { ConfigFilePinGuard } from "./integrity.ts";
@@ -139,25 +143,110 @@ async function main(argv: string[]): Promise<void> {
       }
       return;
     }
-    case "run": {
+    case "apikey:create": {
+      const { values } = parseArgs({
+        args: rest,
+        options: { name: { type: "string" }, scopes: { type: "string" } },
+      });
+      const scopes = (values.scopes ?? ALL_SCOPES.join(",")).split(",").map((x) => x.trim()) as ApiScope[];
+      const { record, token } = newApiKey(values.name ?? "default", scopes);
       const { container } = await start();
-      const interval = Math.min(...container.workers.map((w) => w.pollIntervalMs));
+      try {
+        await container.uow.run((r) => r.apiKeys.insert(record));
+      } finally {
+        await container.pool.end();
+      }
+      // Shown once; only its hash is stored.
+      console.log(
+        JSON.stringify({ id: record.id, name: record.name, scopes: record.scopes, token }, null, 2),
+      );
+      return;
+    }
+    case "apikey:list": {
+      const { container } = await start();
+      try {
+        const keys = await container.uow.run((r) => r.apiKeys.list());
+        console.log(
+          JSON.stringify(
+            keys.map((k) => ({ id: k.id, name: k.name, scopes: k.scopes, revokedAt: k.revokedAt })),
+            null,
+            2,
+          ),
+        );
+      } finally {
+        await container.pool.end();
+      }
+      return;
+    }
+    case "apikey:revoke": {
+      const id = rest[0];
+      if (!id) throw new Error("usage: apikey:revoke <id>");
+      const { container } = await start();
+      try {
+        const done = await container.uow.run((r) => r.apiKeys.revoke(id, new Date()));
+        console.log(done ? `revoked ${id}` : `no active key ${id}`);
+      } finally {
+        await container.pool.end();
+      }
+      return;
+    }
+    case "run": {
+      const { values } = parseArgs({ args: rest, options: { roles: { type: "string" } } });
+      const roles = new Set((values.roles ?? "api,worker,dispatcher").split(",").map((x) => x.trim()));
+      for (const r of roles)
+        if (!["api", "worker", "dispatcher"].includes(r)) throw new Error(`unknown role ${r}`);
+      const { config, container } = await start();
       let stopping = false;
+      const loops: Promise<void>[] = [];
+      const loop = (name: string, intervalMs: number, step: () => Promise<unknown>) =>
+        loops.push(
+          (async () => {
+            while (!stopping) {
+              try {
+                const result = await step();
+                logger.debug({ role: name, result }, "cycle");
+              } catch (e) {
+                // A failing provider, endpoint or database must not crash the loop; the next cycle retries.
+                logger.error({ role: name, err: e }, "cycle failed");
+              }
+              await new Promise((r) => setTimeout(r, intervalMs));
+            }
+          })(),
+        );
+      let api: ReturnType<Container["api"]> | null = null;
+      if (roles.has("api")) {
+        api = container.api((err) => logger.error({ err }, "api error"));
+        await api.listen({ host: config.raw.api.host, port: config.raw.api.port });
+        logger.info({ host: config.raw.api.host, port: config.raw.api.port }, "api listening");
+      }
+      if (roles.has("worker")) {
+        const interval = Math.min(...container.workers.map((w) => w.pollIntervalMs));
+        loop("worker", interval, () => runCycle(container));
+      }
+      if (roles.has("dispatcher")) {
+        const dispatcher = container.dispatcher;
+        if (!dispatcher) logger.warn("dispatcher role requested but no webhooks are configured");
+        else loop("dispatcher", 2_000, () => dispatcher.execute());
+      }
       const stop = () => {
         stopping = true;
       };
       process.on("SIGINT", stop);
       process.on("SIGTERM", stop);
-      logger.info({ networks: container.workers.map((w) => w.adapter.network), interval }, "worker started");
-      while (!stopping) {
-        try {
-          logger.info(await runCycle(container), "cycle");
-        } catch (e) {
-          // A failing provider or database must not crash the loop; the next cycle retries.
-          logger.error({ err: e }, "cycle failed");
-        }
-        await new Promise((r) => setTimeout(r, interval));
-      }
+      logger.info(
+        { roles: [...roles], networks: container.workers.map((w) => w.adapter.network) },
+        "started",
+      );
+      await new Promise<void>((resolve) => {
+        const t = setInterval(() => {
+          if (stopping) {
+            clearInterval(t);
+            resolve();
+          }
+        }, 200);
+      });
+      await api?.close();
+      await Promise.all(loops);
       await container.pool.end();
       return;
     }

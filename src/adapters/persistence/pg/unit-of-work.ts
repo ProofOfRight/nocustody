@@ -2,6 +2,8 @@
 import type { Pool, PoolClient } from "pg";
 import { ConcurrencyError } from "../../../application/errors.ts";
 import type {
+  ApiKeyRecord,
+  ApiScope,
   AuditEntry,
   CandidateStatus,
   Repositories,
@@ -270,6 +272,11 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
         ),
       listByStatus: (status, limit) =>
         loadInvoices("status = $1 ORDER BY updated_at LIMIT $2", [status, limit]),
+      search: ({ status, since, limit }) =>
+        loadInvoices(
+          "($1::text IS NULL OR status = $1) AND ($2::timestamptz IS NULL OR created_at >= $2) ORDER BY created_at DESC, id LIMIT $3",
+          [status ?? null, since ?? null, limit],
+        ),
     },
 
     slots: {
@@ -416,6 +423,125 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
             [e.type, e.aggregateId, e.occurredAt, JSON.stringify(e.data)],
           );
         }
+      },
+    },
+
+    delivery: {
+      claim: async (now: Date, leaseMs: number, limit: number) => {
+        const { rows } = await db.query<{
+          id: string;
+          event_id: string;
+          type: string;
+          aggregate_id: string;
+          occurred_at: Date;
+          payload: Record<string, unknown>;
+          attempts: number;
+        }>(
+          `UPDATE outbox SET next_attempt_at = $1::timestamptz + make_interval(secs => $2::double precision / 1000)
+           WHERE id IN (
+             SELECT id FROM outbox
+             WHERE delivered_at IS NULL AND dead_at IS NULL AND next_attempt_at <= $1
+             ORDER BY id LIMIT $3 FOR UPDATE SKIP LOCKED)
+           RETURNING id, event_id, type, aggregate_id, occurred_at, payload, attempts`,
+          [now, leaseMs, limit],
+        );
+        return rows
+          .sort((a, b) => Number(BigInt(a.id) - BigInt(b.id)))
+          .map((r) => ({
+            id: String(r.id),
+            eventId: r.event_id,
+            type: r.type,
+            aggregateId: r.aggregate_id,
+            occurredAt: r.occurred_at,
+            payload: r.payload,
+            attempts: r.attempts,
+          }));
+      },
+      markDelivered: async (id: string, at: Date) => {
+        await db.query("UPDATE outbox SET delivered_at = $2, last_error = NULL WHERE id = $1", [id, at]);
+      },
+      markFailed: async (id: string, next: Date, error: string) => {
+        await db.query(
+          "UPDATE outbox SET attempts = attempts + 1, next_attempt_at = $2, last_error = $3 WHERE id = $1",
+          [id, next, error.slice(0, 500)],
+        );
+      },
+      markDead: async (id: string, at: Date, error: string) => {
+        await db.query(
+          "UPDATE outbox SET attempts = attempts + 1, dead_at = $2, last_error = $3 WHERE id = $1",
+          [id, at, error.slice(0, 500)],
+        );
+      },
+    },
+
+    apiKeys: {
+      insert: async (k: ApiKeyRecord) => {
+        await db.query(
+          "INSERT INTO api_keys (id, name, secret_sha256, scopes, revoked_at) VALUES ($1, $2, $3, $4, $5)",
+          [k.id, k.name, k.secretSha256, k.scopes, k.revokedAt],
+        );
+      },
+      findById: async (id: string) => {
+        const { rows } = await db.query<{
+          id: string;
+          name: string;
+          secret_sha256: string;
+          scopes: ApiScope[];
+          revoked_at: Date | null;
+        }>("SELECT id, name, secret_sha256, scopes, revoked_at FROM api_keys WHERE id = $1", [id]);
+        const r = rows[0];
+        return r
+          ? {
+              id: r.id,
+              name: r.name,
+              secretSha256: r.secret_sha256,
+              scopes: r.scopes,
+              revokedAt: r.revoked_at,
+            }
+          : null;
+      },
+      list: async () => {
+        const { rows } = await db.query<{
+          id: string;
+          name: string;
+          secret_sha256: string;
+          scopes: ApiScope[];
+          revoked_at: Date | null;
+        }>("SELECT id, name, secret_sha256, scopes, revoked_at FROM api_keys ORDER BY created_at");
+        return rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          secretSha256: r.secret_sha256,
+          scopes: r.scopes,
+          revokedAt: r.revoked_at,
+        }));
+      },
+      revoke: async (id: string, at: Date) => {
+        const res = await db.query(
+          "UPDATE api_keys SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL",
+          [id, at],
+        );
+        return res.rowCount === 1;
+      },
+      touch: async (id: string, at: Date) => {
+        await db.query("UPDATE api_keys SET last_used_at = $2 WHERE id = $1", [id, at]);
+      },
+    },
+
+    idempotency: {
+      find: async (apiKeyId: string, key: string) => {
+        const { rows } = await db.query<{ request_sha256: string; invoice_id: string }>(
+          "SELECT request_sha256, invoice_id FROM idempotency_keys WHERE api_key_id = $1 AND key = $2",
+          [apiKeyId, key],
+        );
+        const r = rows[0];
+        return r ? { requestSha256: r.request_sha256, invoiceId: r.invoice_id } : null;
+      },
+      insert: async (apiKeyId: string, key: string, requestSha256: string, invoiceId: string) => {
+        await db.query(
+          "INSERT INTO idempotency_keys (api_key_id, key, request_sha256, invoice_id) VALUES ($1, $2, $3, $4)",
+          [apiKeyId, key, requestSha256, invoiceId],
+        );
       },
     },
 
