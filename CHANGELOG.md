@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 Before 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-26
 
 Results of the first full project audit (code, tests, security). **Upgrade note:** the pinned checksum changed
 ([ADR-0031](docs/adr/0031-pinned-config-scope.md)): run `config:hash` again and update `NOCUSTODY_PINNED_SHA256`
@@ -142,6 +142,7 @@ mainnet**; start with small amounts.
 - Production container image (`FROM scratch`, non-root, no shell), example `docker compose` deployment,
   reproducible multi-arch builds, signed build provenance and SPDX SBOM attestations.
 
+[0.3.0]: https://github.com/ProofOfRight/nocustody/releases/tag/v0.3.0
 [0.2.1]: https://github.com/ProofOfRight/nocustody/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ProofOfRight/nocustody/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ProofOfRight/nocustody/releases/tag/v0.1.0
