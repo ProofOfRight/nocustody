@@ -4,8 +4,10 @@ Plain PHP 8.1+ with `ext-curl`, no Composer packages.
 
 - `NocustodyClient.php` — create and read invoices (decimal strings, `Idempotency-Key`).
 - `webhook.php` — receive events: verifies `X-Signature` over the raw body with `hash_equals`, rejects timestamps older
-  than 5 minutes, ignores repeated event ids (the file-based store is for the example; in production keep processed
-  event ids in your database, with the check and the insert in one transaction).
+  than 5 minutes, runs each event id once under a file lock and records the id only after the work succeeded (the
+  file-based store is for the example; in production keep processed event ids in your database, with the check and
+  the insert in one transaction). Set `NOCUSTODY_WEBHOOK_LOG` to a file in a directory only the application can
+  write, outside the web root and not in a shared `/tmp`.
 
 ```php
 require 'NocustodyClient.php';
