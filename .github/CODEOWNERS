@@ -37,7 +37,16 @@
 /tsconfig.build.json      @ProofOfRight
 /vitest.config.ts         @ProofOfRight
 
-# Payment verification code (see CONTRIBUTING.md)
+# Payment verification code (see CONTRIBUTING.md), the pinned-config guard, the schema, the merchant-facing edge
 /src/domain/              @ProofOfRight
 /src/application/         @ProofOfRight
 /src/adapters/chains/     @ProofOfRight
+/src/adapters/persistence/ @ProofOfRight
+/src/adapters/api/        @ProofOfRight
+/src/adapters/webhooks/   @ProofOfRight
+/src/adapters/http/       @ProofOfRight
+/src/app/                 @ProofOfRight
+
+# The address canary and the integration examples merchants copy (webhook signature verification)
+/tools/                   @ProofOfRight
+/examples/                @ProofOfRight
