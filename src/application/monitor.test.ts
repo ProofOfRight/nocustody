@@ -46,9 +46,9 @@ const cand = (hash: string, amount: string, at: number): TransferCandidate => ({
 });
 
 function setup(o: { peg?: PegPriceSource[]; secondary?: SecondarySource[]; asset?: AssetSettings } = {}) {
-  const store = new InMemoryStore();
   let t = T0;
   const clock = { now: () => new Date(t) };
+  const store = new InMemoryStore(() => clock.now());
   const sent: Alert[] = [];
   const alerts = { send: async (a: Alert) => void sent.push(a) };
   const catalog = new AssetCatalog([o.asset ?? settings()]);
@@ -213,6 +213,52 @@ describe("verifier and settlement policies", () => {
     expect((await verify.execute()).rejected).toBe(1);
     expect([...s.store.data.candidates.values()][0]?.status).toBe("rejected");
     expect(alerts).toHaveLength(1);
+  });
+
+  it("a candidate whose verification keeps failing is rejected after the max age, with an alert", async () => {
+    const s = setup();
+    const chain = new FakeChain(TRON);
+    const c = cand("ee", "10.01", T0);
+    chain.verdicts.set(c.txHash, new Error("HTTP 503"));
+    await s.store.run((r) => r.candidates.insert(c, "seen", null));
+    const alerts: Alert[] = [];
+    const verify = new VerifyTransfers({
+      adapter: chain,
+      catalog: s.catalog,
+      uow: s.store,
+      clock: s.clock,
+      batchSize: 10,
+      maxPendingMs: 24 * 60 * MIN,
+      alerts: { send: async (a) => void alerts.push(a) },
+    });
+    expect(await verify.execute()).toMatchObject({ errors: 1, rejected: 0 });
+    expect([...s.store.data.candidates.values()][0]).toMatchObject({ status: "seen", attempts: 1 });
+    s.advance(25 * 60 * MIN);
+    expect(await verify.execute()).toMatchObject({ errors: 1, rejected: 1 });
+    expect([...s.store.data.candidates.values()][0]?.status).toBe("rejected");
+    expect(alerts.map((a) => a.key)).toEqual([`never-final:${TRON}/${c.txHash}`]);
+  });
+
+  it("the max age counts from the time the candidate was first seen when its block time is older (downtime)", async () => {
+    const s = setup();
+    const chain = new FakeChain(TRON);
+    // The gateway was down for two days; the scanner catches up and stores a candidate whose block is 48 h old.
+    const c = cand("ff", "10.01", T0 - 48 * 60 * MIN);
+    chain.verdicts.set(c.txHash, { status: "pending", reason: "not solidified" });
+    await s.store.run((r) => r.candidates.insert(c, "seen", null));
+    const verify = new VerifyTransfers({
+      adapter: chain,
+      catalog: s.catalog,
+      uow: s.store,
+      clock: s.clock,
+      batchSize: 10,
+      maxPendingMs: 24 * 60 * MIN,
+    });
+    // One lagging "not final" answer must not reject a payment that was made while we were down.
+    expect(await verify.execute()).toMatchObject({ pending: 1, rejected: 0 });
+    expect([...s.store.data.candidates.values()][0]?.status).toBe("seen");
+    s.advance(25 * 60 * MIN);
+    expect(await verify.execute()).toMatchObject({ rejected: 1 });
   });
 
   it("payments below the AML threshold complete without screening; above it are screened; holds can be resolved", async () => {

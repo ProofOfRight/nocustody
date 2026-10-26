@@ -50,6 +50,13 @@ interface Data {
 
 /** Transactions are emulated by copying the (immutable-valued) collections and restoring them on failure. */
 export class InMemoryStore implements UnitOfWork {
+  /** Time for `seen_at`-like columns PostgreSQL fills with `now()`; tests pass their fake clock. */
+  readonly #now: () => Date;
+
+  constructor(now: () => Date = () => new Date()) {
+    this.#now = now;
+  }
+
   data: Data = {
     invoices: new Map(),
     slots: [],
@@ -184,7 +191,7 @@ export class InMemoryStore implements UnitOfWork {
         insert: async (c: TransferCandidate, status, reason) => {
           const key = `${c.network}/${c.txHash}`;
           if (d().candidates.has(key)) return "duplicate";
-          d().candidates.set(key, { candidate: c, status, attempts: 0, reason });
+          d().candidates.set(key, { candidate: c, status, attempts: 0, reason, seenAt: this.#now() });
           return "inserted";
         },
         listSeen: async (network: NetworkId, limit) =>

@@ -101,6 +101,7 @@ interface CandidateRow {
   status: CandidateStatus;
   attempts: number;
   reason: string | null;
+  seen_at: Date;
 }
 
 interface TransferRow {
@@ -199,6 +200,7 @@ function repositories(db: PoolClient, assets: AssetResolver): Repositories {
       status: r.status,
       attempts: r.attempts,
       reason: r.reason,
+      seenAt: r.seen_at,
     };
   };
 
