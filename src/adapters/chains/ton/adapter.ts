@@ -197,7 +197,7 @@ export class TonAdapter implements ChainAdapter {
     const t = res.transactions[0];
     if (!t) return { status: "pending", reason: "transaction not indexed yet" };
     if (b64ToHex(t.hash) !== c.txHash)
-      return { status: "rejected", reason: "response for another transaction" };
+      return { status: "pending", reason: "provider answered about another transaction" }; // provider fault
     if (!isFinalized(t))
       return { status: "pending", reason: `not finalized (finality ${t.finality ?? "unknown"})` };
     const ref = txRef(this.network, c.txHash, BigInt(t.lt));
