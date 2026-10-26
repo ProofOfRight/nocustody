@@ -61,4 +61,4 @@ docker compose run --rm -e E2E_MODE=live -e NOCUSTODY_CONFIG=/app/my-ton.config.
 
 | Host | Used for | Limits (free tier) |
 |---|---|---|
-| `testnet.toncenter.com` / `toncenter.com` | candidates (`/api/v3/transactions?account=`), truth (`/api/v3/transactions?hash=`, `/api/v3/transactionsByMessage`), `get_wallet_address` (`/api/v3/runGetMethod`) | 1 request/s without a key; with a key the `X-API-Key` header is sent and the client-side limit is off |
+| `testnet.toncenter.com` / `toncenter.com` | candidates (`/api/v3/transactions?account=`), truth (`/api/v3/transactions?hash=`), `get_wallet_address` (`/api/v3/runGetMethod`) | 1 request/s without a key; with a key the `X-API-Key` header is sent and the client-side limit is off |

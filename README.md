@@ -11,7 +11,7 @@ The gateway issues invoices, watches the merchant's own addresses on supported b
 transfers and notifies the merchant's application. It never holds private keys: funds go directly to wallets whose
 keys stay offline. A compromised server does not mean stolen funds.
 
-> **Status: 0.2, early release.** Verified end to end on the TRON Nile and TON testnets and with a read-only replay
+> **Status: 0.3, early release.** Verified end to end on the TRON Nile and TON testnets and with a read-only replay
 > of real mainnet payments; no production deployment yet. Start with small amounts.
 
 ## Principles
