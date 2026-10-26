@@ -14,15 +14,15 @@ Starting list of threats and mitigations for the gateway. Requirements contribut
 
 | Threat | Mitigation |
 |---|---|
-| Receiving address substitution (server / admin / frontend compromise) | Addresses pinned in config with a checksum, verified at startup and on every cycle, alert on mismatch; no API to change addresses; canary on another host |
+| Receiving address substitution (server / admin / frontend compromise) | Addresses, contracts, providers and money policies pinned in config with a checksum ([ADR-0031](adr/0031-pinned-config-scope.md)), verified at startup, before every invoice and every minute, alert on mismatch; a stored invoice address outside the pinned list is refused; no API to change addresses; canary on another host checks every form a payer sees |
 | Fake token / jetton / master contract | Contract / master taken from config, never from metadata; TON — our own jetton-wallet via `get_wallet_address` |
-| Failed or reverted transaction ("Flash USDT") | Credit only final and successful transactions (TRON solidified + `SUCCESS`; TON masterchain, no bounce, not aborted) |
+| Failed or reverted transaction ("Flash USDT") | Credit only final and successful transactions (TRON solidified + `SUCCESS`; TON masterchain, no bounce, jetton-wallet transaction not aborted; native coin: the credited amount of the credit phase, no outgoing messages) |
 | Forged provider response | TLS only, finalized-state query, optional second source, reconciliation |
 | Late payment settles someone else's invoice | (address, amount) slot / memo locked until `expires_at + grace`; allocation starts at a random slot, so a pair just released is rarely handed out next. Residual risk: a payment after grace for an old invoice meets a newer invoice that holds the same pair; a 5 s early-payment tolerance keeps a transfer that landed before an invoice from being claimed by it ([ADR-0030](adr/0030-early-payment-tolerance.md)) |
 | Double crediting | `UNIQUE(network, tx_hash, log_index \| lt)`, DB transactions |
 | Lost events on restart | Scanner cursor advances only after durable write; transactional outbox |
 | Forged / replayed webhook to the merchant | HMAC over timestamp + event id + body; webhook secret separate from the API key |
-| Dust / address poisoning | Threshold, ignore and log, merchant guidance in docs |
+| Dust / address poisoning | Zero-value transfers always ignored, threshold for the rest, ignore and log, merchant guidance in docs |
 | Provider rate-limit exhaustion (dust spam) | Filters, limits, alerts, second key / provider |
 | Issuer (Tether) freezes USDT on an address | Address pool, rotation, regular sweeps by the merchant, AML |
 | Compromised npm dependency | Minimal dependencies, lockfile, `npm ci --ignore-scripts`, audit in CI ([ADR-0007](adr/0007-minimal-dependencies.md)) |

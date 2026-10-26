@@ -9,7 +9,7 @@ The gateway is universal: merchants price in any fiat currency (RUB, CNY, IRR, J
 
 ## Decision
 
-Currencies (ISO 4217 registry) and rate providers are config and `RateProvider` adapters, not core code. Price lists and rate conversion are both supported. See [architecture.md](../architecture.md#pricing-and-amounts).
+Currencies (ISO 4217 registry) and rate providers are config and `RateProvider` adapters, not core code. Rate conversion is implemented; per-currency price lists exist in the domain and are planned for the API. See [architecture.md](../architecture.md#pricing-and-amounts).
 
 ## Consequences
 

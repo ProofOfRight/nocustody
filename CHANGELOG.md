@@ -4,6 +4,72 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 Before 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
+## [Unreleased]
+
+Results of the first full project audit (code, tests, security). **Upgrade note:** the pinned checksum changed
+([ADR-0031](docs/adr/0031-pinned-config-scope.md)): run `config:hash` again and update `NOCUSTODY_PINNED_SHA256`
+before starting this version; migration 0005 runs automatically.
+
+### Security
+
+- TON: a transfer whose text comment contained a control character (U+0000) made the verifier fail on it every
+  cycle, so nothing on the TON network was settled any more (about 0.003 TON for an attacker). Such comments are
+  treated as absent; a candidate whose result cannot be stored no longer stops the batch.
+- A transfer that landed before an invoice existed can no longer be credited to an invoice opened within 30 s after
+  it with the same amount: the early-payment tolerance is 5 s ([ADR-0030](docs/adr/0030-early-payment-tolerance.md)),
+  and slots are handed out starting at a random position.
+- The pinned checksum now covers provider endpoints, amount policies, pricing, AML, depeg and the webhook URL; the
+  guard runs every minute in the monitor and alerts through Telegram; an invoice whose stored address is not a pinned
+  address of its asset is refused when read; a provider key variable may not name another secret.
+- A burst of transactions larger than one scan's page budget could freeze a network's cursor for good while the
+  heartbeat stayed green; the scanner now guarantees progress and alerts.
+- Depeg protection fails closed: with it configured, a missing or stale reading blocks new invoices; the deviation
+  is compared exactly (150.9 bps was rounded to 150 and let through).
+- AML blocklist entries are parsed per network: a TON address in user-friendly form never matched before.
+- The address canary checks `address_display` and the wallet URI as well, uses a random order id and requires https.
+- API: tokens not shaped like a key are refused before the database is asked; a concurrent create with the same
+  `Idempotency-Key` and another body is refused; malformed request targets are 400, not logged 500s; the integrity
+  reason (config path) no longer reaches API clients.
+- Payment page: an invoice that can no longer be paid shows its status only, without address or QR code.
+- Webhooks: one attempt is bounded as a whole (a trickling endpoint could hold the dispatcher for hours); the outbox
+  lease covers the whole batch (two dispatchers double-sent); a resolver failure is retried instead of dead-lettered;
+  more special IP ranges are refused.
+- Release workflow: only commits on `main`, never over an existing version, the pushed digest is smoke-tested.
+  CI runs the PHP examples; CODEOWNERS covers the edge, the schema and the examples; Dependabot waits a week.
+
+### Fixed
+
+- A PostgreSQL restart crashed the process (no handler for idle pool client errors).
+- `candidateMaxAge` is counted from the first time the scanner saw a candidate when its block time is older, so a
+  catch-up after downtime cannot reject real payments; candidates whose verification keeps failing age out too.
+- A GRAM transfer with an encrypted comment was invisible (no candidate, no unmatched event); it is a payment
+  without memo now. A provider answer about another transaction is retried, not a final rejection.
+- A transaction with several transfers to us is hinted with its largest one; a later non-dust hint re-queues a
+  candidate stored as dust; candidates are per asset (migration 0005).
+- A zero-value transfer is dust whatever the threshold (TRON address-poisoning spam produced `transfer.unmatched`
+  webhooks).
+- An existing merchant order is answered before quoting, so a stale manual rate no longer turns a retry into 503.
+- Two workers no longer write two `transfer.unmatched` events for one transfer.
+- SIGTERM stops within the grace period (loop sleeps are interruptible); `ops:status` and `apikey:revoke` no longer
+  need the TON provider to be reachable.
+- `since` accepts an RFC 3339 offset; the OpenAPI error-code list is complete; duplicate on-chain assets, a depeg
+  symbol no asset uses, zero and overflowing durations are refused.
+
+### Added
+
+- One worker loop per network; dispatcher heartbeat; alerts `dispatcher-lag`, `webhooks-backlog`, `scanner-budget`,
+  `slots-exhausted`, `address_pin_violation` through the router.
+- `ops.retention` (off by default) prunes delivered webhooks, idempotency keys and settled candidates.
+- `ops.maxDispatcherLag`; migrations marked `-- no-transaction` run statement by statement (`CREATE INDEX
+  CONCURRENTLY`).
+- Contract tests: statuses and event types against the migrations, OpenAPI and `docs/api.md`; routes against OpenAPI.
+
+### Changed
+
+- `paid`, `overpaid` and `paid_late` are documented as events, not readable statuses; the Laravel example decides by
+  event type; `ops:status` lists only statuses that persist.
+- `invoice.cancelled` and price lists are documented as reserved / planned.
+
 ## [0.2.1] - 2026-10-26
 
 Operations did not run in 0.1.0 and 0.2.0: upgrade.

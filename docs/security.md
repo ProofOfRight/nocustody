@@ -5,19 +5,27 @@ These rules are mandatory for all code in this repository. Threats they address:
 ## Funds and keys
 
 - No private keys, seeds or xprv on servers — only addresses and xpubs ([ADR-0002](adr/0002-watch-only.md)).
-- Receiving addresses are pinned in config with a checksum, verified at start-up and on every cycle; on mismatch the
-  gateway alerts and stops issuing invoices. There is no API, bot command or admin UI to change addresses.
+- Receiving addresses, contracts, providers, amount policies, pricing, AML, depeg and the webhook URL are pinned in
+  config with a checksum supplied separately ([ADR-0031](adr/0031-pinned-config-scope.md)), verified at start-up,
+  before every invoice and once a minute by the monitor; on mismatch the gateway alerts and stops issuing invoices.
+  There is no API, bot command or admin UI to change addresses, and an invoice whose stored address is not a pinned
+  address of its asset is refused when read.
 - The verifier compares the recipient against the pinned list, not against a mutable table.
 
 ## Verification
 
-- Only final and successful transactions are credited (TRON: solidified and `SUCCESS`; TON: masterchain, no bounce,
-  not aborted).
+- Only final and successful transactions are credited (TRON: solidified and `SUCCESS` receipt; TON jettons: in a
+  masterchain block, not bounced, the jetton-wallet's `internal_transfer` not aborted with compute and action phases
+  successful; TON native coin: in a masterchain block, not bounced, no outgoing messages, the amount the credit phase
+  credited — an `aborted` compute phase on an undeployed wallet still keeps the coins).
 - The asset is identified by the contract / master address from config, **never** by symbol, name or metadata.
 - The indexer supplies candidates; a finalized-state query is the source of truth; a second provider is optional.
 - Idempotency: `UNIQUE(network, tx_hash, log_index | lt)`.
 - Scan cursors advance only after a durable write, overlap the previous window and catch up after downtime instead
-  of jumping ahead.
+  of jumping ahead; a burst larger than one scan's page budget makes the next scan start tight at the cursor rather
+  than freeze it, and raises an alert.
+- A transfer whose block time is more than 5 s before the invoice was created is never credited to it
+  ([ADR-0030](adr/0030-early-payment-tolerance.md)); a zero-value transfer is never a payment.
 
 ## Transport and external calls
 

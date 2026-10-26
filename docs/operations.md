@@ -3,14 +3,18 @@
 ## Processes
 
 `node src/app/cli.ts run --roles api,worker,dispatcher,monitor` (default: all four). Roles can run in separate
-processes or hosts against the same database.
+processes or hosts against the same database. Run **one `worker` per network**: the client-side request spacing for
+keyless providers lives in the process. Alert cooldowns and API rate limits are per process too (two monitors send
+an alert twice; two `api` processes double the per-key limit).
 
 | Role | Does |
 |---|---|
 | `api` | merchant REST API (bind to localhost, publish through a TLS reverse proxy) |
-| `worker` | per network: scan candidates → verify finality → settle; invoice expiry. Networks are isolated: a failing provider stops only its own network. Writes a heartbeat per network |
-| `dispatcher` | delivers webhooks from the outbox |
-| `monitor` | scanner heartbeats, dead webhooks, reconciliation with a second source, depeg protection; sends alerts |
+| `worker` | one loop per network at its `pollInterval`: scan candidates → verify finality → settle; a separate expiry loop. A slow or failing provider affects only its own network. Writes a heartbeat per network |
+| `dispatcher` | delivers webhooks from the outbox; writes the `dispatcher` heartbeat |
+| `monitor` | every minute: the pinned-config guard, scanner and dispatcher heartbeats, dead and overdue webhooks; reconciliation with a second source; depeg protection; retention (if configured); sends alerts |
+
+`SIGTERM` finishes the current cycle of every loop and stops; a sleeping loop stops at once.
 
 ## Alerts
 
@@ -22,11 +26,23 @@ Always written to the log; optionally to Telegram (send-only bot, it never reads
 
 Repeats of the same condition are muted for `cooldown`. Alerts:
 
-- scanner lag — no successful cycle for longer than `ops.maxScannerLag` (defaults: TRON 5 min, TON 2 min);
-- webhooks in dead-letter (retry with `webhook:retry-dead [event-id]` after fixing the endpoint);
-- a candidate that is still not final `ops.candidateMaxAge` (default 24 h) after its block time — rejected;
-- reconciliation findings and second-source failures;
-- depeg block / unblock.
+- `address_pin_violation` (critical) — the pinned parts of `config.json` changed on disk; new invoices are blocked;
+- `scanner-lag:<network>` (critical) — no successful cycle for longer than `ops.maxScannerLag` (defaults: TRON 5 min,
+  TON 2 min);
+- `scanner-budget:<asset>` — a scan read its whole page budget: more transactions than one cycle reads, the scanner
+  is catching up (a burst on the address; it cannot freeze the cursor, but detection lags);
+- `dispatcher-lag` (critical) and `webhooks-backlog` — with webhooks configured: the dispatcher has not completed a
+  cycle, or an event has been due without delivery, for longer than `ops.maxDispatcherLag` (default 5 min);
+- `webhooks-dead` — events in dead-letter (retry with `webhook:retry-dead [event-id]` after fixing the endpoint);
+- `never-final:<network>/<tx>` — a candidate still not final (or its verification still failing)
+  `ops.candidateMaxAge` (default 24 h) after its block time, or after we first saw it when that is later — rejected;
+- `slots-exhausted:<asset>` (critical) — every active address is full for a price; merchants get
+  `503 allocation.no_free_slot` until slots free up (add addresses or shorten `ttl` / `grace`);
+- `reconcile-missed:<network>:<address>`, `reconcile-unknown:…`, `reconcile-source:<name>` — reconciliation findings
+  and second-source failures;
+- `depeg:<symbol>` block / unblock, `depeg:<symbol>:source` — one source failing.
+
+Alerts are muted per key for `cooldown` in each process.
 
 ## Reconciliation with a second source
 
@@ -54,9 +70,11 @@ Off by default — no requests to exchanges unless configured:
 "ops": { "depeg": { "symbol": "USDT", "maxDeviationBps": 150, "interval": "5m", "sources": ["kraken", "coinbase"] } }
 ```
 
-If any source reports USDT/USD further than `maxDeviationBps` from 1.00, or no source answers, new invoices priced in
-that symbol are refused (`503 pricing.depeg_block`) until all sources are back in range. Existing invoices are
-not affected.
+If any source reports USDT/USD further than `maxDeviationBps` from 1.00 (an exact comparison), or no source answers,
+new invoices priced in that symbol are refused (`503 pricing.depeg_block`) until all sources are back in range.
+The guard fails closed: with depeg protection configured, a missing reading or one older than three intervals (the
+monitor is not running) refuses new invoices as well. Existing invoices are not affected. `symbol` must be the
+`priceSymbol` of a configured asset.
 
 ## AML
 
@@ -67,7 +85,8 @@ not affected.
 
 - Payments whose total is below the asset's `amlThreshold` complete without screening; `"0"` screens everything.
 - `noop` (default) clears everything; `blocklist` holds payments from senders listed in a local file (one address per
-  line, optionally `network:address`, `#` comments) — no data leaves the server.
+  line in any form the network accepts — TON user-friendly or raw, TRON base58 — optionally prefixed
+  `network:address`, `#` comments) — no data leaves the server. A line that is not an address is a start-up error.
 - A held invoice is `aml_hold`: access is not granted. Decide manually:
   `invoice:aml-resolve <id> approve|reject --note "…"`. Move held funds to a separate quarantine address yourself.
 - A screening service that is unavailable leaves the invoice `aml_pending`; it is retried every cycle.
@@ -76,14 +95,30 @@ not affected.
 
 ## Status
 
-`node src/app/cli.ts ops:status` prints heartbeats, guards (depeg), invoices needing attention (`underpaid`,
-`overpaid`, `paid_late`, `aml_pending`, `aml_hold`), unmatched transfers, unverified candidates and undelivered
-webhooks.
+`node src/app/cli.ts ops:status` prints heartbeats (scanners, dispatcher), guards (depeg, with the time of the last
+reading), invoices needing attention (`underpaid`, `aml_pending`, `aml_hold`), unmatched transfers, unverified
+candidates and undelivered webhooks. `overpaid` and `paid_late` are events, not persisted statuses: look for them in
+the webhook log or the audit log.
+
+## Retention
+
+Nothing is deleted unless `ops.retention` is configured:
+
+```json
+"ops": { "retention": { "deliveredWebhooks": "30d", "idempotencyKeys": "30d", "settledCandidates": "90d" } }
+```
+
+The monitor then deletes, once an hour, delivered outbox rows, idempotency keys and dust / rejected candidates older
+than the given age. Invoices, payments, verified transfers and the audit log are kept forever by design: they are the
+record of every crediting decision.
 
 ## Address canary
 
 Run `tools/canary.ts` from **another host** every few minutes (cron). It creates a small invoice through the public
-API and checks that the address shown to payers is one you expect — catching a tampered server, config or proxy.
+API and checks that every address a payer could see — `payment.address`, `payment.address_display` and the address
+inside `payment.uri` — is one you expect, catching a tampered server, config or proxy. List every form your
+addresses appear in (for TON both the raw `0:…` and the user-friendly form). The order id is random, so a tampered
+server cannot recognise canary requests; https is required (`CANARY_ALLOW_HTTP=1` for a test stand).
 
 ```bash
 CANARY_API_URL=https://pay.example.org CANARY_API_KEY=nck_... CANARY_ASSET=usdt-tron \
