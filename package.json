@@ -41,7 +41,7 @@
     "dependency-cruiser": "18.7.0",
     "fast-check": "4.10.2",
     "jsqr": "1.4.0",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "vitest": "5.0.5"
   }
 }
