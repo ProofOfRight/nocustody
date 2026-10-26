@@ -31,7 +31,8 @@ Security fixes go into the latest minor release line and `main`.
 
 | Version | Supported |
 |---|---|
-| 0.1.x | yes |
+| 0.2.x | yes |
+| 0.1.x | no — misses TON jetton payments sent with `forward_ton_amount = 0`; upgrade |
 | < 0.1 | no |
 
 ## Verifying releases

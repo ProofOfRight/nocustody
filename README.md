@@ -6,8 +6,8 @@ The gateway issues invoices, watches the merchant's own addresses on supported b
 transfers and notifies the merchant's application. It never holds private keys: funds go directly to wallets whose
 keys stay offline. A compromised server does not mean stolen funds.
 
-> **Status: 0.1, first release.** Verified end to end on the TRON Nile and TON testnets, not yet run against mainnet.
-> Start with small amounts.
+> **Status: 0.2, early release.** Verified end to end on the TRON Nile and TON testnets and with a read-only replay
+> of real mainnet payments; no production deployment yet. Start with small amounts.
 
 ## Principles
 
@@ -25,8 +25,9 @@ Non-goals: holding funds, signing transactions, payouts, refunds, sweeps, exchan
 
 | Network / asset | Status |
 |---|---|
-| USDT-TRC20 (TRON) | 0.1, testnet-verified |
-| USDT jetton and GRAM (TON) | 0.1, testnet-verified |
+| USDT-TRC20 (TRON) | testnet-verified, mainnet replay |
+| USDT jetton (TON) | testnet-verified, mainnet replay |
+| GRAM (TON) | testnet-verified |
 | EVM, Solana, Bitcoin | later |
 
 ## Running
