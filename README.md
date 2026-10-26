@@ -65,6 +65,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and rules.
 - [Changelog](CHANGELOG.md), [releasing](docs/releasing.md)
 - Reporting vulnerabilities: [SECURITY.md](SECURITY.md)
 
+## Support the project
+
+Crypto donations: see [DONATE.md](DONATE.md).
+
 ## License
 
 [Apache-2.0](LICENSE). As stated in section 6 of the license, it does not grant permission to use the project name.

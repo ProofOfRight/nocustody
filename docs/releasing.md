@@ -27,6 +27,9 @@ For maintainers. Decisions: [ADR-0028](adr/0028-container-image.md) (image),
    the SPDX SBOM for the image digest, and creates the GitHub release with the SBOM and the verification command.
 5. Verify the published image the way operators do ([deployment.md](deployment.md#verify-the-image)), and rebuild
    it locally to compare digests (below).
+6. Add the donation addresses to the release notes (`gh release edit vX.Y.Z --notes-file ...`), copied from your
+   wallets, not from the repository, and check that they match [DONATE.md](../DONATE.md). The latest release is
+   the second source donors compare against.
 
 ## Reproducing a release build
 
