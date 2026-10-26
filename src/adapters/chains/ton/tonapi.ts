@@ -4,7 +4,7 @@
 // returns hints only — every reconciled transaction is still verified through toncenter by the primary adapter.
 import { z } from "zod";
 import type { ReceivingAddress } from "../../../application/catalog.ts";
-import type { SecondarySource, TransferCandidate } from "../../../application/ports.ts";
+import type { SecondaryReport, SecondarySource, TransferCandidate } from "../../../application/ports.ts";
 import type { Asset } from "../../../domain/asset.ts";
 import type { ChainAddress } from "../../../domain/chain-address.ts";
 import { Money } from "../../../domain/money.ts";
@@ -60,14 +60,17 @@ export class TonapiSource implements SecondarySource {
     address: ChainAddress,
     receiving: readonly ReceivingAddress[],
     from: Date,
-  ): Promise<TransferCandidate[]> {
+    _until: Date,
+  ): Promise<SecondaryReport> {
     const jettonWallet =
       receiving.find((r) => r.address.value === address.value)?.tokenAccount?.value ?? null;
-    if (asset.kind === "token" && !jettonWallet) return [];
+    if (asset.kind === "token" && !jettonWallet) return { transfers: [], complete: true };
     const out: TransferCandidate[] = [];
     const fromUtime = Math.floor(from.getTime() / 1000);
-    // Newest first, paging backwards with before_lt, until the window start is crossed.
+    // Newest first, paging backwards with before_lt, until the window start is crossed. tonapi has no upper time
+    // bound, so transactions after `until` count against the page budget too.
     let beforeLt: number | null = null;
+    let complete = false;
     for (let i = 0; i < this.#maxPages; i++) {
       const query: Record<string, string> = { limit: String(this.#pageSize), sort_order: "desc" };
       if (beforeLt !== null) query.before_lt = String(beforeLt);
@@ -83,9 +86,12 @@ export class TonapiSource implements SecondarySource {
         const c = this.#candidate(asset, address, t);
         if (c) out.push(c);
       }
-      if (crossed || r.transactions.length < this.#pageSize) break;
+      if (crossed || r.transactions.length < this.#pageSize) {
+        complete = true;
+        break;
+      }
     }
-    return out;
+    return { transfers: out, complete };
   }
 
   #candidate(asset: Asset, address: ChainAddress, t: z.infer<typeof tx>): TransferCandidate | null {

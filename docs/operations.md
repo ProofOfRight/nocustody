@@ -38,8 +38,8 @@ Repeats of the same condition are muted for `cooldown`. Alerts:
   `ops.candidateMaxAge` (default 24 h) after its block time, or after we first saw it when that is later — rejected;
 - `slots-exhausted:<asset>` (critical) — every active address is full for a price; merchants get
   `503 allocation.no_free_slot` until slots free up (add addresses or shorten `ttl` / `grace`);
-- `reconcile-missed:<network>:<address>`, `reconcile-unknown:…`, `reconcile-source:<name>` — reconciliation findings
-  and second-source failures;
+- `reconcile-missed:<network>:<address>`, `reconcile-unknown:…`, `reconcile-truncated:…`, `reconcile-source:<name>` —
+  reconciliation findings, partial answers and second-source failures;
 - `depeg:<symbol>` block / unblock, `depeg:<symbol>:source` — one source failing.
 
 Alerts are muted per key for `cooldown` in each process.
@@ -57,7 +57,10 @@ address in `[now − lookback, now − settleDelay]`:
 
 - a transfer the primary scanner missed becomes a **candidate** and goes through the normal verifier — the second
   source never credits anything by itself; an alert is sent;
-- a transfer we verified that the second source does not know is reported (investigate the providers).
+- a transfer we verified that the second source does not know is reported (investigate the providers);
+- if the address had more transfers in the window than one run reads (Tronscan 500, tonapi 1000 transactions,
+  newest first), the answer is partial: what it returned is still queued, the comparison is skipped and
+  `reconcile-truncated` is sent. Shorten `lookback` or run more often.
 
 Tronscan mainnet needs an API key; the testnets (`nileapi.tronscan.org`, `testnet.tonapi.io`) work without one.
 For tonapi the key is sent as the `Authorization` header — set `apiKeyHeader` if your plan differs.

@@ -127,19 +127,35 @@ describe("second sources (recorded)", () => {
       contract_address: "TFakeToken",
     });
     const calls: URL[] = [];
-    const list = await new TronscanSource(NILE, client(fx, calls)).incoming(
+    const report = await new TronscanSource(NILE, client(fx, calls)).incoming(
       asset,
       to,
       [],
       new Date(1792970000000),
+      new Date(1792990000000),
     );
     expect(calls[0]?.pathname).toBe("/api/new/token_trc20/transfers");
     expect(calls[0]?.searchParams.get("toAddress")).toBe(to.value);
-    expect(list.map((c) => [c.txHash.slice(0, 10), c.amount.units])).toEqual([
+    expect(calls[0]?.searchParams.get("end_timestamp")).toBe("1792990000000");
+    expect(report.complete).toBe(true);
+    expect(report.transfers.map((c) => [c.txHash.slice(0, 10), c.amount.units])).toEqual([
       ["a010a24cf5", 15_000_000n],
       ["364157c883", 2_000_000_000n],
       ["320a48d17d", 1_000_000n],
     ]);
+
+    // Every page full up to the budget: the oldest transfers of the window may be missing.
+    const full = { token_transfers: Array.from({ length: 50 }, () => fx.token_transfers[0]) };
+    const busy: URL[] = [];
+    const truncated = await new TronscanSource(NILE, client(full, busy)).incoming(
+      asset,
+      to,
+      [],
+      new Date(1792970000000),
+      new Date(1792990000000),
+    );
+    expect(busy).toHaveLength(10);
+    expect(truncated.complete).toBe(false);
   });
 
   it("tonapi: internal_transfer on our jetton-wallet with amount and memo; plain GRAM transfers", async () => {
@@ -167,12 +183,14 @@ describe("second sources (recorded)", () => {
     // Jettons: internal_transfer on OUR jetton-wallet (found even without a notification to the owner).
     const calls: URL[] = [];
     const jwFx = read("./chains/ton/fixtures/testnet-tonapi-jetton-wallet-transactions.json");
-    const jettons = await new TonapiSource(TESTNET, client(jwFx, calls)).incoming(
+    const { transfers: jettons, complete } = await new TonapiSource(TESTNET, client(jwFx, calls)).incoming(
       usdt,
       owner,
       receiving,
       new Date(1792965900 * 1000),
+      new Date(),
     );
+    expect(complete).toBe(true);
     expect(calls[0]?.pathname).toBe(`/v2/blockchain/accounts/${jw.value}/transactions`);
     expect(jettons[0]).toMatchObject({ memo: "2473565594", to: owner });
     expect(jettons[0]?.amount.units).toBe(1_009_774n);
@@ -184,10 +202,27 @@ describe("second sources (recorded)", () => {
       owner,
       receiving,
       new Date(1792965900 * 1000),
+      new Date(),
     );
-    expect(native.map((c) => c.amount.units)).toEqual([6035n, 7511n, 7511n, expect.any(BigInt)]);
+    expect(native.transfers.map((c) => c.amount.units)).toEqual([6035n, 7511n, 7511n, expect.any(BigInt)]);
     // without a pinned jetton-wallet nothing can be attributed to the jetton
-    expect(await new TonapiSource(TESTNET, client(fx)).incoming(usdt, owner, [], new Date(0))).toEqual([]);
+    expect(
+      await new TonapiSource(TESTNET, client(fx)).incoming(usdt, owner, [], new Date(0), new Date()),
+    ).toEqual({ transfers: [], complete: true });
+
+    // 10 full pages, all inside the window: the report is partial.
+    const recent = { ...jwFx.transactions[0], utime: 1792999999 };
+    const full = { transactions: Array.from({ length: 100 }, () => recent) };
+    const busy: URL[] = [];
+    const truncated = await new TonapiSource(TESTNET, client(full, busy)).incoming(
+      usdt,
+      owner,
+      receiving,
+      new Date(1792965900 * 1000),
+      new Date(),
+    );
+    expect(busy).toHaveLength(10);
+    expect(truncated.complete).toBe(false);
   });
 });
 

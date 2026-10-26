@@ -115,8 +115,18 @@ export interface PegPriceSource {
 }
 
 /**
- * Independent second indexer used for reconciliation. Returns incoming transfers of `asset` to `address` since
- * `from`, already filtered like the primary adapter does (contract / our jetton-wallet, success), as candidates.
+ * What a second source reported for one address. `complete` is false when its page budget ran out before the
+ * window was covered: the transfers it did not return are not evidence that a transfer is unknown to it.
+ */
+export interface SecondaryReport {
+  readonly transfers: TransferCandidate[];
+  readonly complete: boolean;
+}
+
+/**
+ * Independent second indexer used for reconciliation. Returns incoming transfers of `asset` to `address` in
+ * [`from`, `until`], already filtered like the primary adapter does (contract / our jetton-wallet, success), as
+ * candidates. A source may return transfers after `until`; the caller drops them.
  */
 export interface SecondarySource {
   readonly name: string;
@@ -127,7 +137,8 @@ export interface SecondarySource {
     address: ChainAddress,
     receiving: readonly ReceivingAddress[],
     from: Date,
-  ): Promise<TransferCandidate[]>;
+    until: Date,
+  ): Promise<SecondaryReport>;
 }
 
 export interface RateProvider {
