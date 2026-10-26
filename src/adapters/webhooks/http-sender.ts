@@ -59,6 +59,13 @@ export function isSpecialAddress(address: string): boolean {
   return true;
 }
 
+/** The public webhook contract uses snake_case keys, like the REST API. */
+export function snakeKeys(data: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(data).map(([k, v]) => [k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`), v]),
+  );
+}
+
 export function signWebhook(secret: string, timestamp: string, eventId: string, body: string): string {
   return `v1=${createHmac("sha256", secret).update(`${timestamp}.${eventId}.${body}`).digest("hex")}`;
 }
@@ -90,7 +97,7 @@ export class HttpWebhookSender implements WebhookSender {
       id: m.eventId,
       type: m.type,
       created_at: m.occurredAt.toISOString(),
-      data: { ...m.payload, object_id: m.aggregateId },
+      data: { ...snakeKeys(m.payload), object_id: m.aggregateId },
     });
     const timestamp = String(Math.floor((this.#o.now?.() ?? new Date()).getTime() / 1000));
     const headers = {

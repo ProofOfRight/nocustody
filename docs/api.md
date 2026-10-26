@@ -41,7 +41,8 @@ Each event is a `POST` with a JSON body:
 
 ```json
 { "id": "6f1c7c1e-…", "type": "invoice.paid", "created_at": "2026-10-26T12:00:00.000Z",
-  "data": { "object_id": "<invoice id>", "amount": "10.010000", "received": "10.010000", "…": "…" } }
+  "data": { "object_id": "<invoice id>", "amount": "10.010000", "received": "10.010000",
+            "transfer_key": "tron:mainnet/<tx>/<log index>", "…": "…" } }
 ```
 
 and headers `X-Event-Id`, `X-Timestamp` (Unix seconds) and

@@ -21,6 +21,7 @@
     "check": "npm run lint && npm run typecheck && npm run layers && npm run licenses && npm run source-policy && npm test && npm run test:int",
     "e2e:nile": "node scripts/e2e-nile.ts",
     "e2e:ton": "node scripts/e2e-ton.ts",
+    "e2e:api": "node scripts/e2e-api.ts",
     "db:migrate": "node src/app/cli.ts db:migrate",
     "build": "tsc -p tsconfig.build.json && cp -R src/adapters/persistence/pg/migrations dist/adapters/persistence/pg/"
   },
