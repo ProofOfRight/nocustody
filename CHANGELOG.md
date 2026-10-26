@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 Before 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-10-26
 
 First release. Verified end to end with real TRON Nile and TON testnet transactions; **not yet run against
 mainnet**; start with small amounts.
