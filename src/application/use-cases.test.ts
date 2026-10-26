@@ -104,8 +104,9 @@ function setup(opts: { assets?: AssetSettings[]; providers?: RateProvider[]; mem
   const strategies = (s: AssetSettings) => (s.strategy === "memo" ? memo : uniqueAmount);
   const integrity = {
     ok: true,
+    reason: "pinned checksum mismatch",
     check: async () =>
-      integrity.ok ? { ok: true as const } : { ok: false as const, reason: "pinned checksum mismatch" },
+      integrity.ok ? { ok: true as const } : { ok: false as const, reason: integrity.reason },
   };
   let n = 0;
   const create = new CreateInvoice({
@@ -236,6 +237,33 @@ describe("CreateInvoice", () => {
     s.integrity.ok = false;
     expect(await errCode(s.order("o1"))).toBe("integrity.pin_violation");
     expect(s.store.data.invoices.size).toBe(0);
+  });
+
+  it("the integrity reason stays with the operator: the API caller never sees a config path or file fragment", async () => {
+    const s = setup();
+    s.integrity.ok = false;
+    s.integrity.reason =
+      'config unreadable: cannot read config /etc/nocustody/config.json: Unexpected token "x"';
+    const message = await s.order("o1").then(
+      () => "",
+      (e: Error) => e.message,
+    );
+    expect(message).not.toContain("/etc/");
+    expect(message).not.toContain("Unexpected token");
+    expect(message).toContain("blocked");
+  });
+
+  it("answers an existing order before quoting: a stale rate or a depeg block does not hide it", async () => {
+    const s = setup({ providers: [manual([["USD", "USDT", "1"]], 0, 60 * MIN)] });
+    const first = await s.order("o1");
+    s.clock.advance(2 * 60 * MIN); // the only rate is now stale
+    expect(await errCode(s.order("o2"))).toBe("pricing.no_rate");
+    const again = await s.order("o1");
+    expect(again.created).toBe(false);
+    expect(again.invoice.id).toBe(first.invoice.id);
+    await s.store.run((r) => r.guards.set("depeg:USDT", true, "off the peg", s.clock.now()));
+    expect((await s.order("o1")).created).toBe(false);
+    expect(await errCode(s.order("o3", "10", "USDT"))).toBe("pricing.depeg_block");
   });
 
   it("refuses disabled currencies and stale rates", async () => {
