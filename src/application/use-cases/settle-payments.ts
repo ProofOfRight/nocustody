@@ -96,7 +96,7 @@ export class SettlePayments {
     if (!invoice) return unmatched("invoice_missing");
     try {
       invoice.applyPayment(
-        { transferKey: subject, from: v.from, amount: v.amount, at: v.at },
+        { transferKey: subject, from: v.from, to: v.to, amount: v.amount, at: v.at },
         settings.amountPolicy,
         now,
       );
