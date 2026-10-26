@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Clock, UnitOfWork, WebhookSender } from "../ports.ts";
 
+/** Heartbeat role name of the dispatcher (read by the monitor). */
+export const DISPATCHER_ROLE = "dispatcher";
+
 export interface DispatchStats {
   delivered: number;
   failed: number;
@@ -80,6 +83,8 @@ export class DispatchWebhooks {
         await r.delivery.markFailed(m.id, new Date(now.getTime() + this.delayAfter(attempts)), result.error);
       });
     }
+    // The monitor watches this heartbeat like the scanners': a dead or stuck dispatcher is an alert, not a mystery.
+    await uow.run((r) => r.heartbeats.ok(DISPATCHER_ROLE, clock.now()));
     return stats;
   }
 }

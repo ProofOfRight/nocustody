@@ -533,6 +533,14 @@ function repositories(db: PoolClient, assets: AssetResolver): Repositories {
           [id, at, error.slice(0, 500)],
         );
       },
+      oldestDue: async (now: Date) => {
+        const { rows } = await db.query<{ t: Date | null }>(
+          `SELECT min(next_attempt_at) AS t FROM outbox
+           WHERE delivered_at IS NULL AND dead_at IS NULL AND next_attempt_at <= $1`,
+          [now],
+        );
+        return rows[0]?.t ?? null;
+      },
       pruneDelivered: async (before: Date) => {
         const res = await db.query(
           "DELETE FROM outbox WHERE delivered_at IS NOT NULL AND delivered_at < $1",

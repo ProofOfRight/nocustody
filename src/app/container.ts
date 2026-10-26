@@ -300,6 +300,7 @@ export function buildContainer(o: ContainerOptions) {
     alerts,
     catalog,
     integrity: o.integrity,
+    ...(o.config.raw.webhooks ? { maxDispatcherLagMs: parseDuration(ops.maxDispatcherLag) } : {}),
     retention: ops.retention
       ? {
           ...(ops.retention.deliveredWebhooks
@@ -442,27 +443,29 @@ const normaliseAddress: AddressNormaliser = (network, raw) => {
   throw new Error(`${raw} is not an address of any configured network family`);
 };
 
-/** One scanner → verifier → settlement pass for every network, plus expiry. */
 /**
- * One scanner → verifier → settlement pass for every network, plus expiry. Networks are isolated: a failing
- * provider stops only its own network for this cycle. Each network's heartbeat is recorded for the monitor.
+ * One scanner → verifier → settlement pass for one network, with its heartbeat. In `run` every network has its
+ * own loop at its own pollInterval, so a slow provider delays only its own network.
  */
+export async function runNetwork(c: Container, w: NetworkWorker) {
+  const role = `scanner:${w.adapter.network}`;
+  try {
+    const ingest = await w.ingest.execute();
+    const verify = await w.verify.execute();
+    const settle = await w.settle.execute();
+    await c.uow.run((r) => r.heartbeats.ok(role, c.clock.now()));
+    return { network: w.adapter.network, ingest, verify, settle };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    await c.uow.run((r) => r.heartbeats.error(role, c.clock.now(), error)).catch(() => undefined);
+    return { network: w.adapter.network, error };
+  }
+}
+
+/** Every network in turn, then expiry: one pass of everything the worker role does (e2e scripts, tests). */
 export async function runCycle(c: Container) {
   const results = [];
-  for (const w of c.workers) {
-    const role = `scanner:${w.adapter.network}`;
-    try {
-      const ingest = await w.ingest.execute();
-      const verify = await w.verify.execute();
-      const settle = await w.settle.execute();
-      await c.uow.run((r) => r.heartbeats.ok(role, c.clock.now()));
-      results.push({ network: w.adapter.network, ingest, verify, settle });
-    } catch (e) {
-      const error = e instanceof Error ? e.message : String(e);
-      await c.uow.run((r) => r.heartbeats.error(role, c.clock.now(), error)).catch(() => undefined);
-      results.push({ network: w.adapter.network, error });
-    }
-  }
+  for (const w of c.workers) results.push(await runNetwork(c, w));
   const expired = await c.expireInvoices.execute();
   return { results, expired };
 }

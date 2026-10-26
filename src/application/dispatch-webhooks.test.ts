@@ -34,12 +34,13 @@ function setup(results: DeliveryResult[]) {
 }
 
 describe("DispatchWebhooks", () => {
-  it("delivers once and marks the event delivered", async () => {
+  it("delivers once and marks the event delivered; every cycle writes the dispatcher heartbeat", async () => {
     const s = setup([]);
     await s.append();
     expect(await s.dispatch.execute()).toEqual({ delivered: 1, failed: 0, dead: 0 });
     expect(await s.dispatch.execute()).toEqual({ delivered: 0, failed: 0, dead: 0 });
     expect(s.sent).toHaveLength(1);
+    expect(s.store.data.heartbeats.get("dispatcher")?.lastOkAt?.getTime()).toBe(T0);
   });
 
   it("retries with exponential backoff, then dead-letters", async () => {

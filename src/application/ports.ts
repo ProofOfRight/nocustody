@@ -279,6 +279,8 @@ export interface OutboxDelivery {
   reviveDead(now: Date, eventId?: string): Promise<number>;
   /** Deletes events delivered before `before` (retention); returns how many. */
   pruneDelivered(before: Date): Promise<number>;
+  /** Earliest `next_attempt_at` of an undelivered, not dead-lettered event that is due; null when none is. */
+  oldestDue(now: Date): Promise<Date | null>;
 }
 
 export interface Heartbeat {

@@ -21,6 +21,11 @@ export interface MonitorDeps {
   readonly catalog: AssetCatalog;
   /** Max age of the last successful scanner cycle, per network. */
   readonly maxScannerLagMs: ReadonlyMap<NetworkId, number>;
+  /**
+   * With webhooks configured: max age of the dispatcher's last successful cycle, and the longest an event may be due
+   * without being delivered (a dispatcher that is down, stuck on one endpoint, or not running anywhere).
+   */
+  readonly maxDispatcherLagMs?: number;
   readonly secondary: readonly SecondarySource[];
   /** Reconciliation window: [now - lookback, now - settleDelay]. */
   readonly reconcileLookbackMs: number;
@@ -108,6 +113,21 @@ export class Monitor {
     if (dead > 0) {
       problems.push(`${dead} webhook event(s) in dead-letter`);
       await alerts.send({ key: "webhooks-dead", severity: "warning", message: problems.at(-1) ?? "" });
+    }
+    const maxDispatcherLag = this.#d.maxDispatcherLagMs;
+    if (maxDispatcherLag !== undefined) {
+      const hb = beats.find((b) => b.role === "dispatcher");
+      const last = hb?.lastOkAt?.getTime() ?? 0;
+      if (now - last > maxDispatcherLag) {
+        const age = last ? `${Math.round((now - last) / 1000)} s ago` : "never";
+        problems.push(`dispatcher last succeeded ${age}`);
+        await alerts.send({ key: "dispatcher-lag", severity: "critical", message: problems.at(-1) ?? "" });
+      }
+      const oldest = await uow.run((r) => r.delivery.oldestDue(clock.now()));
+      if (oldest && now - oldest.getTime() > maxDispatcherLag) {
+        problems.push(`a webhook event has been due for ${Math.round((now - oldest.getTime()) / 1000)} s`);
+        await alerts.send({ key: "webhooks-backlog", severity: "warning", message: problems.at(-1) ?? "" });
+      }
     }
     return problems;
   }
