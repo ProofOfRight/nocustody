@@ -10,7 +10,7 @@ import type { AssetCatalog, PricingSettings } from "../catalog.ts";
 import { ApplicationError } from "../errors.ts";
 import type { Clock, IdGenerator, IntegrityGuard, UnitOfWork } from "../ports.ts";
 import type { RateService } from "../rates.ts";
-import type { PaymentInstructionStrategy } from "../strategies/unique-amount.ts";
+import type { StrategyResolver } from "../strategies/strategy.ts";
 
 export interface CreateInvoiceInput {
   readonly merchantOrderId: string;
@@ -34,7 +34,7 @@ export class CreateInvoice {
   }
 
   async execute(input: CreateInvoiceInput): Promise<CreateInvoiceResult> {
-    const { uow, catalog, strategy, clock, ids, integrity } = this.#deps;
+    const { uow, catalog, strategies, clock, ids, integrity } = this.#deps;
     // Never hand out payment instructions if the pinned addresses/contracts may have been tampered with.
     const intact = await integrity.check();
     if (!intact.ok) throw new ApplicationError("integrity.pin_violation", intact.reason);
@@ -51,9 +51,9 @@ export class CreateInvoice {
       const id = ids.newId();
       const expiresAt = new Date(now.getTime() + settings.ttlMs);
       const until = new Date(expiresAt.getTime() + settings.graceMs);
-      const { instructions } = await strategy.allocate(
+      const { instructions } = await strategies(settings).allocate(
         { invoiceId: id, settings, base, from: now, until },
-        repos.slots,
+        repos,
       );
       const invoice = Invoice.create(
         {
@@ -76,6 +76,7 @@ export class CreateInvoice {
         reason: "invoice created",
         data: {
           address: instructions.address.value,
+          memo: instructions.memo,
           amount: instructions.amount.toDecimalString(),
           base: base.toDecimalString(),
           rate: price?.rate ?? null,
@@ -138,7 +139,7 @@ export interface CreateInvoiceDeps {
   readonly catalog: AssetCatalog;
   readonly pricing: PricingSettings;
   readonly rates: RateService;
-  readonly strategy: PaymentInstructionStrategy;
+  readonly strategies: StrategyResolver;
   readonly clock: Clock;
   readonly ids: IdGenerator;
   readonly integrity: IntegrityGuard;

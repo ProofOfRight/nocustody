@@ -86,6 +86,7 @@ interface CandidateRow {
   recipient: string;
   amount_units: string;
   block_time: Date;
+  memo: string | null;
   status: CandidateStatus;
   attempts: number;
   reason: string | null;
@@ -100,6 +101,7 @@ interface TransferRow {
   recipient: string;
   amount_units: string;
   block_time: Date;
+  memo: string | null;
   status: TransferStatus;
   invoice_id: string | null;
   reason: string | null;
@@ -174,6 +176,7 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
         to: chainAddress(network, r.recipient),
         amount: Money.of(assetOf(r.asset_id), units(r.amount_units)),
         at: r.block_time,
+        memo: r.memo,
       },
       status: r.status,
       attempts: r.attempts,
@@ -190,6 +193,7 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
         to: chainAddress(network, r.recipient),
         amount: Money.of(assetOf(r.asset_id), units(r.amount_units)),
         at: r.block_time,
+        memo: r.memo,
       },
       status: r.status,
       invoiceId: r.invoice_id,
@@ -311,6 +315,27 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
       },
     },
 
+    memos: {
+      tryInsert: async (network, memo, invoiceId, address, assetId) => {
+        const res = await db.query(
+          `INSERT INTO memo_reservations (network, memo, invoice_id, address, asset_id) VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (network, memo) DO NOTHING`,
+          [network, memo, invoiceId, address.value, assetId],
+        );
+        return res.rowCount === 1;
+      },
+      find: async (network, memo) => {
+        const { rows } = await db.query<{ invoice_id: string; address: string; asset_id: string }>(
+          "SELECT invoice_id, address, asset_id FROM memo_reservations WHERE network = $1 AND memo = $2",
+          [network, memo],
+        );
+        const r = rows[0];
+        return r
+          ? { invoiceId: r.invoice_id, address: chainAddress(network, r.address), assetId: r.asset_id }
+          : null;
+      },
+    },
+
     candidates: {
       insert: async (c: TransferCandidate, status, reason) => {
         const res = await db.query(
@@ -349,8 +374,8 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
       insert: async (t: VerifiedTransfer, status, reason) => {
         const res = await db.query(
           `INSERT INTO observed_transfers (network, tx_hash, log_index, asset_id, sender, recipient, amount_units,
-             block_time, status, reason)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             block_time, status, reason, memo)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            ON CONFLICT (network, tx_hash, log_index) DO NOTHING`,
           [
             t.ref.network,
@@ -363,6 +388,7 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
             t.at,
             status,
             reason,
+            t.memo,
           ],
         );
         return res.rowCount === 1 ? "inserted" : "duplicate";

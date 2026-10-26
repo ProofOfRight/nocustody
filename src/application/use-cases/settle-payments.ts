@@ -5,7 +5,7 @@ import type { NetworkId } from "../../domain/network.ts";
 import { txRefKey } from "../../domain/tx-ref.ts";
 import type { AssetCatalog } from "../catalog.ts";
 import type { AmlScreener, Clock, Repositories, UnitOfWork, VerifiedTransfer } from "../ports.ts";
-import type { PaymentInstructionStrategy } from "../strategies/unique-amount.ts";
+import type { StrategyResolver } from "../strategies/strategy.ts";
 
 export interface SettleStats {
   matched: number;
@@ -24,7 +24,7 @@ const SCREENABLE = new Set(["paid", "overpaid", "paid_late"]);
 export interface SettlePaymentsDeps {
   readonly network: NetworkId;
   readonly catalog: AssetCatalog;
-  readonly strategy: PaymentInstructionStrategy;
+  readonly strategies: StrategyResolver;
   readonly aml: AmlScreener;
   readonly uow: UnitOfWork;
   readonly clock: Clock;
@@ -50,7 +50,7 @@ export class SettlePayments {
   }
 
   async #settleOne(repos: Repositories, v: VerifiedTransfer, stats: SettleStats): Promise<void> {
-    const { catalog, strategy, clock } = this.#deps;
+    const { catalog, strategies, clock } = this.#deps;
     const now = clock.now();
     const subject = txRefKey(v.ref);
     const unmatched = async (reason: string): Promise<void> => {
@@ -73,11 +73,11 @@ export class SettlePayments {
       ]);
     };
 
-    const m = await strategy.match(v, repos.slots);
+    const settings = catalog.get(v.amount.asset.id);
+    const m = await strategies(settings).match(v, repos);
     if (m.kind === "unmatched") return unmatched(m.reason);
     const invoice = await repos.invoices.findById(m.invoiceId);
     if (!invoice) return unmatched("invoice_missing");
-    const settings = catalog.get(v.amount.asset.id);
     try {
       invoice.applyPayment(
         { transferKey: subject, from: v.from, amount: v.amount, at: v.at },
@@ -96,8 +96,8 @@ export class SettlePayments {
       actor: "settlement",
       subject,
       decision: "matched",
-      reason: `applied to invoice, status ${invoice.status}`,
-      data: { invoiceId: invoice.id, amount: v.amount.toDecimalString() },
+      reason: `applied to invoice by ${m.by}, status ${invoice.status}`,
+      data: { invoiceId: invoice.id, amount: v.amount.toDecimalString(), by: m.by, memo: v.memo },
     });
     stats.matched++;
   }

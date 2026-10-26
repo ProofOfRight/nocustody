@@ -22,6 +22,7 @@ import type {
 interface Data {
   invoices: Map<string, InvoiceState>;
   slots: AmountSlot[];
+  memos: Map<string, { invoiceId: string; address: ChainAddress; assetId: string }>;
   candidates: Map<string, StoredCandidate>;
   transfers: Map<string, StoredTransfer>;
   outbox: DomainEvent[];
@@ -34,6 +35,7 @@ export class InMemoryStore implements UnitOfWork {
   data: Data = {
     invoices: new Map(),
     slots: [],
+    memos: new Map(),
     candidates: new Map(),
     transfers: new Map(),
     outbox: [],
@@ -45,6 +47,7 @@ export class InMemoryStore implements UnitOfWork {
     const snapshot: Data = {
       invoices: new Map(this.data.invoices),
       slots: [...this.data.slots],
+      memos: new Map(this.data.memos),
       candidates: new Map(this.data.candidates),
       transfers: new Map(this.data.transfers),
       outbox: [...this.data.outbox],
@@ -131,6 +134,15 @@ export class InMemoryStore implements UnitOfWork {
               x.address.network === address.network &&
               x.amount.units === amount.units,
           ),
+      },
+      memos: {
+        tryInsert: async (network, memo, invoiceId, address, assetId) => {
+          const key = `${network}/${memo}`;
+          if (d().memos.has(key)) return false;
+          d().memos.set(key, { invoiceId, address, assetId });
+          return true;
+        },
+        find: async (network, memo) => d().memos.get(`${network}/${memo}`) ?? null,
       },
       candidates: {
         insert: async (c: TransferCandidate, status, reason) => {

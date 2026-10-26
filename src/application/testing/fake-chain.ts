@@ -36,7 +36,14 @@ export class FakeChain implements ChainAdapter {
     const v = this.verdicts.get(c.txHash) ?? {
       status: "final",
       transfers: [
-        { ref: txRef(c.network, c.txHash, 0n), from: c.from, to: c.to, amount: c.amount, at: c.at },
+        {
+          ref: txRef(c.network, c.txHash, 0n),
+          from: c.from,
+          to: c.to,
+          amount: c.amount,
+          at: c.at,
+          memo: c.memo,
+        },
       ],
     };
     if (v instanceof Error) throw v;

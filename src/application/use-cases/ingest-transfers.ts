@@ -4,7 +4,7 @@ import { sameAsset } from "../../domain/asset.ts";
 import { sameAddress } from "../../domain/chain-address.ts";
 import { type AssetCatalog, watchedAddresses } from "../catalog.ts";
 import type { ChainAdapter, Clock, UnitOfWork } from "../ports.ts";
-import type { PaymentInstructionStrategy } from "../strategies/unique-amount.ts";
+import type { StrategyResolver } from "../strategies/strategy.ts";
 
 export interface IngestStats {
   fetched: number;
@@ -17,7 +17,7 @@ export interface IngestStats {
 export interface IngestTransfersDeps {
   readonly adapter: ChainAdapter;
   readonly catalog: AssetCatalog;
-  readonly strategy: PaymentInstructionStrategy;
+  readonly strategies: StrategyResolver;
   readonly uow: UnitOfWork;
   readonly clock: Clock;
   readonly pageSize: number;
@@ -37,7 +37,7 @@ export class IngestTransfers {
   }
 
   async execute(): Promise<IngestStats> {
-    const { adapter, catalog, strategy, uow, clock, pageSize, maxPages } = this.#deps;
+    const { adapter, catalog, strategies, uow, clock, pageSize, maxPages } = this.#deps;
     const stats: IngestStats = { fetched: 0, inserted: 0, duplicates: 0, dust: 0, ignored: 0 };
     for (const settings of catalog.forNetwork(adapter.network)) {
       const watched = watchedAddresses(settings);
@@ -81,7 +81,7 @@ export class IngestTransfers {
               });
               continue;
             }
-            const m = await strategy.match(c, repos.slots);
+            const m = await strategies(settings).match(c, repos);
             if (m.kind === "matched") {
               const invoice = await repos.invoices.findById(m.invoiceId);
               if (invoice) {
