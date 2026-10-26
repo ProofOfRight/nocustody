@@ -2,7 +2,7 @@
 # All targets run inside the docker compose `dev` service; see compose.yaml.
 RUN := docker compose run --rm dev
 
-.PHONY: up down shell install lint format typecheck test check build image smoke-image db-migrate e2e-nile e2e-ton e2e-api e2e-ops e2e-mainnet php-selftest
+.PHONY: up down shell install lint format typecheck test check check-untrusted install-untrusted build image smoke-image db-migrate e2e-nile e2e-ton e2e-api e2e-ops e2e-mainnet php-selftest
 
 up:            ## start PostgreSQL
 	docker compose up -d --wait postgres
@@ -22,6 +22,26 @@ test:
 	$(RUN) npm test
 check:         ## everything CI runs: lint, typecheck, layers, licenses, SPDX, tests
 	$(RUN) npm run check
+# Code from a pull request runs only in the sandbox (compose.yaml, profile untrusted): its worktree read-only, no
+# network, no keys, nothing of this repository mounted. CONTRIBUTING.md, "Reviewing pull requests".
+UNTRUSTED = PR_DIR="$(abspath $(PR_DIR))" PR_NODE_MODULES="$(PR_NODE_MODULES)" docker compose --profile untrusted
+PR_DEPS_CHANGED = $(shell git -C "$(PR_DIR)" diff --quiet main -- package.json package-lock.json 2>/dev/null || echo yes)
+PR_NODE_MODULES = $(if $(PR_DEPS_CHANGED),$(abspath $(PR_DIR))/node_modules,$(CURDIR)/node_modules)
+check-untrusted: ## make check on a pull request's worktree in the sandbox: PR_DIR=../nocustody-pr-<N>
+	@test -n "$(PR_DIR)" -a -d "$(PR_DIR)" || { echo "usage: make check-untrusted PR_DIR=../nocustody-pr-<N> (a git worktree)"; exit 2; }
+	@test "$(abspath $(PR_DIR))" != "$(CURDIR)" || { echo "PR_DIR must be a separate worktree, not this repository"; exit 2; }
+	@if [ -n "$(PR_DEPS_CHANGED)" ] && [ ! -f "$(PR_NODE_MODULES)/.package-lock.json" ]; then \
+	  echo "the pull request changes package.json or package-lock.json: read 'git -C $(PR_DIR) diff main -- package-lock.json'"; \
+	  echo "first, then run 'make install-untrusted PR_DIR=$(PR_DIR)'"; exit 2; fi
+	@# mount points inside the read-only mounts must exist on the host
+	mkdir -p "$(abspath $(PR_DIR))/node_modules" "$(PR_NODE_MODULES)/.vite" "$(PR_NODE_MODULES)/.vite-temp" "$(PR_NODE_MODULES)/.vitest-cache"
+	$(UNTRUSTED) run --rm untrusted npm run check; status=$$?; \
+	  $(UNTRUSTED) rm --stop --force postgres-untrusted >/dev/null 2>&1; exit $$status
+install-untrusted: ## the pull request's own dependencies (after reading its lockfile diff), scripts disabled
+	@test -n "$(PR_DIR)" -a -d "$(PR_DIR)" || { echo "usage: make install-untrusted PR_DIR=../nocustody-pr-<N>"; exit 2; }
+	mkdir -p "$(abspath $(PR_DIR))/node_modules"
+	PR_DIR="$(abspath $(PR_DIR))" PR_NODE_MODULES="$(abspath $(PR_DIR))/node_modules" docker compose --profile untrusted \
+	  run --rm --no-deps untrusted-install npm ci --ignore-scripts --no-audit --no-fund
 build:
 	$(RUN) npm run build
 image:         ## production image nocustody:dev, see docs/deployment.md
