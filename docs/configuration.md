@@ -12,10 +12,15 @@ Durations are strings like `500ms`, `30s`, `30m`, `1h`, `7d`. Amounts are decima
 
 ## Pinned checksum
 
-`NOCUSTODY_PINNED_SHA256` must equal the sha256 over the canonical form of `assets` (ids, networks, kinds, contracts,
-decimals, receiving addresses with their status and jetton-wallets). Print it with the `config:hash` command. The gateway refuses to start on a mismatch, and
-re-checks the file on every cycle: if it changes while running, new invoices are blocked and an
-`address_pin_violation` alert is raised. There is no API or command that changes receiving addresses.
+`NOCUSTODY_PINNED_SHA256` must equal the checksum of everything in the config that decides money
+([ADR-0031](adr/0031-pinned-config-scope.md)): per asset its identity (network, kind, contract, decimals), receiving
+addresses with status and jetton-wallet, `amounts`, `ttl`, `grace`, `amlThreshold`, `strategy` and `priceSymbol`;
+the `tron` / `ton` provider sections (`network`, `apiUrl`, `apiKeyEnv`); `pricing`; `ops.aml`; `ops.depeg`; the
+webhook `url`, `allowPrivateNetworks` and `allowHttp`. Timeouts, intervals, API bind and limits, alerts, retention
+and reconciliation sources are not pinned. Print the checksum with the `config:hash` command. The gateway refuses to
+start on a mismatch; while it runs, the file is re-read before every invoice and once a minute by the monitor: a
+change blocks new invoices and raises the `address_pin_violation` alert (log and Telegram). There is no API or
+command that changes receiving addresses.
 
 ## `assets[]`
 
@@ -32,7 +37,7 @@ re-checks the file on every cycle: if it changes while running, new invoices are
 | `addresses[]` | — | `{ address, status: active \| draining, jettonWallet? }`. New invoices use `active` addresses; `draining` ones are still watched. TON jettons need the owner's `jettonWallet`, verified with `get_wallet_address` at startup |
 | `amounts.step` | — | unique-amount step added to the price (`"0.01"`) |
 | `amounts.maxSlots` | — | parallel open invoices per address and base amount (1–999) |
-| `amounts.dustThreshold` | `"0"` | incoming transfers below this are ignored (address poisoning) |
+| `amounts.dustThreshold` | `"0"` | incoming transfers below this are ignored (address poisoning); a zero-value transfer is always ignored |
 | `amounts.underpaymentTolerance` / `underpaymentToleranceBps` | `"0"` / `0` | underpayment still counted as paid: absolute amount / basis points of the invoice |
 | `amounts.acceptLatePayments` | `true` | accept payments after `expires_at` but before `grace_until` (as `paid_late`) |
 | `ttl` | `30m` | invoice lifetime |
@@ -53,9 +58,9 @@ One section per network family, required when an asset uses it.
 | `apiUrl` | — | TronGrid (`https://api.trongrid.io`, `https://nile.trongrid.io`) or toncenter v3 (`https://toncenter.com`, `https://testnet.toncenter.com`) |
 | `apiKeyEnv` | — | environment variable with the provider key |
 | `startFrom` | — | ISO timestamp where scanning starts when there is no cursor yet |
-| `pollInterval` | `10s` | scanner cycle |
+| `pollInterval` | `10s` | scanner cycle of this network (each network has its own loop); 1 s … 24 d |
 | `overlap` | `10m` | each scan re-reads this much of the previous window |
-| `timeout` | `10s` | per request |
+| `timeout` | `10s` | per request; 1 s … 24 d |
 | `maxResponseBytes` | `5000000` | larger responses are rejected |
 | `minInterval` (TON) | `1100ms` | spacing between requests (toncenter allows 1 request/s without a key) |
 
@@ -103,10 +108,15 @@ Monitoring, reconciliation, depeg protection, alerts and AML: see [operations.md
 |---|---|
 | `alerts.cooldown`, `alerts.telegram { botTokenEnv, chatId }` | `30m`, off |
 | `maxScannerLag { "<network id>": duration }` | TRON 5m, TON 2m |
-| `candidateMaxAge` | `24h` |
-| `reconcile { interval, lookback, settleDelay, tron, ton }` | off |
-| `depeg { symbol, maxDeviationBps, interval, sources }` | off |
+| `maxDispatcherLag` | `5m` (with webhooks configured: alert when the dispatcher stops or an event is due this long) |
+| `candidateMaxAge` | `24h` (counted from the block time, or from the first time the scanner saw the candidate when that is later) |
+| `reconcile { interval, lookback, settleDelay, tron { apiUrl, apiKeyEnv, apiKeyHeader }, ton { … } }` | off; when on: `1h`, `3h`, `10m` |
+| `depeg { symbol, maxDeviationBps, interval, sources }` | off; when on: `USDT`, `150`, `5m`, `["kraken", "coinbase"]`; `symbol` must be a `priceSymbol` of some asset |
+| `retention { deliveredWebhooks, idempotencyKeys, settledCandidates }` | off (kept forever); durations after which the monitor deletes delivered outbox rows, idempotency keys, dust and rejected candidates. Invoices, payments, verified transfers and the audit log are never pruned |
 | `aml { provider: noop \| blocklist, blocklistFile }` | `noop` |
+
+Durations must be above zero; intervals and timeouts between 1 s and 24 days. A provider key variable (`apiKeyEnv`,
+`botTokenEnv`) must not name another secret (`database.urlEnv`, `webhooks.secretEnv`, `POSTGRES_*`).
 
 ## `database`
 

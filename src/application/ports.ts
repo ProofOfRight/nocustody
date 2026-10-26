@@ -297,15 +297,21 @@ export interface HeartbeatRepository {
 }
 
 /** Shared switches set by the monitor and read by other processes, e.g. "depeg:USDT". */
+/** `updatedAt` is the time of the last reading; CreateInvoice treats a stale depeg reading as blocked. */
 export interface GuardRepository {
   get(key: string): Promise<{ blocked: boolean; reason: string; updatedAt: Date } | null>;
   set(key: string, blocked: boolean, reason: string, at: Date): Promise<void>;
 }
 
+/**
+ * Outcome of one delivery attempt. `retryable: false` dead-letters the event at once (only for a policy decision such
+ * as an SSRF refusal); every transport failure, timeout or non-2xx answer is retryable.
+ */
 export type DeliveryResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly error: string; readonly retryable: boolean };
 
+/** One signed POST of an outbox event to the merchant, bounded by the configured timeout as a whole. */
 export interface WebhookSender {
   send(message: OutboxMessage): Promise<DeliveryResult>;
 }
