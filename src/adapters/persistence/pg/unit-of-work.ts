@@ -357,7 +357,8 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
       },
       listSeen: async (network: NetworkId, limit: number) => {
         const { rows } = await db.query<CandidateRow>(
-          "SELECT * FROM tx_candidates WHERE network = $1 AND status = 'seen' ORDER BY seen_at, tx_hash LIMIT $2",
+          // Oldest transfers first, so a backlog never starves an older payment.
+          "SELECT * FROM tx_candidates WHERE network = $1 AND status = 'seen' ORDER BY block_time, tx_hash LIMIT $2",
           [network, limit],
         );
         return rows.map(toCandidate);

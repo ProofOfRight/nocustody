@@ -39,7 +39,7 @@ the domain does not change.
 - **Receiving addresses:** pinned in config with a checksum; never editable through an API.
 - **Observed transfer:** `TxRef`, from, to, asset, amount, block, finality, verification result and reason.
 - **Payment:** observed transfer ↔ invoice, classified as exact / under / over / late.
-- **Amount slot / memo reservation:** locks (address, amount) or a memo until `grace_until`.
+- **Amount slot / memo reservation:** locks (address, amount) until `grace_until`; a memo is reserved forever (never reused).
 
 ### Invoice lifecycle
 
@@ -61,8 +61,8 @@ overpayment handling, accepting late payments, TTL, grace, AML threshold) are co
 
 | Port | Purpose |
 |---|---|
-| `ChainAdapter` | `fetchIncoming` returns candidates from an indexer; `verify` checks finality, success, contract, recipient and amount against finalized state ([ADR-0009](adr/0009-independent-finality-check.md)) |
-| `PaymentInstructionStrategy` | allocates payment instructions (unique amount, memo, later xpub derivation / reference key) and matches transfers |
+| `ChainAdapter` | `fetchIncoming` returns candidate transactions from an indexer (an untrusted hint); `verify` re-reads finalized state and returns the transfers it contains, with their real log index / lt ([ADR-0009](adr/0009-independent-finality-check.md)). TRON: [testnet.md](testnet.md); TON: [ton-testnet.md](ton-testnet.md) |
+| `PaymentInstructionStrategy` | allocates payment instructions and matches transfers; chosen per asset in config: `unique-amount` (TRON) or `memo` (TON: memo first, unique amount as fallback); later xpub derivation / reference key |
 | `RateProvider` | quotes for fiat → asset; chained with priorities and fallback |
 | `AmlScreener` | screening verdict for a sender / transaction; `noop` by default |
 | `Clock` | current time, for deterministic tests |
@@ -82,6 +82,9 @@ Storage: PostgreSQL only ([ADR-0014](adr/0014-postgresql-only.md)); queues use `
 - All amounts are `bigint` in minimal units; comparison is **exact** (no prefix or rounded matching).
 - Unique amount strategy: base amount plus a configurable step (default 0.01 USDT) per slot on an address; when the
   slots run out, the next address of the pool is used.
+- Memo strategy (one wallet, TON): a memo from `node:crypto` without look-alike characters, unique per network
+  forever; a unique-amount slot is reserved too when one is free. A transfer with a known memo pays that invoice
+  (the amount may then be under/over); without a memo it must match a unique amount exactly.
 - A slot (address, amount) or memo stays locked until `expires_at + grace`, so a late payment cannot settle a newer
   invoice.
 - Underpayment and overpayment are separate statuses governed by policies; there is no "95% counts as paid" default.

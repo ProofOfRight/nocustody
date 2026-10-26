@@ -25,7 +25,7 @@ Non-goals: holding funds, signing transactions, payouts, refunds, sweeps, exchan
 | Network / asset | Status |
 |---|---|
 | USDT-TRC20 (TRON) | in development |
-| USDT jetton and GRAM (TON) | planned |
+| USDT jetton and GRAM (TON) | in development |
 | EVM, Solana, Bitcoin | later |
 
 ## Development
@@ -44,7 +44,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and rules.
 - [Architecture](docs/architecture.md)
 - [Security requirements](docs/security.md) and [threat model](docs/threat-model.md)
 - [Architecture decision records](docs/adr/README.md)
-- [Testing on TRON Nile](docs/testnet.md)
+- [Testing on TRON Nile](docs/testnet.md) and [on the TON testnet](docs/ton-testnet.md)
 - Reporting vulnerabilities: [SECURITY.md](SECURITY.md)
 
 ## License
