@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Merchant REST API on node:http (no framework, ADR-0025). Driving adapter: translates HTTP to use cases; no
 // business logic here. See docs/api.md and docs/api/openapi.yaml.
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { z } from "zod";
@@ -12,6 +12,8 @@ import type { QuotePrice } from "../../application/use-cases/quote-price.ts";
 import { DomainError } from "../../domain/errors.ts";
 import type { Invoice, InvoiceStatus } from "../../domain/invoice.ts";
 import { authenticate } from "./keys.ts";
+import { type Lang, pickLanguage } from "./page/i18n.ts";
+import { contentSecurityPolicy, NETWORK_NAMES, renderPaymentPage } from "./page/render.ts";
 
 export interface ApiDeps {
   readonly uow: UnitOfWork;
@@ -21,6 +23,8 @@ export interface ApiDeps {
   readonly clock: Clock;
   readonly rateLimitPerMinute: number;
   readonly onError?: (err: unknown) => void;
+  /** Hosted payment page at /pay/:id; null = disabled (headless only). */
+  readonly paymentPage?: { readonly defaultLanguage: Lang; readonly publicRateLimitPerMinute: number } | null;
 }
 
 /** Request bodies above this size are refused with 413. */
@@ -100,6 +104,7 @@ export function invoiceDto(inv: Invoice, adapters: readonly ChainAdapter[]) {
     },
     payment: {
       address: s.instructions.address.value,
+      address_display: adapter?.formatAddress?.(s.instructions.address) ?? s.instructions.address.value,
       amount: s.instructions.amount.toDecimalString(),
       amount_units: s.instructions.amount.units.toString(),
       memo: s.instructions.memo,
@@ -141,6 +146,8 @@ interface Request {
 interface Reply {
   readonly status: number;
   readonly body: unknown;
+  /** Set for non-JSON responses (the payment page); body is then a string. */
+  readonly html?: { readonly csp: string };
 }
 
 type Handler = (req: Request) => Promise<Reply>;
@@ -205,6 +212,7 @@ export class ApiServer {
   readonly #d: ApiDeps;
   readonly #routes: readonly Route[];
   readonly #buckets = new Map<string, { tokens: number; at: number }>();
+  #publicBucket = { tokens: 0, at: 0 };
 
   constructor(d: ApiDeps) {
     this.#d = d;
@@ -240,12 +248,15 @@ export class ApiServer {
     } catch (err) {
       reply = this.#error(err);
     }
-    const body = JSON.stringify(reply.body);
+    const body = reply.html ? String(reply.body) : JSON.stringify(reply.body);
     res.writeHead(reply.status, {
-      "content-type": "application/json; charset=utf-8",
+      "content-type": reply.html ? "text/html; charset=utf-8" : "application/json; charset=utf-8",
       "content-length": Buffer.byteLength(body),
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
+      "referrer-policy": "no-referrer",
+      "x-frame-options": "DENY",
+      ...(reply.html ? { "content-security-policy": reply.html.csp } : {}),
     });
     res.end(body);
   }
@@ -303,6 +314,30 @@ export class ApiServer {
     return key;
   }
 
+  #dto(inv: Invoice) {
+    const dto = invoiceDto(inv, this.#d.adapters);
+    const page = this.#d.paymentPage ? `/pay/${encodeURIComponent(inv.id)}` : null;
+    return { ...dto, payment: { ...dto.payment, page } };
+  }
+
+  /** One shared bucket for unauthenticated routes (behind a proxy all clients share an address anyway). */
+  #takePublic(limit: number): void {
+    const now = Date.now();
+    const b = this.#publicBucket;
+    if (b.at === 0) Object.assign(b, { tokens: limit, at: now });
+    b.tokens = Math.min(limit, b.tokens + ((now - b.at) / 60_000) * limit);
+    b.at = now;
+    if (b.tokens < 1) throw new HttpError(429, "rate_limited", "too many requests");
+    b.tokens -= 1;
+  }
+
+  async #publicInvoice(id: string): Promise<Invoice> {
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new HttpError(404, "not_found", "not found");
+    const inv = await this.#d.uow.run((r) => r.invoices.findById(id));
+    if (!inv) throw new HttpError(404, "not_found", "not found");
+    return inv;
+  }
+
   #error(err: unknown): Reply {
     const fail = (status: number, code: string, message: string) => ({
       status,
@@ -327,7 +362,55 @@ export class ApiServer {
       return r.data;
     };
 
+    const page = d.paymentPage ?? null;
+    const pageRoutes: Route[] = page
+      ? [
+          route("GET", "/pay/:id", null, async (req) => {
+            this.#takePublic(page.publicRateLimitPerMinute);
+            const inv = await this.#publicInvoice(req.params.id ?? "");
+            const s = inv.state;
+            const lang = pickLanguage(req.query.lang, req.headers["accept-language"], page.defaultLanguage);
+            const nonce = randomBytes(18).toString("base64");
+            const html = renderPaymentPage(
+              {
+                id: s.id,
+                status: s.status,
+                assetSymbol: s.asset.symbol,
+                networkName: NETWORK_NAMES[s.asset.network] ?? s.asset.network,
+                amount: s.instructions.amount.toDecimalString(),
+                address: (() => {
+                  const a = d.adapters.find((x) => x.network === s.asset.network);
+                  return a?.formatAddress?.(s.instructions.address) ?? s.instructions.address.value;
+                })(),
+                memo: s.instructions.memo,
+                uri:
+                  d.adapters.find((a) => a.network === s.asset.network)?.buildPaymentUri(s.instructions) ??
+                  null,
+                expiresAt: s.expiresAt.toISOString(),
+                statusUrl: `/pay/${encodeURIComponent(s.id)}/status`,
+              },
+              lang,
+              nonce,
+            );
+            return { status: 200, body: html, html: { csp: contentSecurityPolicy(nonce) } };
+          }),
+          // Public status for the page: no order id, no payments, no sender addresses.
+          route("GET", "/pay/:id/status", null, async (req) => {
+            this.#takePublic(page.publicRateLimitPerMinute);
+            const inv = await this.#publicInvoice(req.params.id ?? "");
+            const s = inv.state;
+            return ok({
+              status: s.status,
+              received: inv.received().toDecimalString(),
+              expires_at: s.expiresAt.toISOString(),
+              grace_until: s.graceUntil.toISOString(),
+            });
+          }),
+        ]
+      : [];
+
     return [
+      ...pageRoutes,
       route("GET", "/health", null, async () => ok({ status: "ok" })),
 
       route("POST", "/v1/invoices", "invoices:write", async (req) => {
@@ -354,7 +437,7 @@ export class ApiServer {
           }
           return r.invoices.findById(prev.invoiceId);
         });
-        if (replayed) return ok(invoiceDto(replayed, d.adapters));
+        if (replayed) return ok(this.#dto(replayed));
         const { invoice, created } = await d.createInvoice.execute({
           merchantOrderId: body.merchant_order_id,
           priceAmount: body.price.amount,
@@ -364,7 +447,7 @@ export class ApiServer {
         await d.uow
           .run((r) => r.idempotency.insert(key.id, idem, requestSha256, invoice.id))
           .catch(() => undefined); // a concurrent request with the same key stored it first; the invoice is the same
-        return ok(invoiceDto(invoice, d.adapters), created ? 201 : 200);
+        return ok(this.#dto(invoice), created ? 201 : 200);
       }),
 
       route("GET", "/v1/invoices/:id", "invoices:read", async (req) => {
@@ -372,7 +455,7 @@ export class ApiServer {
         if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new HttpError(404, "not_found", "invoice not found");
         const inv = await d.uow.run((r) => r.invoices.findById(id));
         if (!inv) throw new HttpError(404, "not_found", "invoice not found");
-        return ok(invoiceDto(inv, d.adapters));
+        return ok(this.#dto(inv));
       }),
 
       route("GET", "/v1/invoices", "invoices:read", async (req) => {
@@ -384,7 +467,7 @@ export class ApiServer {
             ...(q.since ? { since: new Date(q.since) } : {}),
           }),
         );
-        return ok({ data: list.map((i) => invoiceDto(i, d.adapters)) });
+        return ok({ data: list.map((i) => this.#dto(i)) });
       }),
 
       route("GET", "/v1/quotes", "quotes:read", async (req) => {

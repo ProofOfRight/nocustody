@@ -24,8 +24,9 @@ Requests are rate-limited per key (`api.rateLimitPerMinute`).
 same invoice; the same key with a different body is refused (`422 idempotency_mismatch`). `merchant_order_id` is
 unique as well: a second request for the same order returns the existing invoice.
 
-Show the payer `payment.address`, `payment.amount` (exact — the amount may include a small unique add-on) and, on
-TON, `payment.memo` as the transfer comment. `payment.uri` is a wallet deep link where one exists.
+Show the payer `payment.address_display`, `payment.amount` (exact — the amount may include a small unique add-on)
+and, on TON, `payment.memo` as the transfer comment. `payment.uri` is a wallet deep link where one exists. Or send
+the payer to the hosted page `payment.page` if it is enabled ([payment-page.md](payment-page.md)).
 
 ## Webhooks
 

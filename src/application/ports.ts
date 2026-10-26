@@ -88,6 +88,8 @@ export interface ChainAdapter {
     receiving: readonly ChainAddress[],
   ): Promise<VerificationResult>;
   buildPaymentUri(instructions: PaymentInstructions): string | null;
+  /** Form wallets expect when the address is shown to a payer (TON: user-friendly, non-bounceable). */
+  formatAddress?(address: ChainAddress): string;
 }
 
 /** Operator alert (Telegram, log, …). `key` groups repeats of the same condition. */

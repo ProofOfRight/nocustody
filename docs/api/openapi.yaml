@@ -190,9 +190,12 @@ components:
           type: object
           description: Show exactly these to the payer. The amount must be paid exactly; on TON include the memo as comment.
           properties:
-            address: { type: string }
+            address: { type: string, description: Canonical form (TON raw "0:…") }
+            address_display:
+              { type: string, description: "Form to show payers (TON user-friendly, non-bounceable)" }
             amount: { $ref: "#/components/schemas/Decimal" }
             amount_units: { type: string, description: Amount in minimal units }
+            page: { type: [string, "null"], description: "Path of the hosted payment page, when enabled" }
             memo: { type: [string, "null"] }
             uri:
               { type: [string, "null"], description: "Wallet deep link (ton://transfer/...) where supported" }

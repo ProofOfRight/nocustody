@@ -76,6 +76,10 @@ export class TonAdapter implements ChainAdapter {
     return chainAddress(this.network, parseTonAddress(raw));
   }
 
+  formatAddress(address: ChainAddress): string {
+    return friendlyTon(address.value, this.#testnet);
+  }
+
   buildPaymentUri(instr: PaymentInstructions): string | null {
     const asset = instr.amount.asset;
     const params = new URLSearchParams();

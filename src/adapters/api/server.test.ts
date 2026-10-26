@@ -52,7 +52,9 @@ async function client(api: ApiServer) {
 }
 const ADDR = chainAddress(TRON, "TAddrA111111111111111111111111111");
 
-async function setup(opts: { rateLimit?: number; failing?: boolean } = {}) {
+async function setup(
+  opts: { rateLimit?: number; failing?: boolean; page?: boolean; publicLimit?: number } = {},
+) {
   const store = new InMemoryStore();
   const settings: AssetSettings = {
     asset: USDT_TRON,
@@ -99,6 +101,9 @@ async function setup(opts: { rateLimit?: number; failing?: boolean } = {}) {
       adapters: [new FakeChain(TRON)],
       clock,
       rateLimitPerMinute: opts.rateLimit ?? 1_000,
+      paymentPage: opts.page
+        ? { defaultLanguage: "en", publicRateLimitPerMinute: opts.publicLimit ?? 1_000 }
+        : null,
       onError: (e) => errors.push(e),
     }),
   );
@@ -273,5 +278,46 @@ describe("merchant API", () => {
     for (let i = 0; i < 5; i++)
       codes.push((await app.inject({ url: "/v1/invoices", headers: auth() })).statusCode);
     expect(codes).toEqual([200, 200, 200, 429, 429]);
+  });
+});
+
+describe("hosted payment page", () => {
+  it("is disabled by default", async () => {
+    const { app, create } = await setup();
+    const id = (await create()).json().id;
+    expect((await app.inject({ url: `/pay/${id}` })).statusCode).toBe(404);
+  });
+
+  it("serves the page with a strict CSP whose nonce matches the inline script", async () => {
+    const { app, create } = await setup({ page: true });
+    const inv = (await create()).json();
+    expect(inv.payment.page).toBe(`/pay/${inv.id}`);
+    const r = await app.inject({ url: inv.payment.page, headers: { "accept-language": "fa" } });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    const csp = r.headers.get("content-security-policy") ?? "";
+    const nonce = /script-src 'nonce-([^']+)'/.exec(csp)?.[1];
+    expect(nonce).toBeTruthy();
+    expect(r.body).toContain(`<script nonce="${nonce}">`);
+    expect(r.body).toContain('dir="rtl"');
+    expect(r.headers.get("x-frame-options")).toBe("DENY");
+    const again = await app.inject({ url: inv.payment.page });
+    expect(again.headers.get("content-security-policy")).not.toBe(csp); // fresh nonce per response
+  });
+
+  it("public status reveals only status, received amount and deadlines", async () => {
+    const { app, create } = await setup({ page: true });
+    const id = (await create()).json().id;
+    const r = await app.inject({ url: `/pay/${id}/status` });
+    expect(Object.keys(r.json()).sort()).toEqual(["expires_at", "grace_until", "received", "status"]);
+    expect((await app.inject({ url: "/pay/nope/status" })).statusCode).toBe(404);
+  });
+
+  it("public routes are rate-limited", async () => {
+    const { app, create } = await setup({ page: true, publicLimit: 2 });
+    const id = (await create()).json().id;
+    const codes = [];
+    for (let i = 0; i < 4; i++) codes.push((await app.inject({ url: `/pay/${id}/status` })).statusCode);
+    expect(codes).toEqual([200, 200, 429, 429]);
   });
 });

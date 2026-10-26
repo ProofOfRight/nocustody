@@ -32,3 +32,5 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0023](0023-mpl-for-dev-dependencies.md) | 2026-10-26 | MPL-2.0 allowed for dev-only dependencies | accepted |
 | [0024](0024-unlicense-allowed.md) | 2026-10-26 | Unlicense allowed; TON libraries `@ton/core` and `@ton/crypto` | accepted |
 | [0025](0025-http-api-on-node-http.md) | 2026-10-26 | HTTP API on node:http without a framework | accepted |
+| [0026](0026-qr-code-library.md) | 2026-10-26 | qrcode-generator for QR codes | accepted |
+| [0027](0027-hosted-payment-page.md) | 2026-10-26 | Hosted payment page without external resources | accepted |
