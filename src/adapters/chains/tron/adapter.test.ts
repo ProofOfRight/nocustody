@@ -240,8 +240,8 @@ describe("verify (solidified truth)", () => {
     expect(r.status === "final" && r.transfers[0]?.amount.units).toBe(1n);
   });
 
-  it("rejects an answer about another transaction and ignores malformed topics", async () => {
-    expect((await verifyWith(receipt((x) => (x.id = "0".repeat(64))))).status).toBe("rejected");
+  it("an answer about another transaction is a provider fault (pending, retried), never a decision; malformed topics are ignored", async () => {
+    expect((await verifyWith(receipt((x) => (x.id = "0".repeat(64))))).status).toBe("pending");
     const r = await verifyWith(
       receipt((x) => (x.log = x.log.map((l) => ({ ...l, topics: (l.topics as string[]).slice(0, 2) })))),
     );

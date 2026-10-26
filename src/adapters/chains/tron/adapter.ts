@@ -123,8 +123,10 @@ export class TronAdapter implements ChainAdapter {
       solidTxInfoSchema,
     );
     if (!("id" in info)) return { status: "pending", reason: "not solidified yet" };
+    // A provider (or a cache in front of it) answering about another transaction is a provider fault, not a fact
+    // about the candidate: it stays pending and is retried, never rejected for good.
     if (info.id.toLowerCase() !== candidate.txHash)
-      return { status: "rejected", reason: "response for another tx" };
+      return { status: "pending", reason: "provider answered about another transaction" };
     if (info.result !== undefined && info.result !== "SUCCESS") {
       return { status: "rejected", reason: `transaction result ${info.result}` };
     }
