@@ -2,7 +2,7 @@
 # All targets run inside the docker compose `dev` service; see compose.yaml.
 RUN := docker compose run --rm dev
 
-.PHONY: up down shell install lint format typecheck test check build db-migrate e2e-nile e2e-ton e2e-api e2e-ops php-selftest
+.PHONY: up down shell install lint format typecheck test check build image smoke-image db-migrate e2e-nile e2e-ton e2e-api e2e-ops php-selftest
 
 up:            ## start PostgreSQL
 	docker compose up -d --wait postgres
@@ -24,6 +24,10 @@ check:         ## everything CI runs: lint, typecheck, layers, licenses, SPDX, t
 	$(RUN) npm run check
 build:
 	$(RUN) npm run build
+image:         ## production image nocustody:dev, see docs/deployment.md
+	docker build -t nocustody:dev .
+smoke-image:   ## production image with deploy/compose.yaml: migrations, API, page, non-root, read-only
+	sh scripts/smoke-image.sh
 db-migrate:
 	$(RUN) npm run db:migrate
 e2e-nile:      ## end-to-end scenario on TRON Nile testnet (manual payment), see docs/testnet.md
