@@ -45,7 +45,7 @@ git checkout vX.Y.Z
 export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
 docker buildx create --name repro --driver docker-container \
   --driver-opt image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c
-docker buildx build --builder repro --platform linux/amd64,linux/arm64 \
+docker buildx build --no-cache --builder repro --platform linux/amd64,linux/arm64 \
   --build-arg SOURCE_DATE_EPOCH --build-arg VERSION=X.Y.Z --build-arg REVISION=$(git rev-parse HEAD) \
   --label org.opencontainers.image.source=https://github.com/<owner>/nocustody \
   --provenance=false --sbom=false \
@@ -53,4 +53,6 @@ docker buildx build --builder repro --platform linux/amd64,linux/arm64 \
 jq -r '."containerimage.digest"' metadata.json   # must equal the released digest
 ```
 
-Use the BuildKit version from the release workflow of that tag.
+Use the BuildKit version from the release workflow of that tag. Keep `--no-cache` when the builder has built
+anything before: `rewrite-timestamp` only lowers file times newer than `SOURCE_DATE_EPOCH`, so a layer taken from the
+cache of an earlier build keeps its older times and the digest differs, although the files are the same.
