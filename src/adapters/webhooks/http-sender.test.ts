@@ -19,6 +19,7 @@ const message: OutboxMessage = {
 
 let received: Array<{ headers: IncomingMessage["headers"]; body: string }> = [];
 let status = 200;
+let responseBody = "ok";
 const server = createServer((req, res) => {
   let body = "";
   req.on("data", (c) => {
@@ -27,7 +28,7 @@ const server = createServer((req, res) => {
   req.on("end", () => {
     received.push({ headers: req.headers, body });
     res.statusCode = status;
-    res.end("ok");
+    res.end(responseBody);
   });
 });
 let url = "";
@@ -75,6 +76,19 @@ describe("webhook sender", () => {
     status = 302;
     expect((await sender().send(message)).ok).toBe(false); // redirects are not followed
     status = 200;
+  });
+
+  it("an oversized response body is cut off and still yields a result", async () => {
+    responseBody = "x".repeat(300_000);
+    try {
+      status = 200;
+      expect(await sender().send(message)).toEqual({ ok: true });
+      status = 503;
+      expect(await sender().send(message)).toEqual({ ok: false, error: "HTTP 503", retryable: true });
+    } finally {
+      responseBody = "ok";
+      status = 200;
+    }
   });
 
   it("SSRF: private and special addresses are refused unless explicitly allowed", async () => {

@@ -122,19 +122,25 @@ export class HttpWebhookSender implements WebhookSender {
           timeout: this.#o.timeoutMs,
         },
         (res) => {
-          let read = 0;
-          res.on("data", (chunk: Buffer) => {
-            read += chunk.length;
-            if (read > 65_536) res.destroy();
-          });
-          res.on("end", () => {
+          // The status line decides; the body is drained only to free the socket and is capped. A destroyed
+          // response emits neither "end" nor "error", so the result is resolved before destroying it.
+          const settle = () => {
             const status = res.statusCode ?? 0;
             resolve(
               status >= 200 && status < 300
                 ? { ok: true }
                 : { ok: false, error: `HTTP ${status}`, retryable: true },
             );
+          };
+          let read = 0;
+          res.on("data", (chunk: Buffer) => {
+            read += chunk.length;
+            if (read > 65_536) {
+              settle();
+              res.destroy();
+            }
           });
+          res.on("end", settle);
           res.on("error", () => resolve({ ok: false, error: "response error", retryable: true }));
         },
       );

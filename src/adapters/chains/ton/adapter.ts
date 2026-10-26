@@ -24,6 +24,7 @@ import { Money } from "../../../domain/money.ts";
 import type { NetworkId } from "../../../domain/network.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
 import type { JsonHttpClient } from "../../http/json-client.ts";
+import { parseTimeCursor, type TimeCursor } from "../cursor.ts";
 import { canonicalTon, friendlyTon, parseTonAddress } from "./address.ts";
 import { OP_INTERNAL_TRANSFER, parseInternalTransfer, parsePlainComment } from "./payload.ts";
 import { isFinalized, runGetMethodSchema, type TonTransaction, tonTransactionsSchema } from "./schemas.ts";
@@ -38,7 +39,7 @@ export interface TonAdapterOptions {
   readonly maxPagesPerAddress?: number;
 }
 
-type Cursor = Record<string, number>; // scanned account (wallet or jetton-wallet) → last seen utime (seconds)
+type Cursor = TimeCursor; // scanned account (wallet or jetton-wallet) → last seen utime (seconds)
 
 const opcode = (n: number) => `0x${n.toString(16).padStart(8, "0")}`;
 const b64ToHex = (b64: string) => Buffer.from(b64, "base64").toString("hex");
@@ -123,7 +124,7 @@ export class TonAdapter implements ChainAdapter {
     limit: number,
   ): Promise<FetchResult> {
     if (!this.supports(asset)) throw new Error(`asset ${asset.id} is not supported by the TON adapter`);
-    const state = parseCursor(cursor);
+    const state = parseTimeCursor(cursor, "TON");
     const next: Cursor = { ...state };
     const out: TransferCandidate[] = [];
     const pageSize = Math.min(256, Math.max(1, limit));
@@ -257,14 +258,4 @@ export class TonAdapter implements ChainAdapter {
       ],
     };
   }
-}
-
-function parseCursor(cursor: string | null): Cursor {
-  if (!cursor) return {};
-  const parsed: unknown = JSON.parse(cursor);
-  if (typeof parsed !== "object" || parsed === null) throw new Error("invalid TON cursor");
-  const out: Cursor = {};
-  for (const [k, v] of Object.entries(parsed))
-    if (typeof v === "number" && Number.isSafeInteger(v)) out[k] = v;
-  return out;
 }

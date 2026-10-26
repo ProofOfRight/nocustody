@@ -14,6 +14,8 @@ export interface SettleStats {
   completed: number;
   held: number;
   amlDeferred: number;
+  /** Transfers or screenings that failed with an unexpected error; left as they are and retried next cycle. */
+  errors: number;
 }
 
 const SCREENABLE = new Set(["paid", "overpaid", "paid_late"]);
@@ -30,6 +32,8 @@ export interface SettlePaymentsDeps {
   readonly uow: UnitOfWork;
   readonly clock: Clock;
   readonly batchSize: number;
+  /** Called for an unexpected error on one transfer or invoice; the batch goes on with the next one. */
+  readonly onError?: (subject: string, error: unknown) => void;
 }
 
 export class SettlePayments {
@@ -41,15 +45,21 @@ export class SettlePayments {
 
   async execute(): Promise<SettleStats> {
     const { network, uow, batchSize } = this.#deps;
-    const stats: SettleStats = { matched: 0, unmatched: 0, completed: 0, held: 0, amlDeferred: 0 };
+    const stats: SettleStats = { matched: 0, unmatched: 0, completed: 0, held: 0, amlDeferred: 0, errors: 0 };
     const verified = await uow.run((r) => r.transfers.listVerified(network, batchSize));
     for (const t of verified) {
       try {
-        await uow.run((repos) => this.#settleOne(repos, t.transfer, stats));
+        try {
+          await uow.run((repos) => this.#settleOne(repos, t.transfer, stats));
+        } catch (e) {
+          // Another process changed the invoice between read and write: re-read and apply once more.
+          if (!(e instanceof ConcurrencyError)) throw e;
+          await uow.run((repos) => this.#settleOne(repos, t.transfer, stats));
+        }
       } catch (e) {
-        // Another process changed the invoice between read and write: re-read and apply once more.
-        if (!(e instanceof ConcurrencyError)) throw e;
-        await uow.run((repos) => this.#settleOne(repos, t.transfer, stats));
+        // One failing transfer must not block the ones behind it; it stays "verified" and is retried next cycle.
+        stats.errors++;
+        this.#deps.onError?.(txRefKey(t.transfer.ref), e);
       }
     }
     await this.#screen(stats);
@@ -117,16 +127,23 @@ export class SettlePayments {
       const verdicts = [];
       const threshold = this.#deps.catalog.get(inv.state.asset.id).amlThresholdUnits;
       const belowThreshold = inv.received().units < threshold;
-      for (const p of belowThreshold ? [] : payments) {
-        const [txHash = "", index = "0"] = p.transferKey.split("/").slice(-2);
-        verdicts.push(
-          await aml.screen({
-            network: inv.state.asset.network,
-            from: p.from,
-            txRef: { network: inv.state.asset.network, txHash, index: BigInt(index) },
-            amount: p.amount,
-          }),
-        );
+      try {
+        for (const p of belowThreshold ? [] : payments) {
+          const [txHash = "", index = "0"] = p.transferKey.split("/").slice(-2);
+          verdicts.push(
+            await aml.screen({
+              network: inv.state.asset.network,
+              from: p.from,
+              txRef: { network: inv.state.asset.network, txHash, index: BigInt(index) },
+              amount: p.amount,
+            }),
+          );
+        }
+      } catch (e) {
+        // A throwing screener is "unavailable" for this invoice: it stays aml_pending and is retried next cycle.
+        stats.errors++;
+        this.#deps.onError?.(inv.id, e);
+        continue;
       }
       const hold = verdicts.find((v) => v.verdict === "hold");
       if (!hold && verdicts.some((v) => v.verdict === "unavailable")) {

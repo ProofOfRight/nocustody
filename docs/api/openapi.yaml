@@ -132,7 +132,7 @@ components:
                     type: string
                     description: |
                       Stable machine code, e.g. unauthorized, forbidden, invalid_request, idempotency_key_required,
-                      idempotency_mismatch, rate_limited, not_found, asset.unknown, pricing.currency_disabled,
+                      idempotency_mismatch, invoice.order_mismatch, rate_limited, not_found, asset.unknown, pricing.currency_disabled,
                       pricing.no_rate, allocation.no_free_slot, integrity.pin_violation, decimal.precision, internal.
                   message: { type: string }
   schemas:

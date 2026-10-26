@@ -116,7 +116,7 @@ export class InMemoryStore implements UnitOfWork {
         },
         insert: async (inv) => {
           if ([...d().invoices.values()].some((x) => x.merchantOrderId === inv.state.merchantOrderId)) {
-            throw new Error("duplicate merchant order id");
+            throw new ConcurrencyError(`merchant order ${inv.state.merchantOrderId} already has an invoice`);
           }
           d().invoices.set(inv.id, inv.state);
         },

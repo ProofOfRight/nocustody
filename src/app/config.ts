@@ -11,7 +11,7 @@ import { defineAsset } from "../domain/asset.ts";
 import type { ChainAddress } from "../domain/chain-address.ts";
 import { isIsoCurrency } from "../domain/currency.ts";
 import { parseDecimal } from "../domain/decimal.ts";
-import { type NetworkId, networkId } from "../domain/network.ts";
+import { type NetworkId, networkFamily, networkId } from "../domain/network.ts";
 import { parseDuration } from "./duration.ts";
 
 const decimal = z.string().regex(/^(0|[1-9]\d*)(\.\d+)?$/, "non-negative decimal string");
@@ -256,7 +256,7 @@ export function parseConfig(json: unknown, validators: AddressValidators): Confi
     if (ids.has(a.id)) throw new ConfigError(`duplicate asset id ${a.id}`);
     ids.add(a.id);
     const network = networkId(a.network);
-    const validate = validators.get(network.slice(0, network.indexOf(":")));
+    const validate = validators.get(networkFamily(network));
     if (!validate) throw new ConfigError(`no adapter for network ${network}`);
     const asset = defineAsset({
       id: a.id,

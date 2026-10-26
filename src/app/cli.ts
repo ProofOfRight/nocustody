@@ -253,9 +253,11 @@ async function main(argv: string[]): Promise<void> {
     }
     case "run": {
       const { values } = parseArgs({ args: rest, options: { roles: { type: "string" } } });
-      const roles = new Set((values.roles ?? "api,worker,dispatcher").split(",").map((x) => x.trim()));
+      const roles = new Set(
+        (values.roles ?? "api,worker,dispatcher,monitor").split(",").map((x) => x.trim()),
+      );
       for (const r of roles)
-        if (!["api", "worker", "dispatcher"].includes(r)) throw new Error(`unknown role ${r}`);
+        if (!["api", "worker", "dispatcher", "monitor"].includes(r)) throw new Error(`unknown role ${r}`);
       const { config, container } = await start();
       let stopping = false;
       const loops: Promise<void>[] = [];

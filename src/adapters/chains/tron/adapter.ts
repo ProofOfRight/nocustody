@@ -16,6 +16,7 @@ import { Money } from "../../../domain/money.ts";
 import type { NetworkId } from "../../../domain/network.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
 import type { JsonHttpClient } from "../../http/json-client.ts";
+import { parseTimeCursor, type TimeCursor } from "../cursor.ts";
 import { parseTronAddress, tronAddressFromHex, tronAddressToHex20 } from "./address.ts";
 import { solidTxInfoSchema, trc20HistorySchema } from "./schemas.ts";
 
@@ -34,7 +35,7 @@ export interface TronAdapterOptions {
 }
 
 /** Cursor: last seen block timestamp (ms) per receiving address. */
-type Cursor = Record<string, number>;
+type Cursor = TimeCursor;
 
 export class TronAdapter implements ChainAdapter {
   readonly network: NetworkId;
@@ -66,7 +67,7 @@ export class TronAdapter implements ChainAdapter {
     limit: number,
   ): Promise<FetchResult> {
     const contract = this.#contract(asset);
-    const state = parseCursor(cursor);
+    const state = parseTimeCursor(cursor, "TRON");
     const next: Cursor = { ...state };
     const out: TransferCandidate[] = [];
     const seen = new Set<string>();
@@ -158,14 +159,4 @@ export class TronAdapter implements ChainAdapter {
       throw new Error(`asset ${asset.id} is not a TRC20 token here`);
     return asset.contract;
   }
-}
-
-function parseCursor(cursor: string | null): Cursor {
-  if (!cursor) return {};
-  const parsed: unknown = JSON.parse(cursor);
-  if (typeof parsed !== "object" || parsed === null) throw new Error("invalid TRON cursor");
-  const out: Cursor = {};
-  for (const [k, v] of Object.entries(parsed))
-    if (typeof v === "number" && Number.isSafeInteger(v)) out[k] = v;
-  return out;
 }

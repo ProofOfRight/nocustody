@@ -32,10 +32,7 @@ const pool = new pg.Pool({ connectionString: url, max: 5 });
 const MIN = 60_000;
 const ADDR = chainAddress(TRON, "TAddrA111111111111111111111111111");
 const usdt = (d: string) => Money.parse(USDT_TRON, d);
-const assets = (id: string) => {
-  if (id !== USDT_TRON.id) throw new Error(`unknown asset ${id}`);
-  return USDT_TRON;
-};
+const assets = new Map([[USDT_TRON.id, USDT_TRON]]);
 
 async function resetSchema(): Promise<void> {
   await pool.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");

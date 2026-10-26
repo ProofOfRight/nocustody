@@ -80,6 +80,7 @@ const APP_ERRORS: Readonly<Record<string, number>> = {
   "asset.unknown": 422,
   "pricing.currency_disabled": 422,
   "invoice.zero_amount": 422,
+  "invoice.order_mismatch": 409,
   "pricing.no_rate": 503,
   "pricing.depeg_block": 503,
   "allocation.no_free_slot": 503,
@@ -281,7 +282,11 @@ export class ApiServer {
     }
     const params: Record<string, string> = {};
     found.route.params.forEach((name, i) => {
-      params[name] = decodeURIComponent(found.match[i + 1] ?? "");
+      try {
+        params[name] = decodeURIComponent(found.match[i + 1] ?? "");
+      } catch {
+        throw new HttpError(400, "invalid_request", `malformed path parameter ${name}`);
+      }
     });
     const req: Request = {
       method,
@@ -299,7 +304,13 @@ export class ApiServer {
   async #authorize(req: Request, scope: ApiScope): Promise<ApiKeyRecord> {
     const header = req.headers.authorization ?? "";
     const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-    const key = token ? await this.#d.uow.run((r) => authenticate(token, r.apiKeys)) : null;
+    const key = token
+      ? await this.#d.uow.run(async (r) => {
+          const k = await authenticate(token, r.apiKeys);
+          if (k) await r.apiKeys.touch(k.id, this.#d.clock.now());
+          return k;
+        })
+      : null;
     if (!key) throw new HttpError(401, "unauthorized", "missing or invalid API key");
     if (!key.scopes.includes(scope)) throw new HttpError(403, "forbidden", `the key lacks scope ${scope}`);
     // Token bucket per key.

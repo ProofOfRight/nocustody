@@ -41,7 +41,7 @@ import { ResolveAmlHold } from "../application/use-cases/resolve-aml-hold.ts";
 import { SettlePayments } from "../application/use-cases/settle-payments.ts";
 import { VerifyTransfers } from "../application/use-cases/verify-transfers.ts";
 import { chainAddress } from "../domain/chain-address.ts";
-import type { NetworkId } from "../domain/network.ts";
+import { type NetworkId, networkFamily } from "../domain/network.ts";
 import type { AddressValidators, Config } from "./config.ts";
 import { parseDuration } from "./duration.ts";
 import { logger } from "./logger.ts";
@@ -75,12 +75,9 @@ export function buildContainer(o: ContainerOptions) {
   const clock = o.clock ?? systemClock;
   const pool = new pg.Pool({ connectionString: o.databaseUrl, max: 10 });
   const catalog = new AssetCatalog(o.config.assets);
-  const assetById = new Map(o.config.assets.map((s) => [s.asset.id, s.asset]));
-  const uow = new PgUnitOfWork(pool, (id) => {
-    const a = assetById.get(id);
-    if (!a) throw new Error(`asset ${id} is stored in the database but not configured`);
-    return a;
-  });
+  const uow = new PgUnitOfWork(pool, new Map(o.config.assets.map((s) => [s.asset.id, s.asset])));
+  const onSettleError = (subject: string, err: unknown) =>
+    logger.error({ subject, err: err instanceof Error ? err.message : String(err) }, "settlement failed");
   const uniqueAmount = new UniqueAmountStrategy();
   const memo = new MemoStrategy(o.memos ?? cryptoMemos);
   const strategies: StrategyResolver = (s) => (s.strategy === "memo" ? memo : uniqueAmount);
@@ -147,6 +144,7 @@ export function buildContainer(o: ContainerOptions) {
         uow,
         clock,
         batchSize: 100,
+        onError: onSettleError,
       }),
       pollIntervalMs: parseDuration(tron.pollInterval),
     });
@@ -193,7 +191,16 @@ export function buildContainer(o: ContainerOptions) {
       adapter,
       ingest: new IngestTransfers({ adapter, catalog, strategies, uow, clock, pageSize: 100, maxPages: 5 }),
       verify: new VerifyTransfers({ adapter, catalog, uow, clock, batchSize: 50, maxPendingMs, alerts }),
-      settle: new SettlePayments({ network, catalog, strategies, aml, uow, clock, batchSize: 100 }),
+      settle: new SettlePayments({
+        network,
+        catalog,
+        strategies,
+        aml,
+        uow,
+        clock,
+        batchSize: 100,
+        onError: onSettleError,
+      }),
       pollIntervalMs: parseDuration(ton.pollInterval),
     });
   }
@@ -230,10 +237,11 @@ export function buildContainer(o: ContainerOptions) {
   const lagDefaults: Readonly<Record<string, string>> = { tron: "5m", ton: "2m" };
   const maxScannerLagMs = new Map<NetworkId, number>(
     workers.map((w) => {
-      const family = w.adapter.network.slice(0, w.adapter.network.indexOf(":"));
       return [
         w.adapter.network,
-        parseDuration(ops.maxScannerLag[w.adapter.network] ?? lagDefaults[family] ?? "5m"),
+        parseDuration(
+          ops.maxScannerLag[w.adapter.network] ?? lagDefaults[networkFamily(w.adapter.network)] ?? "5m",
+        ),
       ];
     }),
   );

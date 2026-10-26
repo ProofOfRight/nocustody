@@ -172,10 +172,42 @@ describe("CreateInvoice", () => {
     const b = await s.order("o2");
     expect(a.invoice.state.instructions.amount.toDecimalString()).toBe("10.010000");
     expect(b.invoice.state.instructions.amount.toDecimalString()).toBe("10.020000");
-    const again = await s.order("o1", "999");
+    const again = await s.order("o1", "10.00");
     expect(again.created).toBe(false);
     expect(again.invoice.id).toBe(a.invoice.id);
     expect(s.store.data.outbox.map((e) => e.type)).toEqual(["invoice.created", "invoice.created"]);
+  });
+
+  it("refuses the same merchant order with another price, currency or asset", async () => {
+    const s = setup();
+    await s.order("o1");
+    expect(await errCode(s.order("o1", "999"))).toBe("invoice.order_mismatch");
+    expect(await errCode(s.order("o1", "10", "JPY"))).toBe("invoice.order_mismatch");
+    // Priced in the asset itself: the invoice amount is base + unique-amount step, which still counts as the same.
+    const direct = await s.order("o2", "10", "USDT");
+    expect(direct.invoice.state.price).toBeNull();
+    expect((await s.order("o2", "10", "USDT")).created).toBe(false);
+    expect(await errCode(s.order("o2", "11", "USDT"))).toBe("invoice.order_mismatch");
+  });
+
+  it("a concurrent create for the same order answers with the invoice that won", async () => {
+    const s = setup();
+    const first = await s.order("o1");
+    // Simulate the race: the duplicate check passes, the insert then hits the unique constraint.
+    const run = s.store.run.bind(s.store);
+    let armed = true;
+    s.store.run = async (work) =>
+      run(async (repos) => {
+        if (!armed) return work(repos);
+        armed = false;
+        return work({
+          ...repos,
+          invoices: { ...repos.invoices, findByMerchantOrderId: async () => null },
+        });
+      });
+    const again = await s.order("o1");
+    expect(again.created).toBe(false);
+    expect(again.invoice.id).toBe(first.invoice.id);
   });
 
   it("locks the rate, source and cross-rate path", async () => {

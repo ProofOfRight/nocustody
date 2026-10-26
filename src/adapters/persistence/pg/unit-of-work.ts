@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Pool, PoolClient } from "pg";
-import { ConcurrencyError } from "../../../application/errors.ts";
+import { ApplicationError, ConcurrencyError } from "../../../application/errors.ts";
 import type {
   ApiKeyRecord,
   ApiScope,
@@ -23,8 +23,11 @@ import { Money } from "../../../domain/money.ts";
 import type { NetworkId } from "../../../domain/network.ts";
 import { type TxRef, txRef } from "../../../domain/tx-ref.ts";
 
-/** Resolves stored asset ids to assets from the pinned config; an unknown id is a hard error. */
-export type AssetResolver = (assetId: string) => Asset;
+/**
+ * Assets from the pinned config by stored id. Rows whose asset id is no longer configured can never be processed:
+ * they are left out of every batch (so one stale row cannot wedge a pipeline) and are an error when loaded by id.
+ */
+export type AssetResolver = ReadonlyMap<string, Asset>;
 
 /** PostgreSQL unit of work: one transaction per `run`, repositories bound to its connection. */
 export class PgUnitOfWork implements UnitOfWork {
@@ -53,6 +56,12 @@ export class PgUnitOfWork implements UnitOfWork {
 }
 
 const units = (v: string | bigint): bigint => BigInt(v);
+
+const isUniqueViolation = (e: unknown, constraint: string): boolean =>
+  typeof e === "object" &&
+  e !== null &&
+  (e as { code?: unknown }).code === "23505" &&
+  (e as { constraint?: unknown }).constraint === constraint;
 
 interface InvoiceRow {
   id: string;
@@ -109,7 +118,14 @@ interface TransferRow {
   reason: string | null;
 }
 
-function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
+function repositories(db: PoolClient, assets: AssetResolver): Repositories {
+  const assetIds = [...assets.keys()];
+  const assetOf = (id: string): Asset => {
+    const a = assets.get(id);
+    if (!a)
+      throw new ApplicationError("asset.unknown", `asset ${id} is stored in the database but not configured`);
+    return a;
+  };
   const toInvoice = (r: InvoiceRow, payments: PaymentRow[]): Invoice => {
     const asset = assetOf(r.asset_id);
     const network = r.network as NetworkId;
@@ -231,28 +247,35 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
       findByMerchantOrderId: async (oid) => (await loadInvoices("merchant_order_id = $1", [oid]))[0] ?? null,
       insert: async (inv) => {
         const s = inv.state;
-        await db.query(
-          `INSERT INTO invoices (id, merchant_order_id, network, asset_id, expected_units, pay_address,
-             pay_amount_units, memo, price, created_at, expires_at, grace_until, status, aml_reason, version)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-          [
-            s.id,
-            s.merchantOrderId,
-            s.asset.network,
-            s.asset.id,
-            s.expected.units.toString(),
-            s.instructions.address.value,
-            s.instructions.amount.units.toString(),
-            s.instructions.memo,
-            priceJson(s.price),
-            s.createdAt,
-            s.expiresAt,
-            s.graceUntil,
-            s.status,
-            s.amlReason,
-            s.version,
-          ],
-        );
+        try {
+          await db.query(
+            `INSERT INTO invoices (id, merchant_order_id, network, asset_id, expected_units, pay_address,
+               pay_amount_units, memo, price, created_at, expires_at, grace_until, status, aml_reason, version)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+            [
+              s.id,
+              s.merchantOrderId,
+              s.asset.network,
+              s.asset.id,
+              s.expected.units.toString(),
+              s.instructions.address.value,
+              s.instructions.amount.units.toString(),
+              s.instructions.memo,
+              priceJson(s.price),
+              s.createdAt,
+              s.expiresAt,
+              s.graceUntil,
+              s.status,
+              s.amlReason,
+              s.version,
+            ],
+          );
+        } catch (e) {
+          // A concurrent request created the invoice for this order first; the caller re-reads it.
+          if (isUniqueViolation(e, "invoices_merchant_order_id_key"))
+            throw new ConcurrencyError(`merchant order ${s.merchantOrderId} already has an invoice`);
+          throw e;
+        }
         await savePayments(inv);
       },
       update: async (inv) => {
@@ -267,15 +290,21 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
       },
       listExpirable: (now, limit) =>
         loadInvoices(
-          "status IN ('awaiting_payment', 'confirming') AND expires_at <= $1 ORDER BY expires_at LIMIT $2",
-          [now, limit],
+          `status IN ('awaiting_payment', 'confirming') AND expires_at <= $1 AND asset_id = ANY($3::text[])
+           ORDER BY expires_at LIMIT $2`,
+          [now, limit, assetIds],
         ),
       listByStatus: (status, limit) =>
-        loadInvoices("status = $1 ORDER BY updated_at LIMIT $2", [status, limit]),
+        loadInvoices("status = $1 AND asset_id = ANY($3::text[]) ORDER BY updated_at LIMIT $2", [
+          status,
+          limit,
+          assetIds,
+        ]),
       search: ({ status, since, limit }) =>
         loadInvoices(
-          "($1::text IS NULL OR status = $1) AND ($2::timestamptz IS NULL OR created_at >= $2) ORDER BY created_at DESC, id LIMIT $3",
-          [status ?? null, since ?? null, limit],
+          `($1::text IS NULL OR status = $1) AND ($2::timestamptz IS NULL OR created_at >= $2)
+           AND asset_id = ANY($4::text[]) ORDER BY created_at DESC, id LIMIT $3`,
+          [status ?? null, since ?? null, limit, assetIds],
         ),
     },
 
@@ -365,8 +394,9 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
       listSeen: async (network: NetworkId, limit: number) => {
         const { rows } = await db.query<CandidateRow>(
           // Oldest transfers first, so a backlog never starves an older payment.
-          "SELECT * FROM tx_candidates WHERE network = $1 AND status = 'seen' ORDER BY block_time, tx_hash LIMIT $2",
-          [network, limit],
+          `SELECT * FROM tx_candidates WHERE network = $1 AND status = 'seen' AND asset_id = ANY($3::text[])
+           ORDER BY block_time, tx_hash LIMIT $2`,
+          [network, limit, assetIds],
         );
         return rows.map(toCandidate);
       },
@@ -411,9 +441,9 @@ function repositories(db: PoolClient, assetOf: AssetResolver): Repositories {
       },
       listVerified: async (network: NetworkId, limit: number) => {
         const { rows } = await db.query<TransferRow>(
-          `SELECT * FROM observed_transfers WHERE network = $1 AND status = 'verified'
+          `SELECT * FROM observed_transfers WHERE network = $1 AND status = 'verified' AND asset_id = ANY($3::text[])
            ORDER BY created_at, tx_hash, log_index LIMIT $2`,
-          [network, limit],
+          [network, limit, assetIds],
         );
         return rows.map(toTransfer);
       },
