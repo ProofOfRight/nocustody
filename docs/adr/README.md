@@ -34,3 +34,4 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0025](0025-http-api-on-node-http.md) | 2026-10-26 | HTTP API on node:http without a framework | accepted |
 | [0026](0026-qr-code-library.md) | 2026-10-26 | qrcode-generator for QR codes | accepted |
 | [0027](0027-hosted-payment-page.md) | 2026-10-26 | Hosted payment page without external resources | accepted |
+| [0028](0028-container-image.md) | 2026-10-26 | Production container image from scratch with the official Node binary | accepted |

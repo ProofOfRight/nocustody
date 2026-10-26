@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Allowlist: the build context holds only what the image needs. Everything else (.git, internal-docs/,
+# CLAUDE.local.md, .env, node_modules/, .cache/) never reaches the builder.
+*
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.build.json
+!src/
+!LICENSE
+!NOTICE

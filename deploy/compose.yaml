@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: Apache-2.0
+# Example production deployment: PostgreSQL, a one-shot migration and the gateway with all roles in one process.
+# See docs/deployment.md. Copy this directory next to your config.json and .env (from .env.example).
+# Pin the image by digest after verifying its attestations (docs/deployment.md#verify-the-image).
+name: nocustody
+
+x-gateway: &gateway
+  image: "${NOCUSTODY_IMAGE:?set NOCUSTODY_IMAGE in .env}"
+  user: "65532:65532"
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 128
+  mem_limit: 512m
+  # Secrets and provider keys (NOCUSTODY_PINNED_SHA256, every *Env name used in config.json); see .env.example.
+  env_file: [.env]
+  environment:
+    NOCUSTODY_CONFIG: /etc/nocustody/config.json
+    DATABASE_URL: postgres://nocustody:${POSTGRES_PASSWORD:?}@postgres:5432/nocustody
+  volumes:
+    - ./config.json:/etc/nocustody/config.json:ro
+  networks: [db, egress]
+
+services:
+  postgres:
+    image: postgres:18.6-alpine3.24@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nocustody
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+      POSTGRES_DB: nocustody
+    volumes:
+      - pgdata:/var/lib/postgresql
+    networks: [db]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nocustody -d nocustody"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *gateway
+    command: ["db:migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gateway:
+    <<: *gateway
+    command: ["run"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # The API must stay behind a TLS reverse proxy: publish on loopback only.
+    ports:
+      - "127.0.0.1:${NOCUSTODY_PORT:-8080}:8080"
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/node
+        - -e
+        - "fetch('http://127.0.0.1:8080/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  # The database is reachable only from the gateway containers.
+  db:
+    internal: true
+  # Outbound HTTPS to blockchain and rate providers, webhooks to the merchant.
+  egress: {}
+
+volumes:
+  pgdata:
