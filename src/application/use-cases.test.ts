@@ -489,17 +489,37 @@ describe("payment flow", () => {
     s.chain.pages = [[matched, stray]];
     await s.ingest.execute();
     await s.verify.execute();
-    // Emulate the other worker's commit landing between listVerified and the write: the rows are no longer
-    // "verified" when this worker tries to settle them.
-    for (const c of [matched, stray]) {
-      const key = txRefKey(txRef(TRON, c.txHash, 0n));
+    // Emulate the other worker's commit landing between listVerified and this worker's write: the row is no
+    // longer "verified" by the time markMatched / markUnmatched runs, so they must report false and nothing more
+    // may be recorded for the transfer.
+    const run = s.store.run.bind(s.store);
+    const taken = (ref: { txHash: string }, status: "matched" | "unmatched") => {
+      const key = txRefKey(txRef(TRON, ref.txHash, 0n));
       const cur = s.store.data.transfers.get(key);
-      if (!cur) throw new Error("transfer missing");
-      s.store.data.transfers.set(key, { ...cur, status: c === matched ? "matched" : "unmatched" });
-    }
+      if (cur) s.store.data.transfers.set(key, { ...cur, status });
+    };
+    s.store.run = async (work) =>
+      run((repos) =>
+        work({
+          ...repos,
+          transfers: {
+            ...repos.transfers,
+            markMatched: async (ref, invoiceId) => {
+              taken(ref, "matched");
+              return repos.transfers.markMatched(ref, invoiceId);
+            },
+            markUnmatched: async (ref, reason) => {
+              taken(ref, "unmatched");
+              return repos.transfers.markUnmatched(ref, reason);
+            },
+          },
+        }),
+      );
     const outboxBefore = s.store.data.outbox.length;
+    const auditBefore = s.store.data.audit.length;
     expect(await s.settle.execute()).toMatchObject({ matched: 0, unmatched: 0, errors: 0 });
     expect(s.store.data.outbox.length).toBe(outboxBefore); // no second transfer.unmatched, no second credit
+    expect(s.store.data.audit.length).toBe(auditBefore);
     expect(s.store.data.invoices.get(invoice.id)?.status).toBe("confirming");
   });
 
