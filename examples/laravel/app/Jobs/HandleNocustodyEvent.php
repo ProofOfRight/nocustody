@@ -14,7 +14,9 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Acts on a recorded gateway event. The invoice is re-read from the API before anything is granted, so the decision
- * never rests on the webhook body alone. Replace the marked lines with your own order logic.
+ * never rests on the webhook body alone. The same event may be queued more than once (redelivery, the sweeper in
+ * routes/nocustody-console.php): the event row is locked and checked inside the transaction that does the work and
+ * marks it processed, so the work happens once. Replace the marked lines with your own order logic.
  */
 final class HandleNocustodyEvent implements ShouldQueue
 {
@@ -39,30 +41,34 @@ final class HandleNocustodyEvent implements ShouldQueue
         if ($event === null || $event->processed_at !== null) {
             return;
         }
-        $type = $event->type;
-        if (str_starts_with($type, 'invoice.')) {
-            $invoice = NocustodyClient::fromConfig()->getInvoice($event->object_id);
-            $orderId = (string) $invoice['merchant_order_id'];
-            DB::table('nocustody_invoices')
-                ->where('invoice_id', $invoice['id'])
-                ->update(['status' => $invoice['status'], 'updated_at' => now()]);
+        // Read the invoice before the transaction: no row lock is held during the HTTP call.
+        $invoice = str_starts_with($event->type, 'invoice.')
+            ? NocustodyClient::fromConfig()->getInvoice($event->object_id)
+            : null;
 
-            // A paid invoice moves through aml_pending to completed in the same cycle, so paid / overpaid / paid_late
-            // are event types you receive, not statuses you read back. Decide "needs a person" by the event type and
-            // grant access only when the re-read invoice says completed.
-            if (in_array($type, ['invoice.underpaid', 'invoice.overpaid', 'invoice.paid_late', 'invoice.aml_hold'], true)) {
-                // YOUR CODE: needs a human — notify support with $orderId, $type and the amounts in $invoice
-                // (received versus payment.amount). Refunds are manual, from your own wallet.
-                Log::warning('nocustody: invoice needs attention', ['order' => $orderId, 'event' => $type]);
+        DB::transaction(function () use ($invoice): void {
+            $event = DB::table('nocustody_events')->where('event_id', $this->eventId)->lockForUpdate()->first();
+            if ($event === null || $event->processed_at !== null) {
+                return; // another worker got there first
             }
-            if ($invoice['status'] === 'completed') {
-                // YOUR CODE: grant access for $orderId exactly once (e.g. inside a transaction, guarded by order state).
-                Log::info('nocustody: order paid', ['order' => $orderId, 'invoice' => $invoice['id']]);
+            if ($invoice !== null) {
+                $orderId = (string) $invoice['merchant_order_id'];
+                DB::table('nocustody_invoices')
+                    ->where('invoice_id', $invoice['id'])
+                    ->update(['status' => $invoice['status'], 'updated_at' => now()]);
+
+                if ($invoice['status'] === 'completed') {
+                    // YOUR CODE: grant access for $orderId here, in this transaction, guarded by the order's state.
+                    Log::info('nocustody: order paid', ['order' => $orderId, 'invoice' => $invoice['id']]);
+                } elseif (in_array($invoice['status'], ['underpaid', 'overpaid', 'paid_late', 'aml_hold'], true)) {
+                    // YOUR CODE: needs a human — notify support with $orderId and the amounts in $invoice.
+                    Log::warning('nocustody: invoice needs attention', ['order' => $orderId, 'status' => $invoice['status']]);
+                }
+            } elseif ($event->type === 'transfer.unmatched') {
+                // A payment that matched no invoice (wrong amount, no memo, too late): resolve it manually.
+                Log::warning('nocustody: unmatched transfer', ['event' => $this->eventId]);
             }
-        } elseif ($type === 'transfer.unmatched') {
-            // A payment that matched no invoice (wrong amount, no memo, too late): resolve it manually.
-            Log::warning('nocustody: unmatched transfer', ['event' => $this->eventId]);
-        }
-        DB::table('nocustody_events')->where('event_id', $this->eventId)->update(['processed_at' => now()]);
+            DB::table('nocustody_events')->where('event_id', $this->eventId)->update(['processed_at' => now()]);
+        });
     }
 }
