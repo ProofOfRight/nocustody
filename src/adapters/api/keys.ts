@@ -26,6 +26,11 @@ export function newApiKey(
   };
 }
 
+/** Whether a bearer token has the shape of an API key; anything else is refused before the database is asked. */
+export function isTokenShaped(token: string): boolean {
+  return TOKEN.test(token);
+}
+
 /** Returns the key if the token is valid and not revoked; null otherwise (never says which part was wrong). */
 export async function authenticate(token: string, keys: ApiKeyRepository): Promise<ApiKeyRecord | null> {
   const m = TOKEN.exec(token);

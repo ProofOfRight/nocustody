@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { connect } from "node:net";
 import { afterAll, describe, expect, it } from "vitest";
 import { AssetCatalog, type AssetSettings } from "../../application/catalog.ts";
 import type { ApiScope } from "../../application/ports.ts";
@@ -33,6 +34,21 @@ async function client(api: ApiServer) {
   servers.push(api);
   const { port } = await api.listen("127.0.0.1", 0);
   return {
+    api,
+    /** Sends raw bytes (what fetch would refuse to send) and returns the status line of the answer. */
+    raw: (request: string) =>
+      new Promise<string>((resolve, reject) => {
+        const socket = connect(port, "127.0.0.1", () => socket.write(request));
+        let data = "";
+        socket.on("data", (c) => {
+          data += c;
+          if (data.includes("\r\n\r\n")) {
+            socket.end();
+            resolve(data.split("\r\n")[0] ?? "");
+          }
+        });
+        socket.on("error", reject);
+      }),
     inject: async (o: InjectOptions) => {
       const headers: Record<string, string> = { ...(o.headers ?? {}) };
       let body: string | undefined;
@@ -125,6 +141,17 @@ async function setup(
   return { app, store, key, auth, create, body, errors, rw };
 }
 
+/** Counts transactions the store runs, to see what a request costs in database work. */
+function countRuns(store: InMemoryStore): () => number {
+  let n = 0;
+  const run = store.run.bind(store);
+  store.run = async (work) => {
+    n++;
+    return run(work);
+  };
+  return () => n;
+}
+
 describe("merchant API", () => {
   it("health needs no key and reveals nothing", async () => {
     const { app } = await setup();
@@ -178,6 +205,60 @@ describe("merchant API", () => {
     expect((await create(body, "")).statusCode).toBe(400);
   });
 
+  it("a concurrent create with the same Idempotency-Key and another body is refused, not silently accepted", async () => {
+    const { create, body, store } = await setup();
+    // Both requests find no stored row (the race), so both create; the second insert of the key then collides.
+    const run = store.run.bind(store);
+    let misses = 2;
+    store.run = async (work) =>
+      run((repos) =>
+        work({
+          ...repos,
+          idempotency: {
+            ...repos.idempotency,
+            find: async (k, key) => (misses-- > 0 ? null : repos.idempotency.find(k, key)),
+          },
+        }),
+      );
+    expect((await create(body, "race")).statusCode).toBe(201);
+    const second = await create({ ...body, merchant_order_id: "o2" }, "race");
+    expect(second.statusCode).toBe(422);
+    expect(second.json().error.code).toBe("idempotency_mismatch");
+  });
+
+  it("asks the database only for tokens shaped like a key; junk is refused without a transaction", async () => {
+    const { app, store } = await setup();
+    const runs = countRuns(store);
+    for (const token of ["x", "nck_", "nck_000000000000_short", "a".repeat(200)]) {
+      const r = await app.inject({ url: "/v1/invoices", headers: { authorization: `Bearer ${token}` } });
+      expect(r.statusCode).toBe(401);
+    }
+    expect(runs()).toBe(0);
+    // a well-formed but unknown key costs exactly one lookup
+    const r = await app.inject({
+      url: "/v1/invoices",
+      headers: { authorization: `Bearer nck_000000000000_${"A".repeat(43)}` },
+    });
+    expect(r.statusCode).toBe(401);
+    expect(runs()).toBe(1);
+  });
+
+  it("a malformed request target is the client's error (400), never a logged 500", async () => {
+    const { app, errors } = await setup();
+    for (const target of ["//[", "http://["]) {
+      const line = await app.raw(`GET ${target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`);
+      expect(line, target).toContain(" 400 ");
+    }
+    expect(errors).toEqual([]);
+  });
+
+  it("a server error after start-up is reported and does not crash the process", async () => {
+    const { app, errors } = await setup();
+    const boom = new Error("accept EMFILE");
+    expect(() => app.api.server.emit("error", boom)).not.toThrow();
+    expect(errors).toEqual([boom]);
+  });
+
   it("validates strictly: decimal strings only, no unknown fields, body size limit", async () => {
     const { create, app, auth, body } = await setup();
     expect((await create({ ...body, price: { amount: 10.5, currency: "USD" } })).statusCode).toBe(400);
@@ -208,6 +289,18 @@ describe("merchant API", () => {
     expect(r.body).not.toContain("password");
     expect(r.json()).toEqual({ error: { code: "internal", message: "internal error" } });
     expect(errors).toHaveLength(1);
+  });
+
+  it("accepts RFC 3339 timestamps with an offset in since, as the OpenAPI format date-time promises", async () => {
+    const { app, auth, create } = await setup();
+    await create();
+    const r = await app.inject({
+      url: "/v1/invoices?since=2026-10-26T11%3A00%3A00%2B03%3A00",
+      headers: auth(),
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().data).toHaveLength(1);
+    expect((await app.inject({ url: "/v1/invoices?since=yesterday", headers: auth() })).statusCode).toBe(400);
   });
 
   it("gets and lists invoices", async () => {
