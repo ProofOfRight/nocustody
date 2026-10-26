@@ -27,4 +27,14 @@ Background: [docs/threat-model.md](docs/threat-model.md), [docs/security.md](doc
 
 ## Supported versions
 
-Before 0.1 only the `main` branch is supported.
+Security fixes go into the latest minor release line and `main`.
+
+| Version | Supported |
+|---|---|
+| 0.1.x | yes |
+| < 0.1 | no |
+
+## Verifying releases
+
+Release images are built by the release workflow and carry signed build provenance and SBOM attestations; builds
+are reproducible. See [docs/deployment.md](docs/deployment.md#verify-the-image).

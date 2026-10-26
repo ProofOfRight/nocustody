@@ -26,3 +26,6 @@ Starting list of threats and mitigations for the gateway. Requirements contribut
 | Provider rate-limit exhaustion (dust spam) | Filters, limits, alerts, second key / provider |
 | Issuer (Tether) freezes USDT on an address | Address pool, rotation, regular sweeps by the merchant, AML |
 | Compromised npm dependency | Minimal dependencies, lockfile, `npm ci --ignore-scripts`, audit in CI ([ADR-0007](adr/0007-minimal-dependencies.md)) |
+| Tampered release image (registry, build host or maintainer machine) | Images built only by the release workflow from a tag; signed SLSA provenance and SBOM attestations checked with `gh attestation verify`; reproducible builds; base images and BuildKit pinned by digest ([ADR-0029](adr/0029-release-provenance.md)) |
+| Code execution inside the gateway container | `FROM scratch` image without shell or package manager, non-root, read-only root filesystem, no capabilities, config mounted read-only ([ADR-0028](adr/0028-container-image.md)); no keys to steal; the canary on another host detects substituted addresses |
+| Script injection or framing on the hosted payment page | Off by default; no external resources, CSP with a per-response nonce, `frame-ancestors 'none'`, all values escaped; the public status route exposes no order or payer data ([ADR-0027](adr/0027-hosted-payment-page.md)) |
