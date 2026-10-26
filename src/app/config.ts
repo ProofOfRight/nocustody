@@ -73,33 +73,26 @@ const assetSchema = z
   })
   .strict();
 
-const tronSchema = z
-  .object({
-    network: z.string(),
-    apiUrl: httpsUrl,
-    apiKeyEnv: envName.optional(),
-    timeout: timerDuration.default("10s"),
-    pollInterval: timerDuration.default("10s"),
-    /** Rescan overlap so transfers near the previous window edge are never skipped. */
-    overlap: duration.default("10m"),
-    /** Where scanning starts when there is no cursor yet. */
-    startFrom: z.string().datetime(),
-    maxResponseBytes: z.number().int().min(1_024).max(50_000_000).default(5_000_000),
-  })
-  .strict();
+/** What every chain provider section has; a network adds its own fields with `.extend`. */
+const chainProviderSchema = z.object({
+  network: z.string(),
+  apiUrl: httpsUrl,
+  apiKeyEnv: envName.optional(),
+  timeout: timerDuration.default("10s"),
+  pollInterval: timerDuration.default("10s"),
+  /** Rescan overlap so transfers near the previous window edge are never skipped. */
+  overlap: duration.default("10m"),
+  /** Where scanning starts when there is no cursor yet. */
+  startFrom: z.string().datetime(),
+  maxResponseBytes: z.number().int().min(1_024).max(50_000_000).default(5_000_000),
+});
 
-const tonSchema = z
-  .object({
-    network: z.string(),
-    apiUrl: httpsUrl,
-    apiKeyEnv: envName.optional(),
-    timeout: timerDuration.default("10s"),
-    pollInterval: timerDuration.default("10s"),
-    overlap: duration.default("10m"),
-    startFrom: z.string().datetime(),
+const tronSchema = chainProviderSchema.strict();
+
+const tonSchema = chainProviderSchema
+  .extend({
     /** toncenter allows 1 request/s without a key. */
     minInterval: timerDuration.default("1100ms"),
-    maxResponseBytes: z.number().int().min(1_024).max(50_000_000).default(5_000_000),
   })
   .strict();
 

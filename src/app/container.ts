@@ -162,28 +162,31 @@ export function buildContainer(o: ContainerOptions) {
   });
   const expireInvoices = new ExpireInvoices({ uow, clock, batchSize: 100 });
 
-  const workers: NetworkWorker[] = [];
-  const tron = o.config.raw.tron;
-  if (tron) {
-    const apiKey = tron.apiKeyEnv ? env[tron.apiKeyEnv] : undefined;
-    const client = new JsonHttpClient({
-      baseUrl: tron.apiUrl,
-      apiKey: apiKey || undefined,
-      apiKeyHeader: "TRON-PRO-API-KEY",
-      timeoutMs: parseDuration(tron.timeout),
-      maxResponseBytes: tron.maxResponseBytes,
+  type ProviderConfig = NonNullable<Config["raw"]["tron"]>;
+  const providerClient = (cfg: ProviderConfig, apiKeyHeader: string, minInterval?: string) => {
+    const apiKey = (cfg.apiKeyEnv ? env[cfg.apiKeyEnv] : undefined) || undefined;
+    return new JsonHttpClient({
+      baseUrl: cfg.apiUrl,
+      apiKey,
+      apiKeyHeader,
+      timeoutMs: parseDuration(cfg.timeout),
+      maxResponseBytes: cfg.maxResponseBytes,
+      // without a key the provider's public rate limit applies
+      ...(minInterval && !apiKey ? { minIntervalMs: parseDuration(minInterval) } : {}),
     });
-    const adapter = new TronAdapter({
-      network: tron.network as ChainAdapter["network"],
-      client,
-      startFrom: new Date(tron.startFrom),
-      overlapMs: parseDuration(tron.overlap),
-    });
+  };
+  /** Scanner, verifier, settlement and screening of one network; every configured asset must be supported. */
+  const networkWorker = (
+    adapter: ChainAdapter,
+    cfg: ProviderConfig,
+    sizes: { readonly pageSize: number; readonly verifyBatch: number },
+  ): NetworkWorker => {
     for (const s of catalog.forNetwork(adapter.network)) {
       if (!adapter.supports(s.asset))
-        throw new Error(`asset ${s.asset.id} is not supported by the TRON adapter`);
+        throw new Error(`asset ${s.asset.id} is not supported by the ${adapter.network} adapter`);
     }
-    workers.push({
+    const { network } = adapter;
+    return {
       adapter,
       ingest: new IngestTransfers({
         adapter,
@@ -191,75 +194,19 @@ export function buildContainer(o: ContainerOptions) {
         strategies,
         uow,
         clock,
-        pageSize: 200,
+        pageSize: sizes.pageSize,
         maxScans: 5,
         alerts,
       }),
-      verify: new VerifyTransfers({ adapter, catalog, uow, clock, batchSize: 100, maxPendingMs, alerts }),
-      settle: new SettlePayments({
-        network: adapter.network,
-        catalog,
-        strategies,
-        uow,
-        clock,
-        batchSize: 100,
-        onError: onSettleError,
-      }),
-      screen: screenPayments,
-      pollIntervalMs: parseDuration(tron.pollInterval),
-    });
-  }
-  const startupChecks: Array<() => Promise<string[]>> = [];
-  const ton = o.config.raw.ton;
-  if (ton) {
-    const apiKey = ton.apiKeyEnv ? env[ton.apiKeyEnv] : undefined;
-    const client = new JsonHttpClient({
-      baseUrl: ton.apiUrl,
-      apiKey: apiKey || undefined,
-      apiKeyHeader: "X-API-Key",
-      timeoutMs: parseDuration(ton.timeout),
-      maxResponseBytes: ton.maxResponseBytes,
-      minIntervalMs: apiKey ? 0 : parseDuration(ton.minInterval),
-    });
-    const network = ton.network as ChainAdapter["network"];
-    const jettonWallets = new Map(
-      catalog
-        .forNetwork(network)
-        .map((s) => [
-          s.asset.id,
-          new Map(
-            s.addresses.flatMap((a) =>
-              a.tokenAccount ? [[a.address.value, a.tokenAccount.value] as const] : [],
-            ),
-          ),
-        ]),
-    );
-    const adapter = new TonAdapter({
-      network,
-      client,
-      startFrom: new Date(ton.startFrom),
-      overlapMs: parseDuration(ton.overlap),
-      jettonWallets,
-    });
-    const tonAssets = catalog.forNetwork(network);
-    for (const s of tonAssets) {
-      if (!adapter.supports(s.asset))
-        throw new Error(`asset ${s.asset.id} is not supported by the TON adapter`);
-    }
-    startupChecks.push(() => adapter.checkJettonWallets(tonAssets.map((s) => s.asset)));
-    workers.push({
-      adapter,
-      ingest: new IngestTransfers({
+      verify: new VerifyTransfers({
         adapter,
         catalog,
-        strategies,
         uow,
         clock,
-        pageSize: 100,
-        maxScans: 5,
+        batchSize: sizes.verifyBatch,
+        maxPendingMs,
         alerts,
       }),
-      verify: new VerifyTransfers({ adapter, catalog, uow, clock, batchSize: 50, maxPendingMs, alerts }),
       settle: new SettlePayments({
         network,
         catalog,
@@ -270,8 +217,45 @@ export function buildContainer(o: ContainerOptions) {
         onError: onSettleError,
       }),
       screen: screenPayments,
-      pollIntervalMs: parseDuration(ton.pollInterval),
+      pollIntervalMs: parseDuration(cfg.pollInterval),
+    };
+  };
+
+  const workers: NetworkWorker[] = [];
+  const startupChecks: Array<() => Promise<string[]>> = [];
+  const tron = o.config.raw.tron;
+  if (tron) {
+    const adapter = new TronAdapter({
+      network: tron.network as NetworkId,
+      client: providerClient(tron, "TRON-PRO-API-KEY"),
+      startFrom: new Date(tron.startFrom),
+      overlapMs: parseDuration(tron.overlap),
     });
+    workers.push(networkWorker(adapter, tron, { pageSize: 200, verifyBatch: 100 }));
+  }
+  const ton = o.config.raw.ton;
+  if (ton) {
+    const network = ton.network as NetworkId;
+    const tonAssets = catalog.forNetwork(network);
+    const jettonWallets = new Map(
+      tonAssets.map((s) => [
+        s.asset.id,
+        new Map(
+          s.addresses.flatMap((a) =>
+            a.tokenAccount ? [[a.address.value, a.tokenAccount.value] as const] : [],
+          ),
+        ),
+      ]),
+    );
+    const adapter = new TonAdapter({
+      network,
+      client: providerClient(ton, "X-API-Key", ton.minInterval),
+      startFrom: new Date(ton.startFrom),
+      overlapMs: parseDuration(ton.overlap),
+      jettonWallets,
+    });
+    workers.push(networkWorker(adapter, ton, { pageSize: 100, verifyBatch: 50 }));
+    startupChecks.push(() => adapter.checkJettonWallets(tonAssets.map((s) => s.asset)));
   }
   for (const s of o.config.assets) {
     if (!workers.some((w) => w.adapter.network === s.asset.network)) {
