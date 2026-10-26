@@ -31,23 +31,33 @@ for (const [net, prefix] of [
   ["169.254.0.0", 16],
   ["172.16.0.0", 12],
   ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
   ["192.168.0.0", 16],
   ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
   ["224.0.0.0", 4],
   ["240.0.0.0", 4],
 ] as const) {
   SPECIAL.addSubnet(net, prefix, "ipv4");
 }
 for (const [net, prefix] of [
-  ["::", 128],
-  ["::1", 128],
+  ["::", 96], // unspecified, loopback and IPv4-compatible addresses
+  ["64:ff9b::", 96], // NAT64 well-known prefix
+  ["64:ff9b:1::", 48], // NAT64 local-use prefix
+  ["100::", 64], // discard-only
+  ["2001::", 32], // Teredo
+  ["2002::", 16], // 6to4
   ["fc00::", 7],
   ["fe80::", 10],
+  ["fec0::", 10], // deprecated site-local
   ["ff00::", 8],
-  ["64:ff9b::", 96],
 ] as const) {
   SPECIAL.addSubnet(net, prefix, "ipv6");
 }
+
+/** Refusing a destination is a policy decision and final; everything else about delivery is retried. */
+export class WebhookPolicyError extends Error {}
 
 /** Private, loopback, link-local, multicast, reserved — anything that is not a public unicast address. */
 export function isSpecialAddress(address: string): boolean {
@@ -85,13 +95,35 @@ export class HttpWebhookSender implements WebhookSender {
     this.#url = url;
   }
 
+  /**
+   * One delivery attempt, bounded by `timeoutMs` as a whole: lookup, connect, headers and body. The socket option
+   * `timeout` alone is an idle timeout, so an endpoint that trickles one byte at a time would never time out.
+   */
   async send(m: OutboxMessage): Promise<DeliveryResult> {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), this.#o.timeoutMs);
+    const timedOut = new Promise<DeliveryResult>((resolve) =>
+      ac.signal.addEventListener("abort", () => resolve({ ok: false, error: "timeout", retryable: true })),
+    );
+    try {
+      return await Promise.race([this.#deliver(m, ac.signal), timedOut]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async #deliver(m: OutboxMessage, signal: AbortSignal): Promise<DeliveryResult> {
     const host = this.#url.hostname.replace(/^\[|\]$/g, "");
     let address: string;
     try {
       address = await this.#safeAddress(host);
     } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e), retryable: false };
+      // Only the SSRF policy is final; a resolver failure (EAI_AGAIN, timeout) is retried like any other error.
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+        retryable: !(e instanceof WebhookPolicyError),
+      };
     }
     const body = JSON.stringify({
       id: m.eventId,
@@ -120,6 +152,7 @@ export class HttpWebhookSender implements WebhookSender {
           method: "POST",
           headers: { ...headers, host: this.#url.host },
           timeout: this.#o.timeoutMs,
+          signal,
         },
         (res) => {
           // The status line decides; the body is drained only to free the socket and is capped. A destroyed
@@ -158,7 +191,7 @@ export class HttpWebhookSender implements WebhookSender {
     if (this.#o.allowPrivateNetworks) return resolved[0]?.address ?? "";
     const bad = resolved.filter((r) => isSpecialAddress(r.address));
     if (bad.length > 0) {
-      throw new Error(
+      throw new WebhookPolicyError(
         `webhook host ${host} resolves to a private or special address; set allowPrivateNetworks to permit it`,
       );
     }

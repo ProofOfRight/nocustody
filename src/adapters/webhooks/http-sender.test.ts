@@ -105,6 +105,44 @@ describe("webhook sender", () => {
     expect(await viaDns.send(message)).toMatchObject({ ok: false, retryable: false });
   });
 
+  it("a resolver failure is retried; only the SSRF policy is final", async () => {
+    const dnsDown = sender({
+      url: "https://merchant.example/hook",
+      allowPrivateNetworks: false,
+      resolve: async () => {
+        throw Object.assign(new Error("getaddrinfo EAI_AGAIN merchant.example"), { code: "EAI_AGAIN" });
+      },
+    });
+    expect(await dnsDown.send(message)).toMatchObject({ ok: false, retryable: true });
+    const noAnswer = sender({
+      url: "https://merchant.example/hook",
+      allowPrivateNetworks: false,
+      resolve: async () => [],
+    });
+    expect(await noAnswer.send(message)).toMatchObject({ ok: false, retryable: true });
+  });
+
+  it("the deadline covers the whole attempt: a response that trickles bytes forever is cut off", async () => {
+    // Node's socket `timeout` is an idle timeout; one byte every 150 ms keeps it alive for hours (0.2.1).
+    const timers: NodeJS.Timeout[] = [];
+    const trickle = createServer((_req, res) => {
+      res.writeHead(200);
+      timers.push(setInterval(() => res.write("x"), 150));
+    });
+    await new Promise<void>((r) => trickle.listen(0, "127.0.0.1", r));
+    try {
+      const port = (trickle.address() as AddressInfo).port;
+      const started = Date.now();
+      const r = await sender({ url: `http://127.0.0.1:${port}/hook`, timeoutMs: 600 }).send(message);
+      expect(r).toEqual({ ok: false, error: "timeout", retryable: true });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      for (const t of timers) clearInterval(t);
+      trickle.closeAllConnections();
+      trickle.close();
+    }
+  });
+
   it("classifies special addresses", () => {
     for (const a of [
       "127.0.0.1",
@@ -114,16 +152,32 @@ describe("webhook sender", () => {
       "169.254.169.254",
       "100.64.0.1",
       "0.0.0.0",
+      "192.0.2.1", // TEST-NET-1
+      "198.51.100.1",
+      "203.0.113.1",
       "::1",
+      "::a00:1", // IPv4-compatible 10.0.0.1
       "fd00::1",
       "fe80::1",
+      "fec0::1",
+      "100::1",
+      "2001::1", // Teredo
+      "2002:a00:1::1", // 6to4 of 10.0.0.1
+      "64:ff9b::a00:1", // NAT64 well-known
+      "64:ff9b:1::a00:1", // NAT64 local-use
       "::ffff:127.0.0.1",
+      "::ffff:a00:1",
       "224.0.0.1",
     ]) {
-      expect(isSpecialAddress(a)).toBe(true);
+      expect(isSpecialAddress(a), a).toBe(true);
     }
-    for (const a of ["93.184.215.14", "1.1.1.1", "2606:4700:4700::1111"])
-      expect(isSpecialAddress(a)).toBe(false);
+    for (const a of [
+      "93.184.215.14",
+      "1.1.1.1",
+      "2606:4700:4700::1111",
+      "2001:db8::1".replace("db8", "4860"),
+    ])
+      expect(isSpecialAddress(a), a).toBe(false);
   });
 
   it("refuses plain http, credentials in the URL and short secrets", () => {
