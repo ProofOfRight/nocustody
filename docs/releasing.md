@@ -8,14 +8,18 @@ For maintainers. Decisions: [ADR-0028](adr/0028-container-image.md) (image),
 - Packages: the first release creates `ghcr.io/<owner>/nocustody`; make the package public and link it to the
   repository.
 - Environment `release` with required reviewers (Settings → Environments), so a pushed tag waits for approval.
-- Branch protection for `main` and a tag ruleset for `v*` (only maintainers create release tags).
+- A ruleset for `main`: changes only through pull requests with a code-owner review, the CI checks (`check`,
+  both `image` jobs, `dco`) required and up to date, linear history, no force-push or deletion. Administrators may
+  bypass it only through a pull request, so a direct push to `main` is refused for everyone.
+- A tag ruleset for `v*`: only maintainers create, move or delete release tags.
 
 ## Steps
 
-1. On `main`, with CI green: set `version` in `package.json` (and the root entries of `package-lock.json`) and add
-   a `## [X.Y.Z] - YYYY-MM-DD` section to [CHANGELOG.md](../CHANGELOG.md). Commit (`git commit -s`).
-2. Check locally: `make check` and `make smoke-image`.
-3. Create a signed tag and push it:
+1. In a pull request to `main`: set `version` in `package.json` (and the root entries of `package-lock.json`) and
+   add a `## [X.Y.Z] - YYYY-MM-DD` section to [CHANGELOG.md](../CHANGELOG.md) (`git commit -s`).
+2. Check locally: `make check` and `make smoke-image`. Merge the pull request once CI is green.
+3. On the merged commit of `main`, create a signed tag and push it (the workflow refuses commits that are not on
+   `main`):
 
    ```bash
    git tag -s vX.Y.Z -m "nocustody X.Y.Z"

@@ -26,11 +26,11 @@ build:
 	$(RUN) npm run build
 image:         ## production image nocustody:dev, see docs/deployment.md
 	docker build -t nocustody:dev .
-smoke-image:   ## production image with deploy/compose.yaml: migrations, API, page, non-root, read-only
+smoke-image:   ## production image with deploy/compose.yaml: migrations, runtime DB role, API, page, non-root, read-only
 	sh scripts/smoke-image.sh
 db-migrate:
 	$(RUN) npm run db:migrate
-e2e-nile:      ## end-to-end scenario on TRON Nile testnet (manual payment), see docs/testnet.md
+e2e-nile:      ## end-to-end scenario on TRON Nile testnet (replays a recorded payment; live mode: docs/testnet.md)
 	docker compose run --rm -it dev npm run e2e:nile
 e2e-ton:       ## end-to-end scenario on the TON testnet, see docs/ton-testnet.md
 	$(RUN) npm run e2e:ton

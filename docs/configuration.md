@@ -61,7 +61,7 @@ One section per network family, required when an asset uses it.
 | `pollInterval` | `10s` | scanner cycle of this network (each network has its own loop); 1 s … 24 d |
 | `overlap` | `10m` | each scan re-reads this much of the previous window |
 | `timeout` | `10s` | per request; 1 s … 24 d |
-| `maxResponseBytes` | `5000000` | larger responses are rejected |
+| `maxResponseBytes` | `5000000` | larger responses are rejected; the TON scan then asks again for a smaller page |
 | `minInterval` (TON) | `1100ms` | spacing between requests (toncenter allows 1 request/s without a key) |
 
 ## `api`
