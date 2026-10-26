@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 Before 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
+## [0.3.2] - 2026-10-27
+
+Backlog of the 2026-10-26 audit. No migration, no config or pinned-checksum change.
+
+### Added
+
+- `GET /v1/invoices` pages past the newest 100 invoices: the response carries `next_before`, passed back as `before`
+  for the next page (keyset on `created_at`, `id`; stable while new invoices arrive).
+- `make check-untrusted` / `make install-untrusted`: someone else's code — a pull request, a dependency update — runs
+  in a sandbox without network, keys or write access to the repository ([ADR-0034](docs/adr/0034-untrusted-code-sandbox.md),
+  CONTRIBUTING.md "Reviewing pull requests").
+
+### Security
+
+- Release: the job that holds the signing identity no longer runs repository code, npm or BuildKit; the workflow is
+  `build` → `attest` → `publish` ([ADR-0033](docs/adr/0033-release-isolated-signing.md)). Operators verify the
+  same way as before.
+- The invoice refuses a payment whose recipient is not its payment address (`invoice.recipient`), whatever the
+  matching strategy decided.
+
+### Fixed
+
+- Scanner: after a fully read scan with many candidates the scanner re-read the overlap window up to five times per
+  cycle; adapters now report `more` and the scanner follows it. The `scanner-budget` alert fires only when rows are
+  still unread after the last scan of a cycle.
+- `allocation.bad_memo` (a broken memo generator) was answered as 422; it is 500 now. Every application error code
+  has an explicit HTTP status.
+- The payer's comment is stored with the transaction candidate (`tx_candidates.memo` was never written).
+- PHP example: a webhook event is processed once under a file lock and its id is recorded only after the work
+  succeeded; `NOCUSTODY_WEBHOOK_LOG` is required instead of defaulting to the shared temporary directory.
+
+### Changed
+
+- AML screening is its own step after settlement (`ScreenPayments`); a screening vendor is added there, not inside
+  settlement. Cycle statistics report it as `screen`.
+- Adapter interface: `ChainAdapter.validateAddress` is removed (addresses are validated when the config is loaded),
+  `displayName` is required (the network name on the payment page), `FetchResult.more` replaces `exhausted`.
+- The audit skill's scan flags image digests Dependabot does not update when they drift or age.
+
 ## [0.3.1] - 2026-10-26
 
 **Upgrade note** for deployments from `deploy/compose.yaml`: add `NOCUSTODY_DB_PASSWORD` to `.env` and copy
