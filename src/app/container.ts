@@ -268,6 +268,7 @@ export function buildContainer(o: ContainerOptions) {
     clock,
     alerts,
     catalog,
+    integrity: o.integrity,
     maxScannerLagMs,
     secondary,
     reconcileLookbackMs: parseDuration(rc?.lookback ?? "3h"),
