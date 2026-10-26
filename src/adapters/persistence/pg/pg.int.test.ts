@@ -183,6 +183,44 @@ describe("PostgreSQL repositories", () => {
     expect((await uow.run((r) => r.apiKeys.findById(key.id)))?.revokedAt).toEqual(T0);
   });
 
+  it("ops: heartbeats, guards, dead-letter revival, verified candidates for reconciliation", async () => {
+    await uow.run(async (r) => {
+      await r.heartbeats.ok("scanner:tron:mainnet", T0);
+      await r.heartbeats.error("scanner:tron:mainnet", T0, "HTTP 503");
+      await r.guards.set("depeg:USDT", true, "off peg", T0);
+      await r.outbox.append([{ type: "x", aggregateId: "a", occurredAt: T0, data: {} }]);
+    });
+    expect(await uow.run((r) => r.heartbeats.list())).toEqual([
+      { role: "scanner:tron:mainnet", lastOkAt: T0, lastErrorAt: T0, lastError: "HTTP 503" },
+    ]);
+    expect(await uow.run((r) => r.guards.get("depeg:USDT"))).toEqual({
+      blocked: true,
+      reason: "off peg",
+      updatedAt: T0,
+    });
+    const [m] = await uow.run((r) => r.delivery.claim(T0, 1_000, 10));
+    await uow.run((r) => r.delivery.markDead(m?.id ?? "", T0, "gave up"));
+    expect(await uow.run((r) => r.delivery.countDead())).toBe(1);
+    expect(await uow.run((r) => r.delivery.reviveDead(T0))).toBe(1);
+    expect(await uow.run((r) => r.delivery.countDead())).toBe(0);
+    const c = {
+      network: TRON,
+      txHash: "d".repeat(64),
+      from: "TSender",
+      to: ADDR,
+      amount: usdt("1"),
+      at: T0,
+      memo: null,
+    };
+    await uow.run(async (r) => {
+      await r.candidates.insert(c, "seen", null);
+      await r.candidates.markVerified(TRON, c.txHash);
+    });
+    expect(
+      await uow.run((r) => r.candidates.listVerified(TRON, ADDR, new Date(T0.getTime() - 1), T0)),
+    ).toEqual([c.txHash]);
+  });
+
   it("rolls back state, outbox and cursor together", async () => {
     await expect(
       uow.run(async (r) => {
@@ -210,6 +248,7 @@ describe("PostgreSQL repositories", () => {
         uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 99 }),
         ttlMs: 30 * MIN,
         graceMs: 60 * MIN,
+        amlThresholdUnits: 0n,
       },
     ]);
     const uniqueAmount = new UniqueAmountStrategy();
@@ -317,6 +356,7 @@ describe("PostgreSQL repositories", () => {
         uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 9 }),
         ttlMs: 30 * MIN,
         graceMs: 60 * MIN,
+        amlThresholdUnits: 0n,
       },
     ]);
     const clock = { now: () => T0 };

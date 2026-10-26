@@ -76,6 +76,7 @@ function settings(over: Partial<AssetSettings> = {}): AssetSettings {
     uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 99 }),
     ttlMs: 30 * MIN,
     graceMs: 60 * MIN,
+    amlThresholdUnits: 0n,
     ...over,
   };
 }

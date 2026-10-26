@@ -28,6 +28,8 @@ export interface AssetSettings {
   readonly uniqueAmount: UniqueAmountPolicy;
   readonly ttlMs: number;
   readonly graceMs: number;
+  /** Payments below this total (minimal units) complete without AML screening; 0 screens everything. */
+  readonly amlThresholdUnits: bigint;
 }
 
 export interface PricingSettings {

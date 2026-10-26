@@ -63,6 +63,7 @@ async function setup(opts: { rateLimit?: number; failing?: boolean } = {}) {
     uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 99 }),
     ttlMs: 1_800_000,
     graceMs: 3_600_000,
+    amlThresholdUnits: 0n,
   };
   const catalog = new AssetCatalog([settings]);
   const pricing = { currencies: new Set(["USD", "JPY"]), markupBps: new Map<string, number>() };

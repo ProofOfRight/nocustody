@@ -77,6 +77,7 @@ const APP_ERRORS: Readonly<Record<string, number>> = {
   "pricing.currency_disabled": 422,
   "invoice.zero_amount": 422,
   "pricing.no_rate": 503,
+  "pricing.depeg_block": 503,
   "allocation.no_free_slot": 503,
   "allocation.no_address": 503,
   "allocation.memo_collision": 503,

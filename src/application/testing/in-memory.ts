@@ -12,6 +12,7 @@ import type {
   ApiKeyRecord,
   AuditEntry,
   CandidateStatus,
+  Heartbeat,
   Repositories,
   StoredCandidate,
   StoredTransfer,
@@ -41,6 +42,8 @@ interface Data {
   outboxRows: OutboxRow[];
   apiKeys: Map<string, ApiKeyRecord & { lastUsedAt: Date | null }>;
   idempotency: Map<string, { requestSha256: string; invoiceId: string }>;
+  heartbeats: Map<string, Heartbeat>;
+  guards: Map<string, { blocked: boolean; reason: string; updatedAt: Date }>;
   cursors: Map<string, string>;
   audit: AuditEntry[];
 }
@@ -57,6 +60,8 @@ export class InMemoryStore implements UnitOfWork {
     outboxRows: [],
     apiKeys: new Map(),
     idempotency: new Map(),
+    heartbeats: new Map(),
+    guards: new Map(),
     cursors: new Map(),
     audit: [],
   };
@@ -72,6 +77,8 @@ export class InMemoryStore implements UnitOfWork {
       outboxRows: this.data.outboxRows.map((r) => ({ ...r })),
       apiKeys: new Map(this.data.apiKeys),
       idempotency: new Map(this.data.idempotency),
+      heartbeats: new Map(this.data.heartbeats),
+      guards: new Map(this.data.guards),
       cursors: new Map(this.data.cursors),
       audit: [...this.data.audit],
     };
@@ -192,6 +199,17 @@ export class InMemoryStore implements UnitOfWork {
           const cur = d().candidates.get(`${network}/${txHash}`);
           patchCandidate(network, txHash, { reason, attempts: (cur?.attempts ?? 0) + 1 });
         },
+        listVerified: async (network, address, from, until) =>
+          [...d().candidates.values()]
+            .filter(
+              (c) =>
+                c.candidate.network === network &&
+                c.status === "verified" &&
+                c.candidate.to.value === address.value &&
+                c.candidate.at >= from &&
+                c.candidate.at <= until,
+            )
+            .map((c) => c.candidate.txHash),
       },
       transfers: {
         insert: async (t: VerifiedTransfer, status, reason) => {
@@ -253,6 +271,39 @@ export class InMemoryStore implements UnitOfWork {
         markDead: async (id, at, error) => {
           const r = d().outboxRows.find((x) => x.id === id);
           if (r) Object.assign(r, { attempts: r.attempts + 1, deadAt: at, lastError: error });
+        },
+        countDead: async () => d().outboxRows.filter((r) => r.deadAt).length,
+        reviveDead: async (now, eventId) => {
+          const rows = d().outboxRows.filter((r) => r.deadAt && (!eventId || r.eventId === eventId));
+          for (const r of rows) Object.assign(r, { deadAt: null, attempts: 0, nextAttemptAt: now.getTime() });
+          return rows.length;
+        },
+      },
+      heartbeats: {
+        ok: async (role, at) => {
+          const cur = d().heartbeats.get(role);
+          d().heartbeats.set(role, {
+            role,
+            lastOkAt: at,
+            lastErrorAt: cur?.lastErrorAt ?? null,
+            lastError: cur?.lastError ?? null,
+          });
+        },
+        error: async (role, at, error) => {
+          const cur = d().heartbeats.get(role);
+          d().heartbeats.set(role, {
+            role,
+            lastOkAt: cur?.lastOkAt ?? null,
+            lastErrorAt: at,
+            lastError: error,
+          });
+        },
+        list: async () => [...d().heartbeats.values()],
+      },
+      guards: {
+        get: async (key) => d().guards.get(key) ?? null,
+        set: async (key, blocked, reason, at) => {
+          d().guards.set(key, { blocked, reason, updatedAt: at });
         },
       },
       apiKeys: {

@@ -8,7 +8,9 @@ import type { Invoice, InvoiceStatus, PaymentInstructions } from "../domain/invo
 import type { Money } from "../domain/money.ts";
 import type { NetworkId } from "../domain/network.ts";
 import type { RateQuote } from "../domain/pricing.ts";
+import type { Rational } from "../domain/rational.ts";
 import type { TxRef } from "../domain/tx-ref.ts";
+import type { ReceivingAddress } from "./catalog.ts";
 
 export interface Clock {
   now(): Date;
@@ -86,6 +88,39 @@ export interface ChainAdapter {
     receiving: readonly ChainAddress[],
   ): Promise<VerificationResult>;
   buildPaymentUri(instructions: PaymentInstructions): string | null;
+}
+
+/** Operator alert (Telegram, log, …). `key` groups repeats of the same condition. */
+export interface Alert {
+  readonly key: string;
+  readonly severity: "info" | "warning" | "critical";
+  readonly message: string;
+}
+
+export interface AlertSink {
+  send(alert: Alert): Promise<void>;
+}
+
+/** Market price of a pegged asset in units of its peg (e.g. USDT in USD), for depeg protection. */
+export interface PegPriceSource {
+  readonly name: string;
+  price(): Promise<Rational>;
+}
+
+/**
+ * Independent second indexer used for reconciliation. Returns incoming transfers of `asset` to `address` since
+ * `from`, already filtered like the primary adapter does (contract / our jetton-wallet, success), as candidates.
+ */
+export interface SecondarySource {
+  readonly name: string;
+  readonly network: NetworkId;
+  supports(asset: Asset): boolean;
+  incoming(
+    asset: Asset,
+    address: ChainAddress,
+    receiving: readonly ReceivingAddress[],
+    from: Date,
+  ): Promise<TransferCandidate[]>;
 }
 
 export interface RateProvider {
@@ -166,6 +201,8 @@ export interface CandidateRepository {
   markVerified(network: NetworkId, txHash: string): Promise<void>;
   markRejected(network: NetworkId, txHash: string, reason: string): Promise<void>;
   markPending(network: NetworkId, txHash: string, reason: string): Promise<void>;
+  /** Hashes of candidates to `address` with block time in [from, until] that the verifier accepted. */
+  listVerified(network: NetworkId, address: ChainAddress, from: Date, until: Date): Promise<string[]>;
 }
 
 export type TransferStatus = "verified" | "dust" | "matched" | "unmatched";
@@ -210,6 +247,28 @@ export interface OutboxDelivery {
   markDelivered(id: string, at: Date): Promise<void>;
   markFailed(id: string, nextAttemptAt: Date, error: string): Promise<void>;
   markDead(id: string, at: Date, error: string): Promise<void>;
+  countDead(): Promise<number>;
+  /** Puts dead-lettered events back into delivery (all, or one event id). Returns how many. */
+  reviveDead(now: Date, eventId?: string): Promise<number>;
+}
+
+export interface Heartbeat {
+  readonly role: string;
+  readonly lastOkAt: Date | null;
+  readonly lastErrorAt: Date | null;
+  readonly lastError: string | null;
+}
+
+export interface HeartbeatRepository {
+  ok(role: string, at: Date): Promise<void>;
+  error(role: string, at: Date, error: string): Promise<void>;
+  list(): Promise<Heartbeat[]>;
+}
+
+/** Shared switches set by the monitor and read by other processes, e.g. "depeg:USDT". */
+export interface GuardRepository {
+  get(key: string): Promise<{ blocked: boolean; reason: string; updatedAt: Date } | null>;
+  set(key: string, blocked: boolean, reason: string, at: Date): Promise<void>;
 }
 
 export type DeliveryResult =
@@ -270,6 +329,8 @@ export interface Repositories {
   readonly transfers: TransferRepository;
   readonly outbox: OutboxRepository;
   readonly delivery: OutboxDelivery;
+  readonly heartbeats: HeartbeatRepository;
+  readonly guards: GuardRepository;
   readonly apiKeys: ApiKeyRepository;
   readonly idempotency: IdempotencyRepository;
   readonly cursors: CursorRepository;

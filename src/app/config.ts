@@ -63,6 +63,8 @@ const assetSchema = z
       .strict(),
     ttl: duration.default("30m"),
     grace: duration.default("60m"),
+    /** Payments below this amount (in the asset) complete without AML screening; "0" screens everything. */
+    amlThreshold: decimal.default("0"),
   })
   .strict();
 
@@ -120,6 +122,66 @@ const webhookSchema = z
   })
   .strict();
 
+const secondarySchema = z
+  .object({ apiUrl: httpsUrl, apiKeyEnv: envName.optional(), apiKeyHeader: z.string().optional() })
+  .strict();
+
+const opsSchema = z
+  .object({
+    alerts: z
+      .object({
+        cooldown: duration.default("30m"),
+        telegram: z
+          .object({ botTokenEnv: envName, chatId: z.string().regex(/^-?\d{1,20}$/) })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .prefault({}),
+    /** Alert when a scanner has not completed a cycle for this long. Defaults: TRON 5m, TON 2m. */
+    maxScannerLag: z.record(z.string(), duration).default({}),
+    /** Reject candidates still not final this long after their block time. */
+    candidateMaxAge: duration.default("24h"),
+    reconcile: z
+      .object({
+        interval: duration.default("1h"),
+        lookback: duration.default("3h"),
+        settleDelay: duration.default("10m"),
+        tron: secondarySchema.optional(),
+        ton: secondarySchema.optional(),
+      })
+      .strict()
+      .optional(),
+    /** Off unless configured: no requests to exchanges otherwise. */
+    depeg: z
+      .object({
+        symbol: z
+          .string()
+          .regex(/^[A-Z][A-Z0-9]{1,9}$/)
+          .default("USDT"),
+        maxDeviationBps: z.number().int().min(1).max(5_000).default(150),
+        interval: duration.default("5m"),
+        sources: z
+          .array(z.enum(["kraken", "coinbase"]))
+          .min(1)
+          .default(["kraken", "coinbase"]),
+      })
+      .strict()
+      .optional(),
+    aml: z
+      .object({
+        provider: z.enum(["noop", "blocklist"]).default("noop"),
+        blocklistFile: z.string().optional(),
+      })
+      .strict()
+      .refine(
+        (a) => a.provider !== "blocklist" || !!a.blocklistFile,
+        "blocklistFile is required for the blocklist provider",
+      )
+      .prefault({}),
+  })
+  .strict();
+
 export const configSchema = z
   .object({
     database: z.object({ urlEnv: envName.default("DATABASE_URL") }).strict(),
@@ -127,6 +189,7 @@ export const configSchema = z
     ton: tonSchema.optional(),
     api: apiSchema.prefault({}),
     webhooks: webhookSchema.optional(),
+    ops: opsSchema.prefault({}),
     assets: z.array(assetSchema).min(1),
     pricing: z
       .object({
@@ -229,6 +292,7 @@ export function parseConfig(json: unknown, validators: AddressValidators): Confi
       }),
       ttlMs: parseDuration(a.ttl),
       graceMs: parseDuration(a.grace),
+      amlThresholdUnits: parseDecimal(a.amlThreshold, a.decimals),
     };
   });
   for (const c of raw.pricing.currencies) {

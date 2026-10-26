@@ -6,7 +6,10 @@
 //   node src/app/cli.ts invoice:show <id>
 //   node src/app/cli.ts apikey:create --name <name> --scopes invoices:read,invoices:write,quotes:read
 //   node src/app/cli.ts apikey:list | apikey:revoke <id>
-//   node src/app/cli.ts run [--roles api,worker,dispatcher]   (default: all three)
+//   node src/app/cli.ts ops:status                            heartbeats, guards, queues needing attention
+//   node src/app/cli.ts webhook:retry-dead [event-id]         put dead-lettered webhooks back into delivery
+//   node src/app/cli.ts invoice:aml-resolve <id> approve|reject --note <text>
+//   node src/app/cli.ts run [--roles api,worker,dispatcher,monitor]   (default: all four)
 import { parseArgs } from "node:util";
 import pg from "pg";
 import { ALL_SCOPES, newApiKey } from "../adapters/api/keys.ts";
@@ -190,6 +193,64 @@ async function main(argv: string[]): Promise<void> {
       }
       return;
     }
+    case "ops:status": {
+      const { container } = await start();
+      try {
+        const q = async (sql: string) => (await container.pool.query<{ k: string; n: number }>(sql)).rows;
+        const status = {
+          heartbeats: await container.uow.run((r) => r.heartbeats.list()),
+          guards: (
+            await container.pool.query("SELECT key, blocked, reason, updated_at FROM guards ORDER BY key")
+          ).rows,
+          invoices: await q(
+            "SELECT status AS k, count(*)::int AS n FROM invoices WHERE status IN ('underpaid','overpaid','paid_late','aml_pending','aml_hold') GROUP BY status",
+          ),
+          transfers: await q(
+            "SELECT status AS k, count(*)::int AS n FROM observed_transfers WHERE status = 'unmatched' GROUP BY status",
+          ),
+          candidates: await q(
+            "SELECT status AS k, count(*)::int AS n FROM tx_candidates WHERE status = 'seen' GROUP BY status",
+          ),
+          webhooks: await q(
+            "SELECT CASE WHEN dead_at IS NOT NULL THEN 'dead' ELSE 'pending' END AS k, count(*)::int AS n FROM outbox WHERE delivered_at IS NULL GROUP BY 1",
+          ),
+        };
+        console.log(JSON.stringify(status, null, 2));
+      } finally {
+        await container.pool.end();
+      }
+      return;
+    }
+    case "webhook:retry-dead": {
+      const { container } = await start();
+      try {
+        const n = await container.uow.run((r) => r.delivery.reviveDead(new Date(), rest[0]));
+        console.log(`${n} event(s) put back into delivery`);
+      } finally {
+        await container.pool.end();
+      }
+      return;
+    }
+    case "invoice:aml-resolve": {
+      const { values, positionals } = parseArgs({
+        args: rest,
+        allowPositionals: true,
+        options: { note: { type: "string" } },
+      });
+      const [id, decision] = positionals;
+      if (!id || (decision !== "approve" && decision !== "reject") || !values.note) {
+        throw new Error("usage: invoice:aml-resolve <id> approve|reject --note <text>");
+      }
+      const { container } = await start();
+      try {
+        console.log(
+          `invoice ${id}: ${await container.resolveAmlHold.execute(id, decision === "approve", values.note)}`,
+        );
+      } finally {
+        await container.pool.end();
+      }
+      return;
+    }
     case "run": {
       const { values } = parseArgs({ args: rest, options: { roles: { type: "string" } } });
       const roles = new Set((values.roles ?? "api,worker,dispatcher").split(",").map((x) => x.trim()));
@@ -227,6 +288,12 @@ async function main(argv: string[]): Promise<void> {
         const dispatcher = container.dispatcher;
         if (!dispatcher) logger.warn("dispatcher role requested but no webhooks are configured");
         else loop("dispatcher", 2_000, () => dispatcher.execute());
+      }
+      if (roles.has("monitor")) {
+        const { healthMs, reconcileMs, depegMs } = container.monitorIntervals;
+        loop("monitor:health", healthMs, () => container.monitor.checkHealth());
+        if (reconcileMs) loop("monitor:reconcile", reconcileMs, () => container.monitor.reconcile());
+        if (depegMs) loop("monitor:depeg", depegMs, () => container.monitor.checkDepeg());
       }
       const stop = () => {
         stopping = true;

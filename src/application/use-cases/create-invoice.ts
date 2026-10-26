@@ -42,6 +42,9 @@ export class CreateInvoice {
     if (base.isZero()) throw new ApplicationError("invoice.zero_amount", "price converts to zero");
 
     return uow.run(async (repos) => {
+      // Depeg protection: the monitor blocks new invoices priced in an asset that lost its peg.
+      const depeg = await repos.guards.get(`depeg:${settings.priceSymbol}`);
+      if (depeg?.blocked) throw new ApplicationError("pricing.depeg_block", depeg.reason);
       // Idempotent creation by merchant order id.
       const existing = await repos.invoices.findByMerchantOrderId(input.merchantOrderId);
       if (existing) return { invoice: existing, created: false };
