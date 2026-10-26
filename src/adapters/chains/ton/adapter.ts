@@ -26,7 +26,13 @@ import { txRef } from "../../../domain/tx-ref.ts";
 import type { JsonHttpClient } from "../../http/json-client.ts";
 import { parseTimeCursor, type TimeCursor } from "../cursor.ts";
 import { canonicalTon, friendlyTon, parseTonAddress } from "./address.ts";
-import { OP_INTERNAL_TRANSFER, parseInternalTransfer, parsePlainComment } from "./payload.ts";
+import {
+  OP_ENCRYPTED_COMMENT,
+  OP_INTERNAL_TRANSFER,
+  OP_TEXT_COMMENT,
+  parseInternalTransfer,
+  parsePlainComment,
+} from "./payload.ts";
 import { isFinalized, runGetMethodSchema, type TonTransaction, tonTransactionsSchema } from "./schemas.ts";
 
 export interface TonAdapterOptions {
@@ -42,6 +48,16 @@ export interface TonAdapterOptions {
 type Cursor = TimeCursor; // scanned account (wallet or jetton-wallet) → last seen utime (seconds)
 
 const opcode = (n: number) => `0x${n.toString(16).padStart(8, "0")}`;
+/**
+ * A coin transfer a payer made: no body, a text comment, or an encrypted comment (wallets offer "encrypt comment";
+ * the gateway cannot read it, so the payment is matched by its amount or ends as transfer.unmatched, never lost).
+ * Any other op is a contract message (jetton notification, excess, …) and is not GRAM paid to us.
+ */
+const isPlainTransfer = (op: string | null): boolean =>
+  op === null || op === opcode(OP_TEXT_COMMENT) || op === opcode(OP_ENCRYPTED_COMMENT);
+/** The memo of a plain transfer; an encrypted comment is unreadable, so the payment carries none. */
+const plainMemo = (op: string | null, body: string | null | undefined): string | null =>
+  op === opcode(OP_ENCRYPTED_COMMENT) ? null : parsePlainComment(body);
 const b64ToHex = (b64: string) => Buffer.from(b64, "base64").toString("hex");
 const hexToB64 = (hex: string) => Buffer.from(hex, "hex").toString("base64");
 
@@ -173,14 +189,14 @@ export class TonAdapter implements ChainAdapter {
       if (!it || it.amount <= 0n) return null;
       return { ...base, from: it.from ?? "", amount: Money.of(asset, it.amount), memo: it.comment };
     }
-    if (m.opcode !== null && m.opcode !== opcode(0)) return null;
+    if (!isPlainTransfer(m.opcode)) return null;
     const value = BigInt(m.value ?? "0");
     if (value <= 0n) return null;
     return {
       ...base,
       from: canonicalTon(m.source),
       amount: Money.of(asset, value),
-      memo: parsePlainComment(m.message_content?.body),
+      memo: plainMemo(m.opcode, m.message_content?.body),
     };
   }
 
@@ -213,7 +229,7 @@ export class TonAdapter implements ChainAdapter {
       return { status: "rejected", reason: "wallet sent messages back (bounce or reply)" };
 
     // Native coin: what the credit phase actually credited.
-    if (m.opcode !== null && m.opcode !== opcode(0)) return { status: "final", transfers: [] };
+    if (!isPlainTransfer(m.opcode)) return { status: "final", transfers: [] };
     if (t.description.destroyed) return { status: "rejected", reason: "account destroyed" };
     const credited = BigInt(t.description.credit_ph?.credit ?? "0");
     if (credited <= 0n) return { status: "rejected", reason: "nothing credited" };
@@ -223,7 +239,7 @@ export class TonAdapter implements ChainAdapter {
       to: owner,
       amount: Money.of(asset, credited),
       at,
-      memo: parsePlainComment(m.message_content?.body),
+      memo: plainMemo(m.opcode, m.message_content?.body),
     };
     return { status: "final", transfers: [transfer] };
   }

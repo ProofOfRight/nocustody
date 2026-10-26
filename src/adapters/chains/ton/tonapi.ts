@@ -104,7 +104,8 @@ export class TonapiSource implements SecondarySource {
         memo: fp?.sum_type === "TextComment" ? (fp.value?.text ?? null) : null,
       };
     }
-    if (m.op_code !== undefined && m.op_code !== "0x00000000") return null;
+    // plain transfer: no op, a text comment, or an encrypted comment (0x2167da4b)
+    if (m.op_code !== undefined && m.op_code !== "0x00000000" && m.op_code !== "0x2167da4b") return null;
     if (!m.value || m.value <= 0) return null;
     const text = (m.decoded_body as { text?: unknown } | undefined)?.text;
     return {
