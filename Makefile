@@ -2,7 +2,7 @@
 # All targets run inside the docker compose `dev` service; see compose.yaml.
 RUN := docker compose run --rm dev
 
-.PHONY: up down shell install lint format typecheck test check build db-migrate e2e-nile e2e-ton e2e-api php-selftest
+.PHONY: up down shell install lint format typecheck test check build db-migrate e2e-nile e2e-ton e2e-api e2e-ops php-selftest
 
 up:            ## start PostgreSQL
 	docker compose up -d --wait postgres
@@ -32,6 +32,8 @@ e2e-ton:       ## end-to-end scenario on the TON testnet, see docs/ton-testnet.m
 	$(RUN) npm run e2e:ton
 e2e-api:       ## API + webhooks end to end (Nile replay, PHP receiver), see docs/api.md
 	sh scripts/e2e-api.sh
+e2e-ops:       ## reconciliation heals a missed payment (Nile + TON testnet), depeg check, heartbeat
+	$(RUN) npm run e2e:ops
 PHP_IMAGE := php:8.4.27-cli-alpine@sha256:d8784155c4d37986be9ddd7a8950df7e78998cc48e35472cd69e2b9371424a65
 php-selftest:  ## PHP example: syntax and webhook signature verification
 	docker run --rm -v "$(CURDIR)/examples/php:/app:ro" -w /app $(PHP_IMAGE) sh -c 'php -l NocustodyClient.php && php -l webhook.php && php selftest.php'
