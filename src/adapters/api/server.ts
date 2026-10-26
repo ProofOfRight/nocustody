@@ -75,6 +75,7 @@ export const APP_ERRORS: Readonly<Record<string, number>> = {
   "allocation.no_address": 503,
   "allocation.memo_collision": 503,
   "integrity.pin_violation": 503,
+  "invoice.address_unpinned": 500,
 };
 
 export function invoiceDto(inv: Invoice, adapters: readonly ChainAdapter[]) {
@@ -362,7 +363,15 @@ export class ApiServer {
       body: { error: { code, message } },
     });
     if (err instanceof HttpError) return fail(err.status, err.code, err.message);
-    if (err instanceof ApplicationError) return fail(APP_ERRORS[err.code] ?? 422, err.code, err.message);
+    if (err instanceof ApplicationError) {
+      const status = APP_ERRORS[err.code] ?? 422;
+      if (status >= 500) {
+        // an operator problem (e.g. a stored address outside the pinned list): log the detail, answer a fixed code
+        this.#d.onError?.(err);
+        return fail(status, err.code, "internal error");
+      }
+      return fail(status, err.code, err.message);
+    }
     if (err instanceof DomainError) return fail(422, err.code, err.message);
     if (err instanceof ConcurrencyError) return fail(409, "conflict", "concurrent update, retry");
     this.#d.onError?.(err);

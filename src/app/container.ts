@@ -92,7 +92,11 @@ export function buildContainer(o: ContainerOptions) {
   const clock = o.clock ?? systemClock;
   const pool = createPool(o.databaseUrl, { max: 10, statementTimeoutMs: 60_000 });
   const catalog = new AssetCatalog(o.config.assets);
-  const uow = new PgUnitOfWork(pool, new Map(o.config.assets.map((s) => [s.asset.id, s.asset])));
+  const uow = new PgUnitOfWork(
+    pool,
+    new Map(o.config.assets.map((s) => [s.asset.id, s.asset])),
+    new Map(o.config.assets.map((s) => [s.asset.id, new Set(s.addresses.map((a) => a.address.value))])),
+  );
   const onSettleError = (subject: string, err: unknown) =>
     logger.error({ subject, err: err instanceof Error ? err.message : String(err) }, "settlement failed");
   // A random first slot: the pair a previous invoice just released is not the next one handed out.
@@ -137,6 +141,7 @@ export function buildContainer(o: ContainerOptions) {
     depeg: ops.depeg
       ? { symbol: ops.depeg.symbol, maxGuardAgeMs: 3 * parseDuration(ops.depeg.interval) }
       : null,
+    alerts,
   });
   const expireInvoices = new ExpireInvoices({ uow, clock, batchSize: 100 });
 
