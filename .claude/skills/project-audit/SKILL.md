@@ -16,7 +16,10 @@ argument: **$ARGUMENTS**
 | `security` ("security audit") | phase 4 in full, 5, 6 |
 
 Record the wall-clock time of each run in the report; after the first
-`full` run write the figure here so the next session can plan.
+`full` run write the figure here so the next session can plan. First
+`full` run (2026-10-26, 0.2.1): phases 1–4 took 28 min wall clock (11
+agents in parallel plus the verifier), the fixes about 2.5 h, the whole
+run about 3.5 h including the final checks.
 
 `quick` is fine while the diff since the last audit is under ~30 source
 files (`git diff --name-only "$base"..main -- src | wc -l`). Above that
