@@ -16,12 +16,31 @@ function slice(bodyBase64: string): Slice | null {
   }
 }
 
-/** Text comment from a slice that starts with op 0, or null (binary comments start with 0xff and are ignored). */
+/**
+ * Control characters other than tab, newline and carriage return, and U+FFFD (invalid UTF-8 decoded), make a comment
+ * "not text". A payer controls the comment; PostgreSQL refuses U+0000 in `text`, so such a comment is treated as
+ * absent and never stored, and the transfer itself is still verified.
+ */
+function isText(text: string): boolean {
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (cp === 0xfffd) return false;
+    if (cp < 0x20 && cp !== 0x09 && cp !== 0x0a && cp !== 0x0d) return false;
+    if (cp >= 0x7f && cp <= 0x9f) return false;
+  }
+  return true;
+}
+
+/**
+ * Text comment from a slice that starts with op 0, or null. Binary comments (TEP-74) start with the byte 0xff: it
+ * is checked on the raw bits, because UTF-8 decoding turns that byte into U+FFFD, not "ÿ".
+ */
 function textComment(s: Slice): string | null {
   if (s.remainingBits < 32) return null;
   if (s.loadUint(32) !== OP_TEXT_COMMENT) return null;
+  if (s.remainingBits >= 8 && s.preloadUint(8) === 0xff) return null;
   const text = s.loadStringTail();
-  if (text.length > MAX_COMMENT || text.startsWith("ÿ")) return null;
+  if (text.length > MAX_COMMENT || !isText(text)) return null;
   return text;
 }
 
