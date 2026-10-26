@@ -47,7 +47,7 @@ const b64ToHex = (b: string) => Buffer.from(b, "base64").toString("hex");
 
 interface Routes {
   tx?: (hash: string) => Json;
-  list?: () => Json;
+  list?: (url: URL) => Json;
   getMethod?: () => Json;
 }
 
@@ -59,7 +59,7 @@ function fake(routes: Routes) {
     let body: Json = {};
     if (u.pathname === "/api/v3/transactions" && u.searchParams.get("hash"))
       body = routes.tx?.(u.searchParams.get("hash") ?? "") ?? { transactions: [] };
-    else if (u.pathname === "/api/v3/transactions") body = routes.list?.() ?? { transactions: [] };
+    else if (u.pathname === "/api/v3/transactions") body = routes.list?.(u) ?? { transactions: [] };
     else if (u.pathname === "/api/v3/runGetMethod") body = routes.getMethod?.() ?? {};
     return new Response(JSON.stringify(body), { status: 200 });
   };
@@ -326,6 +326,40 @@ describe("fetchIncoming (indexer candidates)", () => {
     const third = await a.fetchIncoming(USDT, [owner], second.next, 2);
     expect(calls[20]?.searchParams.get("offset")).toBe("20");
     expect(JSON.parse(third.next)).toEqual({ [JETTON_WALLET]: S + 50 });
+  });
+
+  it("transactions with huge message bodies: the page shrinks until the response fits, nothing is skipped", async () => {
+    // Anyone can send the jetton-wallet a 256 KiB body; 2 such rows fit the 1 MB test limit, 4 do not.
+    const big = (i: number, pad: number) => {
+      const t = credit1().transactions[0];
+      t.hash = Buffer.from(String(i).padStart(32, "0")).toString("base64");
+      t.in_msg.message_content.decoded = "x".repeat(pad);
+      return t;
+    };
+    const rows = (pad: number) => [0, 1, 2, 3, 4, 5].map((i) => big(i, pad));
+    let all = rows(300_000);
+    const { fn, calls } = fake({
+      list: (u) => {
+        const offset = Number(u.searchParams.get("offset"));
+        return { transactions: all.slice(offset, offset + Number(u.searchParams.get("limit"))) };
+      },
+    });
+    const res = await adapter(fn).fetchIncoming(USDT, [owner], null, 50);
+    expect(res.candidates.map((c) => c.txHash)).toEqual(all.map((t) => b64ToHex(t.hash)));
+    expect(calls.map((u) => [u.searchParams.get("limit"), u.searchParams.get("offset")])).toEqual([
+      ["50", "0"], // 15 MB: too large
+      ["25", "0"],
+      ["13", "0"],
+      ["7", "0"],
+      ["4", "0"],
+      ["2", "0"], // fits
+      ["4", "2"], // grows back: too large again
+      ["2", "2"],
+      ["4", "4"], // the last two rows, a short page: done
+    ]);
+    // a single transaction above the limit is a provider problem, not something to skip
+    all = rows(1_200_000);
+    await expect(adapter(fn).fetchIncoming(USDT, [owner], null, 50)).rejects.toThrow("too large");
   });
 
   it("re-reads an overlap window from the cursor (duplicates are dropped by the database)", async () => {

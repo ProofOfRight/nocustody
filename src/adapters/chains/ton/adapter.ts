@@ -23,7 +23,7 @@ import type { PaymentInstructions } from "../../../domain/invoice.ts";
 import { Money } from "../../../domain/money.ts";
 import type { NetworkId } from "../../../domain/network.ts";
 import { txRef } from "../../../domain/tx-ref.ts";
-import type { JsonHttpClient } from "../../http/json-client.ts";
+import { type JsonHttpClient, ResponseTooLargeError } from "../../http/json-client.ts";
 import { pageOffset, parseTimeCursor, recordProgress, type TimeCursor, windowStart } from "../cursor.ts";
 import { canonicalTon, friendlyTon, parseTonAddress } from "./address.ts";
 import {
@@ -163,28 +163,40 @@ export class TonAdapter implements ChainAdapter {
       const baseOffset = pageOffset(state, account);
       let rows = 0;
       let full = true;
-      for (let page = 0; page < maxPages; page++) {
-        const res = await this.#o.client.get(
-          "/api/v3/transactions",
-          {
-            account,
-            start_utime: String(fromUtime),
-            sort: "asc",
-            limit: String(pageSize),
-            offset: String(baseOffset + page * pageSize),
-          },
-          tonTransactionsSchema,
-        );
+      // Anyone can send our jetton-wallet messages with bodies up to 256 KiB, and toncenter returns bodies whole:
+      // a page of such transactions exceeds the response limit. Halve the page until it fits, grow back after.
+      let size = pageSize;
+      for (let page = 0; page < maxPages; ) {
+        let res: { transactions: TonTransaction[] };
+        try {
+          res = await this.#o.client.get(
+            "/api/v3/transactions",
+            {
+              account,
+              start_utime: String(fromUtime),
+              sort: "asc",
+              limit: String(size),
+              offset: String(baseOffset + rows),
+            },
+            tonTransactionsSchema,
+          );
+        } catch (e) {
+          if (!(e instanceof ResponseTooLargeError) || size === 1) throw e;
+          size = Math.ceil(size / 2);
+          continue;
+        }
+        page++;
         rows += res.transactions.length;
         for (const t of res.transactions) {
           next[account] = Math.max(next[account] ?? 0, t.now);
           const c = this.#candidate(asset, owner, t);
           if (c) out.push(c);
         }
-        if (res.transactions.length < pageSize) {
+        if (res.transactions.length < size) {
           full = false;
           break;
         }
+        size = Math.min(pageSize, size * 2);
       }
       if (full) exhausted = true;
       recordProgress(next, state, account, seen, full, rows);

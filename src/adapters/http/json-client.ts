@@ -34,6 +34,14 @@ export class ProviderError extends Error {
   }
 }
 
+/** The response exceeded maxResponseBytes; a caller that pages can ask again for fewer rows. */
+export class ResponseTooLargeError extends ProviderError {
+  constructor(path: string) {
+    super(`${path}: response too large`, false);
+    this.name = "ResponseTooLargeError";
+  }
+}
+
 const RETRY_STATUS = new Set([403, 408, 429, 500, 502, 503, 504]);
 
 export class JsonHttpClient {
@@ -145,7 +153,7 @@ export class JsonHttpClient {
     const declared = Number(res.headers.get("content-length") ?? "0");
     if (declared > this.#o.maxResponseBytes) {
       await res.body?.cancel();
-      throw new ProviderError(`${path}: response too large`, false);
+      throw new ResponseTooLargeError(path);
     }
     if (!res.body) return "";
     const reader = res.body.getReader();
@@ -157,7 +165,7 @@ export class JsonHttpClient {
       size += value.byteLength;
       if (size > this.#o.maxResponseBytes) {
         await reader.cancel();
-        throw new ProviderError(`${path}: response too large`, false);
+        throw new ResponseTooLargeError(path);
       }
       chunks.push(value);
     }
