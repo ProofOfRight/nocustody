@@ -46,7 +46,8 @@ COPY --from=node /usr/lib/libstdc++.so.6* /usr/lib/libgcc_s.so.1 /usr/lib/libato
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=deps /src/node_modules /app/node_modules
 COPY --from=build /src/dist /app/dist
-COPY package.json LICENSE NOTICE /app/
+# Explicit mode: the host's umask must not change the image digest (reproducible builds).
+COPY --chmod=0644 package.json LICENSE NOTICE /app/
 # Files belong to root and are not writable by the process; run with a read-only root filesystem.
 USER 65532:65532
 WORKDIR /app
