@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Minimal HTTPS JSON client for blockchain providers: https only, no redirects, never leaves the configured host,
 // timeout, response size limit, schema validation, client-side rate limit, retries with exponential backoff and
-// jitter. The API key is sent only in its header.
+// jitter. The API key is sent only in its header. Integers beyond 2^53 are never rounded: they parse as bigint, so a
+// schema expecting a number rejects them instead of accepting a different amount.
 import { randomInt } from "node:crypto";
 import type { z } from "zod";
 
@@ -43,6 +44,15 @@ export class ResponseTooLargeError extends ProviderError {
 }
 
 const RETRY_STATUS = new Set([403, 408, 429, 500, 502, 503, 504]);
+
+/** JSON.parse reviver: an integer literal that a double cannot hold exactly becomes a bigint of its source text. */
+const exactIntegers = (_key: string, value: unknown, context?: { source?: string }): unknown =>
+  typeof value === "number" &&
+  !Number.isSafeInteger(value) &&
+  context?.source !== undefined &&
+  /^-?\d+$/.test(context.source)
+    ? BigInt(context.source)
+    : value;
 
 export class JsonHttpClient {
   readonly #base: URL;
@@ -134,7 +144,7 @@ export class JsonHttpClient {
     const text = await this.#readLimited(res, url.pathname);
     let json: unknown;
     try {
-      json = JSON.parse(text);
+      json = JSON.parse(text, exactIntegers);
     } catch {
       throw new ProviderError(`${url.pathname}: response is not JSON`, false);
     }
