@@ -1,5 +1,10 @@
 # nocustody
 
+[![CI](https://github.com/ProofOfRight/nocustody/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ProofOfRight/nocustody/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ProofOfRight/nocustody)](https://github.com/ProofOfRight/nocustody/releases)
+[![License](https://img.shields.io/github/license/ProofOfRight/nocustody)](LICENSE)
+[![Signed provenance](https://img.shields.io/badge/provenance-signed-2ea44f)](https://github.com/ProofOfRight/nocustody/attestations)
+
 Self-hosted, **non-custodial (watch-only)** crypto payment gateway.
 
 The gateway issues invoices, watches the merchant's own addresses on supported blockchains, strictly verifies incoming
