@@ -1,0 +1,4 @@
+# Baseline of the candidates printed by scripts/security_scan.sh (project-audit skill, references/security.md).
+# Tab-separated columns: section · file (empty for lines without a file, e.g. route tables) · line text without
+# the line number (whitespace collapsed) · why it is fine · review date.
+# The script prints such candidates as "reviewed", others as "NEW", entries without a candidate as "stale" (delete).
