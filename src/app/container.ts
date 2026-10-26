@@ -39,6 +39,7 @@ import { IngestTransfers } from "../application/use-cases/ingest-transfers.ts";
 import { Monitor } from "../application/use-cases/monitor.ts";
 import { QuotePrice } from "../application/use-cases/quote-price.ts";
 import { ResolveAmlHold } from "../application/use-cases/resolve-aml-hold.ts";
+import { ScreenPayments } from "../application/use-cases/screen-payments.ts";
 import { SettlePayments } from "../application/use-cases/settle-payments.ts";
 import { VerifyTransfers } from "../application/use-cases/verify-transfers.ts";
 import { chainAddress } from "../domain/chain-address.ts";
@@ -70,6 +71,8 @@ export interface NetworkWorker {
   readonly ingest: IngestTransfers;
   readonly verify: VerifyTransfers;
   readonly settle: SettlePayments;
+  /** AML screening; one instance shared by every network (it screens all aml_pending invoices). */
+  readonly screen: ScreenPayments;
   readonly pollIntervalMs: number;
 }
 
@@ -129,6 +132,18 @@ export function buildContainer(o: ContainerOptions) {
     logger.error({ err: err instanceof Error ? err.message : String(err) }, "alert delivery failed"),
   );
   const aml = o.aml ?? buildAml(ops.aml);
+  const screenPayments = new ScreenPayments({
+    catalog,
+    aml,
+    uow,
+    clock,
+    batchSize: 100,
+    onError: (subject, err) =>
+      logger.error(
+        { subject, err: err instanceof Error ? err.message : String(err) },
+        "AML screening failed",
+      ),
+  });
   const maxPendingMs = parseDuration(ops.candidateMaxAge);
 
   const createInvoice = new CreateInvoice({
@@ -185,12 +200,12 @@ export function buildContainer(o: ContainerOptions) {
         network: adapter.network,
         catalog,
         strategies,
-        aml,
         uow,
         clock,
         batchSize: 100,
         onError: onSettleError,
       }),
+      screen: screenPayments,
       pollIntervalMs: parseDuration(tron.pollInterval),
     });
   }
@@ -249,12 +264,12 @@ export function buildContainer(o: ContainerOptions) {
         network,
         catalog,
         strategies,
-        aml,
         uow,
         clock,
         batchSize: 100,
         onError: onSettleError,
       }),
+      screen: screenPayments,
       pollIntervalMs: parseDuration(ton.pollInterval),
     });
   }
@@ -451,7 +466,7 @@ const normaliseAddress: AddressNormaliser = (network, raw) => {
 };
 
 /**
- * One scanner → verifier → settlement pass for one network, with its heartbeat. In `run` every network has its
+ * One scanner → verifier → settlement → screening pass for one network, with its heartbeat. In `run` every network has its
  * own loop at its own pollInterval, so a slow provider delays only its own network.
  */
 export async function runNetwork(c: Container, w: NetworkWorker) {
@@ -460,8 +475,9 @@ export async function runNetwork(c: Container, w: NetworkWorker) {
     const ingest = await w.ingest.execute();
     const verify = await w.verify.execute();
     const settle = await w.settle.execute();
+    const screen = await w.screen.execute();
     await c.uow.run((r) => r.heartbeats.ok(role, c.clock.now()));
-    return { network: w.adapter.network, ingest, verify, settle };
+    return { network: w.adapter.network, ingest, verify, settle, screen };
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     await c.uow.run((r) => r.heartbeats.error(role, c.clock.now(), error)).catch(() => undefined);

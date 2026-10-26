@@ -17,6 +17,7 @@ import { InMemoryStore } from "./testing/in-memory.ts";
 import { CreateInvoice } from "./use-cases/create-invoice.ts";
 import { deviationBps, exceedsDeviation, Monitor } from "./use-cases/monitor.ts";
 import { ResolveAmlHold } from "./use-cases/resolve-aml-hold.ts";
+import { ScreenPayments } from "./use-cases/screen-payments.ts";
 import { SettlePayments } from "./use-cases/settle-payments.ts";
 import { VerifyTransfers } from "./use-cases/verify-transfers.ts";
 
@@ -384,12 +385,6 @@ describe("verifier and settlement policies", () => {
         network: TRON,
         catalog: s.catalog,
         strategies: () => new UniqueAmountStrategy(),
-        aml: {
-          screen: async (i) => {
-            screened.push(i.from);
-            return { verdict: "hold", reason: "high risk" };
-          },
-        },
         uow: s.store,
         clock: s.clock,
         batchSize: 10,
@@ -405,6 +400,18 @@ describe("verifier and settlement policies", () => {
         );
       });
       await settle.execute();
+      await new ScreenPayments({
+        catalog: s.catalog,
+        aml: {
+          screen: async (i) => {
+            screened.push(i.from);
+            return { verdict: "hold", reason: "high risk" };
+          },
+        },
+        uow: s.store,
+        clock: s.clock,
+        batchSize: 10,
+      }).execute();
       expect(s.store.data.invoices.get(invoice.id)?.status).toBe(expected);
       expect(screened.length > 0).toBe(expected === "aml_hold");
       if (expected === "aml_hold") {

@@ -85,8 +85,8 @@ payments, TTL, grace; the AML threshold is per asset in the application's asset 
 One image, several roles selected at start-up (`run --roles api,worker,dispatcher,monitor`, default: all four;
 [operations.md](operations.md)): `api` (REST and the payment page); `worker` — one loop per network at its own
 poll interval, each cycle scans candidates by cursor, stores them idempotently and advances the cursor only after
-the write, drives candidates to finality and settles verified transfers in one transaction each, plus an expiry
-loop; `dispatcher` (delivers the outbox); `monitor` (heartbeats, the pinned-config guard, reconciliation with a
+the write, drives candidates to finality, settles verified transfers in one transaction each and screens credited
+invoices (AML, a separate step so that a vendor is never added inside settlement), plus an expiry loop; `dispatcher` (delivers the outbox); `monitor` (heartbeats, the pinned-config guard, reconciliation with a
 second source, depeg protection, retention). Roles can run in separate processes against one database; per-process
 state is limited to alert cooldowns, API rate-limit buckets and the provider request spacing, so run one `worker`
 per network and expect alerts to repeat per monitor process.

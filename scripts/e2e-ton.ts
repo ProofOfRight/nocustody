@@ -120,7 +120,9 @@ async function replay(): Promise<boolean> {
     for (let i = 0; i < 6; i++) {
       const r = await runCycle(c);
       console.log(
-        JSON.stringify(r.results.map((x) => ({ ingest: x.ingest, verify: x.verify, settle: x.settle }))),
+        JSON.stringify(
+          r.results.map((x) => ({ ingest: x.ingest, verify: x.verify, settle: x.settle, screen: x.screen })),
+        ),
       );
       const done = await c.pool.query(
         "SELECT count(*)::int AS n FROM invoices WHERE id = ANY($1) AND status = 'completed'",

@@ -13,6 +13,7 @@ import { UniqueAmountStrategy } from "../../../application/strategies/unique-amo
 import { FakeChain } from "../../../application/testing/fake-chain.ts";
 import { CreateInvoice } from "../../../application/use-cases/create-invoice.ts";
 import { IngestTransfers } from "../../../application/use-cases/ingest-transfers.ts";
+import { ScreenPayments } from "../../../application/use-cases/screen-payments.ts";
 import { SettlePayments } from "../../../application/use-cases/settle-payments.ts";
 import { VerifyTransfers } from "../../../application/use-cases/verify-transfers.ts";
 import { STRICT_AMOUNT_POLICY, uniqueAmountPolicy } from "../../../domain/amount-policy.ts";
@@ -493,12 +494,19 @@ describe("PostgreSQL repositories", () => {
       network: TRON,
       catalog,
       strategies,
+      uow,
+      clock,
+      batchSize: 10,
+    }).execute();
+    expect(stats).toMatchObject({ matched: 1 });
+    const screened = await new ScreenPayments({
+      catalog,
       aml: new NoopAmlScreener(),
       uow,
       clock,
       batchSize: 10,
     }).execute();
-    expect(stats).toMatchObject({ matched: 1, completed: 1 });
+    expect(screened).toMatchObject({ completed: 1 });
 
     const stored = await uow.run((r) => r.invoices.findById(a.invoice.id));
     expect(stored?.status).toBe("completed");

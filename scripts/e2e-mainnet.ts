@@ -205,7 +205,7 @@ async function replay(p: Pick, url: string): Promise<boolean> {
     for (let i = 0; i < 6; i++) {
       const r = await runCycle(c);
       console.log(
-        `  cycle ${i + 1}: ${JSON.stringify(r.results.map((x) => ({ ingest: x.ingest, verify: x.verify, settle: x.settle })))}`,
+        `  cycle ${i + 1}: ${JSON.stringify(r.results.map((x) => ({ ingest: x.ingest, verify: x.verify, settle: x.settle, screen: x.screen })))}`,
       );
       const inv = await c.uow.run((repo) => repo.invoices.findById(invoice.id));
       if (inv?.status === "completed") break;
