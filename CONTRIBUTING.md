@@ -34,6 +34,10 @@ Everything runs in Docker (`compose.yaml`); the host needs only Docker and `make
 | `make format` | apply Biome formatting and safe fixes |
 | `make shell` | shell in the dev container |
 | `make up` / `make down` | start / stop PostgreSQL |
+| `make smoke-image` | build the production image and smoke-test it with `deploy/compose.yaml` |
+| `make php-selftest` | PHP and Laravel examples: syntax and webhook signature check |
+| `make e2e-nile`, `make e2e-ton`, `make e2e-api`, `make e2e-ops` | end-to-end scenarios on the testnets ([testnet.md](docs/testnet.md), [ton-testnet.md](docs/ton-testnet.md)) |
+| `make e2e-mainnet` | read-only replay of real mainnet payments ([going-live.md](docs/going-live.md)) |
 
 Run `make check` before every commit.
 
