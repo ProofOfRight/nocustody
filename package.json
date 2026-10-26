@@ -23,6 +23,7 @@
     "e2e:ton": "node scripts/e2e-ton.ts",
     "e2e:api": "node scripts/e2e-api.ts",
     "e2e:ops": "node scripts/e2e-ops.ts",
+    "e2e:mainnet": "node scripts/e2e-mainnet.ts",
     "db:migrate": "node src/app/cli.ts db:migrate",
     "build": "tsc -p tsconfig.build.json && cp -R src/adapters/persistence/pg/migrations dist/adapters/persistence/pg/"
   },
