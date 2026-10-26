@@ -151,6 +151,45 @@ describe("config", () => {
     expect(() => parseDuration("1.5h")).toThrow();
     expect(() => parseDuration("10")).toThrow();
   });
+
+  it("refuses zero durations and timer intervals Node would clamp to 1 ms", () => {
+    const tron = {
+      network: "tron:mainnet",
+      apiUrl: "https://api.trongrid.io",
+      startFrom: "2026-10-26T00:00:00Z",
+    };
+    expect(() => parseConfig({ ...base(), tron: { ...tron, pollInterval: "0s" } }, validators)).toThrow(
+      ConfigError,
+    );
+    expect(() => parseConfig({ ...base(), tron: { ...tron, pollInterval: "30d" } }, validators)).toThrow(
+      ConfigError,
+    );
+    expect(() => parseConfig({ ...base(), tron: { ...tron, timeout: "500ms" } }, validators)).toThrow(
+      ConfigError,
+    );
+    expect(() => parseConfig(withAsset({ ttl: "0s" }), validators)).toThrow(ConfigError);
+    expect(() => parseConfig({ ...base(), ops: { depeg: { interval: "25d" } } }, validators)).toThrow(
+      ConfigError,
+    );
+    // arithmetic-only durations keep their range: a manual rate valid for a year is fine
+    expect(parseConfig(base(), validators).manualRates[0]?.maxAgeMs).toBe(365 * 86_400_000);
+    expect(
+      parseConfig({ ...base(), tron: { ...tron, pollInterval: "24d" } }, validators).raw.tron?.pollInterval,
+    ).toBe("24d");
+  });
+
+  it("refuses two ids for one on-chain asset and a depeg symbol no asset is priced in", () => {
+    const c = base();
+    const first = (c.assets as Record<string, unknown>[])[0] as Record<string, unknown>;
+    c.assets = [first, { ...first, id: "usdt-tron-2" }];
+    expect(() => parseConfig(c, validators)).toThrow(/same asset/);
+    expect(() => parseConfig({ ...base(), ops: { depeg: { symbol: "USTD" } } }, validators)).toThrow(
+      /priceSymbol/,
+    );
+    expect(
+      parseConfig({ ...base(), ops: { depeg: { symbol: "USDT" } } }, validators).raw.ops.depeg?.symbol,
+    ).toBe("USDT");
+  });
 });
 
 describe("TON config", () => {

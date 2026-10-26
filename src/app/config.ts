@@ -15,14 +15,19 @@ import { type NetworkId, networkFamily, networkId } from "../domain/network.ts";
 import { parseDuration } from "./duration.ts";
 
 const decimal = z.string().regex(/^(0|[1-9]\d*)(\.\d+)?$/, "non-negative decimal string");
-const duration = z.string().refine((s) => {
-  try {
-    parseDuration(s);
-    return true;
-  } catch {
-    return false;
-  }
-}, "duration like 30s, 30m, 1h, 7d");
+/** A duration string within [min, max] milliseconds; zero is never a sensible duration ("0s" would busy-loop). */
+const durationBetween = (minMs: number, maxMs: number, hint: string) =>
+  z.string().refine((s) => {
+    try {
+      const ms = parseDuration(s);
+      return ms >= minMs && ms <= maxMs;
+    } catch {
+      return false;
+    }
+  }, `duration like 30s, 30m, 1h, 7d, ${hint}`);
+const duration = durationBetween(1, Number.MAX_SAFE_INTEGER, "above zero");
+/** For intervals and timeouts that drive setTimeout: Node clamps anything above 2^31−1 ms (24.8 days) to 1 ms. */
+const timerDuration = durationBetween(1_000, 24 * 86_400_000, "between 1s and 24d");
 const httpsUrl = z
   .string()
   .url()
@@ -73,8 +78,8 @@ const tronSchema = z
     network: z.string(),
     apiUrl: httpsUrl,
     apiKeyEnv: envName.optional(),
-    timeout: duration.default("10s"),
-    pollInterval: duration.default("10s"),
+    timeout: timerDuration.default("10s"),
+    pollInterval: timerDuration.default("10s"),
     /** Rescan overlap so transfers near the previous window edge are never skipped. */
     overlap: duration.default("10m"),
     /** Where scanning starts when there is no cursor yet. */
@@ -88,12 +93,12 @@ const tonSchema = z
     network: z.string(),
     apiUrl: httpsUrl,
     apiKeyEnv: envName.optional(),
-    timeout: duration.default("10s"),
-    pollInterval: duration.default("10s"),
+    timeout: timerDuration.default("10s"),
+    pollInterval: timerDuration.default("10s"),
     overlap: duration.default("10m"),
     startFrom: z.string().datetime(),
     /** toncenter allows 1 request/s without a key. */
-    minInterval: duration.default("1100ms"),
+    minInterval: timerDuration.default("1100ms"),
     maxResponseBytes: z.number().int().min(1_024).max(50_000_000).default(5_000_000),
   })
   .strict();
@@ -124,7 +129,7 @@ const webhookSchema = z
     allowPrivateNetworks: z.boolean().default(false),
     /** Allow plain http (only sensible together with a trusted private network). */
     allowHttp: z.boolean().default(false),
-    timeout: duration.default("10s"),
+    timeout: timerDuration.default("10s"),
     maxAttempts: z.number().int().min(1).max(100).default(15),
     baseDelay: duration.default("30s"),
     maxDelay: duration.default("6h"),
@@ -153,7 +158,7 @@ const opsSchema = z
     candidateMaxAge: duration.default("24h"),
     reconcile: z
       .object({
-        interval: duration.default("1h"),
+        interval: timerDuration.default("1h"),
         lookback: duration.default("3h"),
         settleDelay: duration.default("10m"),
         tron: secondarySchema.optional(),
@@ -169,7 +174,7 @@ const opsSchema = z
           .regex(/^[A-Z][A-Z0-9]{1,9}$/)
           .default("USDT"),
         maxDeviationBps: z.number().int().min(1).max(5_000).default(150),
-        interval: duration.default("5m"),
+        interval: timerDuration.default("5m"),
         sources: z
           .array(z.enum(["kraken", "coinbase"]))
           .min(1)
@@ -304,8 +309,22 @@ export function parseConfig(json: unknown, validators: AddressValidators): Confi
       amlThresholdUnits: parseDecimal(a.amlThreshold, a.decimals),
     };
   });
+  // Two ids for one on-chain asset would let a payment for one id's invoice settle the other's (the slot exclusion
+  // and the candidate stream are per asset id).
+  const identities = new Map<string, string>();
+  for (const a of assets) {
+    const identity = `${a.asset.network}/${a.asset.kind}/${a.asset.contract ?? "-"}`;
+    const other = identities.get(identity);
+    if (other)
+      throw new ConfigError(`assets ${other} and ${a.asset.id} are the same asset (network, kind, contract)`);
+    identities.set(identity, a.asset.id);
+  }
   for (const c of raw.pricing.currencies) {
     if (!isIsoCurrency(c)) throw new ConfigError(`pricing.currencies: ${c} is not an ISO 4217 currency`);
+  }
+  // The depeg guard is read by CreateInvoice under the asset's priceSymbol; a symbol no asset uses guards nothing.
+  if (raw.ops.depeg && !assets.some((a) => a.priceSymbol === raw.ops.depeg?.symbol)) {
+    throw new ConfigError(`ops.depeg.symbol ${raw.ops.depeg.symbol} is not the priceSymbol of any asset`);
   }
   return {
     raw,
