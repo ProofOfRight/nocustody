@@ -13,7 +13,7 @@ import { DomainError } from "../../domain/errors.ts";
 import type { Invoice, InvoiceStatus } from "../../domain/invoice.ts";
 import { authenticate, isTokenShaped } from "./keys.ts";
 import { type Lang, pickLanguage } from "./page/i18n.ts";
-import { contentSecurityPolicy, NETWORK_NAMES, renderPaymentPage } from "./page/render.ts";
+import { contentSecurityPolicy, isPayable, NETWORK_NAMES, renderPaymentPage } from "./page/render.ts";
 
 export interface ApiDeps {
   readonly uow: UnitOfWork;
@@ -411,7 +411,9 @@ export class ApiServer {
                   d.adapters.find((a) => a.network === s.asset.network)?.buildPaymentUri(s.instructions) ??
                   null,
                 expiresAt: s.expiresAt.toISOString(),
+                graceUntil: s.graceUntil.toISOString(),
                 statusUrl: `/pay/${encodeURIComponent(s.id)}/status`,
+                payable: isPayable(s.status, s.graceUntil, d.clock.now()),
               },
               lang,
               nonce,
