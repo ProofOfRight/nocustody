@@ -47,12 +47,17 @@ final class HandleNocustodyEvent implements ShouldQueue
                 ->where('invoice_id', $invoice['id'])
                 ->update(['status' => $invoice['status'], 'updated_at' => now()]);
 
+            // A paid invoice moves through aml_pending to completed in the same cycle, so paid / overpaid / paid_late
+            // are event types you receive, not statuses you read back. Decide "needs a person" by the event type and
+            // grant access only when the re-read invoice says completed.
+            if (in_array($type, ['invoice.underpaid', 'invoice.overpaid', 'invoice.paid_late', 'invoice.aml_hold'], true)) {
+                // YOUR CODE: needs a human — notify support with $orderId, $type and the amounts in $invoice
+                // (received versus payment.amount). Refunds are manual, from your own wallet.
+                Log::warning('nocustody: invoice needs attention', ['order' => $orderId, 'event' => $type]);
+            }
             if ($invoice['status'] === 'completed') {
                 // YOUR CODE: grant access for $orderId exactly once (e.g. inside a transaction, guarded by order state).
                 Log::info('nocustody: order paid', ['order' => $orderId, 'invoice' => $invoice['id']]);
-            } elseif (in_array($invoice['status'], ['underpaid', 'overpaid', 'paid_late', 'aml_hold'], true)) {
-                // YOUR CODE: needs a human — notify support with $orderId and the amounts in $invoice.
-                Log::warning('nocustody: invoice needs attention', ['order' => $orderId, 'status' => $invoice['status']]);
             }
         } elseif ($type === 'transfer.unmatched') {
             // A payment that matched no invoice (wrong amount, no memo, too late): resolve it manually.

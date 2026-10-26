@@ -210,7 +210,8 @@ async function main(argv: string[]): Promise<void> {
             await container.pool.query("SELECT key, blocked, reason, updated_at FROM guards ORDER BY key")
           ).rows,
           invoices: await q(
-            "SELECT status AS k, count(*)::int AS n FROM invoices WHERE status IN ('underpaid','overpaid','paid_late','aml_pending','aml_hold') GROUP BY status",
+            // paid / overpaid / paid_late move to aml_pending in the same transaction; only these statuses persist
+            "SELECT status AS k, count(*)::int AS n FROM invoices WHERE status IN ('underpaid','aml_pending','aml_hold') GROUP BY status",
           ),
           transfers: await q(
             "SELECT status AS k, count(*)::int AS n FROM observed_transfers WHERE status = 'unmatched' GROUP BY status",
