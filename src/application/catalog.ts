@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { AmountPolicy, UniqueAmountPolicy } from "../domain/amount-policy.ts";
-import type { Asset } from "../domain/asset.ts";
+import { type Asset, sameAsset } from "../domain/asset.ts";
 import type { ChainAddress } from "../domain/chain-address.ts";
 import type { NetworkId } from "../domain/network.ts";
 import type { PriceSymbol } from "../domain/pricing.ts";
@@ -47,6 +47,14 @@ export class AssetCatalog {
     for (const a of assets) {
       if (byId.has(a.asset.id))
         throw new ApplicationError("config.duplicate_asset", `duplicate asset ${a.asset.id}`);
+      for (const other of byId.values()) {
+        if (sameAsset(other.asset, a.asset)) {
+          throw new ApplicationError(
+            "config.duplicate_asset",
+            `${other.asset.id} and ${a.asset.id} are the same on-chain asset`,
+          );
+        }
+      }
       byId.set(a.asset.id, a);
     }
     this.#byId = byId;
