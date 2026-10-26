@@ -70,10 +70,26 @@ export interface NetworkWorker {
   readonly pollIntervalMs: number;
 }
 
+/**
+ * Connection pool with the handler pg requires: pg-pool emits "error" when an idle client loses its connection
+ * (PostgreSQL restart, failover); without a listener that is an uncaught exception and the whole process exits.
+ */
+export function createPool(connectionString: string, o: { max?: number; statementTimeoutMs?: number } = {}) {
+  const pool = new pg.Pool({
+    connectionString,
+    max: o.max ?? 10,
+    connectionTimeoutMillis: 10_000,
+    keepAlive: true,
+    ...(o.statementTimeoutMs ? { statement_timeout: o.statementTimeoutMs } : {}),
+  });
+  pool.on("error", (err) => logger.error({ err: err.message }, "database connection lost on an idle client"));
+  return pool;
+}
+
 export function buildContainer(o: ContainerOptions) {
   const env = o.env ?? process.env;
   const clock = o.clock ?? systemClock;
-  const pool = new pg.Pool({ connectionString: o.databaseUrl, max: 10 });
+  const pool = createPool(o.databaseUrl, { max: 10, statementTimeoutMs: 60_000 });
   const catalog = new AssetCatalog(o.config.assets);
   const uow = new PgUnitOfWork(pool, new Map(o.config.assets.map((s) => [s.asset.id, s.asset])));
   const onSettleError = (subject: string, err: unknown) =>

@@ -11,12 +11,11 @@
 //   node src/app/cli.ts invoice:aml-resolve <id> approve|reject --note <text>
 //   node src/app/cli.ts run [--roles api,worker,dispatcher,monitor]   (default: all four)
 import { parseArgs } from "node:util";
-import pg from "pg";
 import { ALL_SCOPES, newApiKey } from "../adapters/api/keys.ts";
 import { migrate } from "../adapters/persistence/pg/migrate.ts";
 import type { ApiScope } from "../application/ports.ts";
 import { assertPinned, type Config, loadConfigFile } from "./config.ts";
-import { addressValidators, buildContainer, type Container, runCycle } from "./container.ts";
+import { addressValidators, buildContainer, type Container, createPool, runCycle } from "./container.ts";
 import { ConfigFilePinGuard } from "./integrity.ts";
 import { logger } from "./logger.ts";
 
@@ -62,7 +61,7 @@ async function main(argv: string[]): Promise<void> {
     }
     case "db:migrate": {
       const config = loadConfigFile(configPath(), addressValidators);
-      const pool = new pg.Pool({ connectionString: databaseUrl(config) });
+      const pool = createPool(databaseUrl(config), { max: 1 });
       try {
         logger.info(await migrate(pool), "migrations");
       } finally {
