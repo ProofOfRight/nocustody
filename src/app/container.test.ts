@@ -57,6 +57,58 @@ describe("composition root", () => {
     }
   });
 
+  it("wires TRON and TON side by side, each with its own poll interval", async () => {
+    const base = config();
+    const c = buildContainer({
+      config: parseConfig(
+        {
+          ...base.raw,
+          tron: { ...base.raw.tron, pollInterval: "7s" },
+          ton: {
+            network: "ton:testnet",
+            apiUrl: "https://testnet.toncenter.com",
+            startFrom: "2026-10-26T00:00:00Z",
+            pollInterval: "15s",
+          },
+          assets: [
+            ...(base.raw.assets as unknown[]),
+            {
+              id: "gram-testnet",
+              network: "ton:testnet",
+              kind: "native",
+              contract: null,
+              decimals: 9,
+              symbol: "GRAM",
+              priceSymbol: "GRAM",
+              strategy: "memo",
+              addresses: [
+                {
+                  address: "0:326bcaf1f252ca9e3458fe73348566afe805f7c5b40339277260bcb2fc8762b0",
+                  status: "active",
+                },
+              ],
+              amounts: { step: "0.001", maxSlots: 99 },
+            },
+          ],
+        },
+        addressValidators,
+      ),
+      databaseUrl: DB,
+      integrity,
+      env: {},
+    });
+    try {
+      expect(c.workers.map((w) => [w.adapter.network, w.pollIntervalMs])).toEqual([
+        ["tron:mainnet", 7_000],
+        ["ton:testnet", 15_000],
+      ]);
+      // the screening step is shared, not built per network
+      expect(c.workers[0]?.screen).toBe(c.workers[1]?.screen);
+    } finally {
+      await c.pool.end();
+    }
+  });
+
   it("refuses an asset whose network has no provider section", () => {
     expect(() =>
       buildContainer({
