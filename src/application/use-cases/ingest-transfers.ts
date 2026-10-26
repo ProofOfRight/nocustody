@@ -12,7 +12,7 @@ export interface IngestStats {
   duplicates: number;
   dust: number;
   ignored: number;
-  /** Scans that used their whole page budget: the scanner lags behind the chain (an alert is raised). */
+  /** Assets whose rows were still not all read after `maxScans` scans: the scanner lags (an alert is raised). */
   exhausted: number;
 }
 
@@ -22,15 +22,18 @@ export interface IngestTransfersDeps {
   readonly strategies: StrategyResolver;
   readonly uow: UnitOfWork;
   readonly clock: Clock;
+  /** Rows per indexer request, passed to the adapter as `limit`. */
   readonly pageSize: number;
-  readonly maxPages: number;
+  /** Scans per asset and cycle while the adapter reports `more`: catching up after a burst or an outage. */
+  readonly maxScans: number;
   readonly alerts?: AlertSink;
 }
 
 /**
  * Scanner step: fetch candidate transactions from the indexer, store them idempotently and advance the cursor in the
  * same transaction, so the cursor never moves past candidates that were not stored. A matching invoice is marked
- * "confirming" from the indexer's hint; nothing is credited here.
+ * "confirming" from the indexer's hint; nothing is credited here. The adapter pages through the indexer; this loop
+ * only follows its `more` from one stored cursor to the next.
  */
 export class IngestTransfers {
   readonly #deps: IngestTransfersDeps;
@@ -40,23 +43,17 @@ export class IngestTransfers {
   }
 
   async execute(): Promise<IngestStats> {
-    const { adapter, catalog, strategies, uow, clock, pageSize, maxPages } = this.#deps;
+    const { adapter, catalog, strategies, uow, clock, pageSize, maxScans } = this.#deps;
     const stats: IngestStats = { fetched: 0, inserted: 0, duplicates: 0, dust: 0, ignored: 0, exhausted: 0 };
     for (const settings of catalog.forNetwork(adapter.network)) {
       const watched = watchedAddresses(settings);
       const stream = settings.asset.id;
-      for (let page = 0; page < maxPages; page++) {
+      let more = true;
+      for (let scan = 0; scan < maxScans && more; scan++) {
         const cursor = await uow.run((r) => r.cursors.get(adapter.network, stream));
         const result = await adapter.fetchIncoming(settings.asset, watched, cursor, pageSize);
+        more = result.more;
         stats.fetched += result.candidates.length;
-        if (result.exhausted) {
-          stats.exhausted++;
-          await this.#deps.alerts?.send({
-            key: `scanner-budget:${stream}`,
-            severity: "warning",
-            message: `${adapter.network} ${stream}: more transactions than one scan reads; the scanner is catching up and may lag behind the chain`,
-          });
-        }
         await uow.run(async (repos) => {
           const now = clock.now();
           for (const c of result.candidates) {
@@ -104,7 +101,14 @@ export class IngestTransfers {
           }
           await repos.cursors.set(adapter.network, stream, result.next);
         });
-        if (result.candidates.length < pageSize) break;
+      }
+      if (more) {
+        stats.exhausted++;
+        await this.#deps.alerts?.send({
+          key: `scanner-budget:${stream}`,
+          severity: "warning",
+          message: `${adapter.network} ${stream}: more transactions than one cycle reads; the scanner is catching up and may lag behind the chain`,
+        });
       }
     }
     return stats;

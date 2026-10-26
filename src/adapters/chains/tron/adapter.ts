@@ -72,7 +72,7 @@ export class TronAdapter implements ChainAdapter {
     // One candidate per transaction, carrying its largest transfer to us: a dust row listed first must not hide a
     // real payment in the same transaction (the verifier reads every log anyway).
     const byTx = new Map<string, TransferCandidate>();
-    let exhausted = false;
+    let more = false;
     for (const address of addresses) {
       const seen = state[address.value] ?? 0;
       const from = windowStart(state, address.value, seen, this.#o.overlapMs, this.#o.startFrom.getTime());
@@ -118,10 +118,10 @@ export class TronAdapter implements ChainAdapter {
         }
         query.fingerprint = res.meta.fingerprint; // all other parameters must stay the same
       }
-      if (full) exhausted = true;
+      if (full) more = true;
       recordProgress(next, state, address.value, seen, full, rows);
     }
-    return { candidates: [...byTx.values()], next: JSON.stringify(next), exhausted };
+    return { candidates: [...byTx.values()], next: JSON.stringify(next), more };
   }
 
   async verify(

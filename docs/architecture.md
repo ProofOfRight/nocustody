@@ -70,7 +70,7 @@ payments, TTL, grace; the AML threshold is per asset in the application's asset 
 
 | Port | Purpose |
 |---|---|
-| `ChainAdapter` | `fetchIncoming` returns candidate transactions from an indexer (an untrusted hint) and reports an exhausted page budget; `verify` re-reads finalized state and returns the transfers it contains, with their real log index / lt ([ADR-0009](adr/0009-independent-finality-check.md)). TRON: [testnet.md](testnet.md); TON: [ton-testnet.md](ton-testnet.md) |
+| `ChainAdapter` | `fetchIncoming` returns candidate transactions from an indexer (an untrusted hint) and whether rows are left unread after its page budget (`more`; the scanner follows it from one stored cursor to the next); `verify` re-reads finalized state and returns the transfers it contains, with their real log index / lt ([ADR-0009](adr/0009-independent-finality-check.md)). TRON: [testnet.md](testnet.md); TON: [ton-testnet.md](ton-testnet.md) |
 | `SecondarySource` | an independent indexer for reconciliation; returns candidates only, never credits, and says whether its answer covers the whole window |
 | `PaymentInstructionStrategy` | allocates payment instructions and matches transfers; chosen per asset in config: `unique-amount` (TRON) or `memo` (TON: memo first, unique amount as fallback); later xpub derivation / reference key |
 | `RateProvider`, `PegPriceSource` | quotes for fiat → asset, chained in priority order with fallback; the market price of a pegged asset for depeg protection |

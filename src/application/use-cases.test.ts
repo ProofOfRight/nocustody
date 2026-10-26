@@ -145,7 +145,7 @@ function setup(
     uow: store,
     clock,
     pageSize: 2,
-    maxPages: 5,
+    maxScans: 5,
     alerts: { send: async (a) => void alerts.push(a) },
   });
   const verify = new VerifyTransfers({ adapter: chain, catalog, uow: store, clock, batchSize: 50 });
@@ -618,11 +618,27 @@ describe("payment flow", () => {
     expect(d.store.data.transfers.size).toBe(0);
   });
 
-  it("alerts when a scan used its whole page budget: the scanner lags behind the chain", async () => {
-    s.chain.exhausted = true;
+  it("alerts when rows are still unread after every scan of the cycle: the scanner lags behind the chain", async () => {
+    s.chain.alwaysMore = true;
     s.chain.pages = [[]];
     expect(await s.ingest.execute()).toMatchObject({ exhausted: 1 });
+    expect(s.chain.fetches).toBe(5);
     expect(s.alerts.at(-1)).toMatchObject({ key: "scanner-budget:usdt-tron", severity: "warning" });
+  });
+
+  it("follows `more` from one stored cursor to the next and stops when the adapter has caught up", async () => {
+    s.chain.pages = [[candidate("p1", "1", s.clock.now())], [], [candidate("p3", "2", s.clock.now())]];
+    expect(await s.ingest.execute()).toMatchObject({ fetched: 2, inserted: 2, exhausted: 0 });
+    expect(s.chain.fetches).toBe(3);
+    expect(await s.store.run((r) => r.cursors.get(TRON, "usdt-tron"))).toBe("3");
+    expect(s.alerts.some((a) => a.key.startsWith("scanner-budget"))).toBe(false);
+  });
+
+  it("does not re-read the indexer because a fully read scan returned many candidates", async () => {
+    // pageSize is 2: before `more`, a result of ≥ 2 candidates was taken for "there is another page"
+    s.chain.pages = [["q1", "q2", "q3"].map((h) => candidate(h, "1", s.clock.now()))];
+    expect(await s.ingest.execute()).toMatchObject({ inserted: 3, duplicates: 0 });
+    expect(s.chain.fetches).toBe(1);
   });
 
   it("does not advance the cursor when storing candidates fails", async () => {

@@ -70,7 +70,8 @@ A pull request adding or changing a chain adapter must satisfy all of the follow
 4. The recipient is compared against the pinned list of receiving addresses.
 5. The idempotency key is unique within a transaction (log index / lt / instruction index).
 6. Scan cursor: advances only after a durable write, overlaps the previous window, catches up after downtime
-   instead of jumping ahead.
+   instead of jumping ahead. `fetchIncoming` pages within its own budget and returns `more: true` exactly when rows
+   are left unread, never judging by the number of candidates.
 7. Tests cover: fake token, failed transaction, non-final transaction, several transfers in one transaction, dust,
    duplicate delivery, late payment.
 8. External hosts, rate limits and costs are documented.

@@ -145,7 +145,7 @@ export class TonAdapter implements ChainAdapter {
     const out: TransferCandidate[] = [];
     const pageSize = Math.min(256, Math.max(1, limit));
     const maxPages = this.#o.maxPagesPerAddress ?? 10;
-    let exhausted = false;
+    let more = false;
     for (const owner of addresses) {
       const token = asset.kind === "token";
       const account = token ? this.#jettonWallet(asset, owner.value) : owner.value;
@@ -198,10 +198,10 @@ export class TonAdapter implements ChainAdapter {
         }
         size = Math.min(pageSize, size * 2);
       }
-      if (full) exhausted = true;
+      if (full) more = true;
       recordProgress(next, state, account, seen, full, rows);
     }
-    return { candidates: out, next: JSON.stringify(next), exhausted };
+    return { candidates: out, next: JSON.stringify(next), more };
   }
 
   /** Hint extraction; the verifier re-checks everything against finalized state. */

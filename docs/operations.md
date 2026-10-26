@@ -29,8 +29,8 @@ Repeats of the same condition are muted for `cooldown`. Alerts:
 - `address_pin_violation` (critical) — the pinned parts of `config.json` changed on disk; new invoices are blocked;
 - `scanner-lag:<network>` (critical) — no successful cycle for longer than `ops.maxScannerLag` (defaults: TRON 5 min,
   TON 2 min);
-- `scanner-budget:<asset>` — a scan read its whole page budget: more transactions than one cycle reads, the scanner
-  is catching up (a burst on the address; it cannot freeze the cursor, but detection lags);
+- `scanner-budget:<asset>` — rows were still unread after every scan of a cycle: more transactions than one cycle
+  reads, the scanner is catching up (a burst on the address; it cannot freeze the cursor, but detection lags);
 - `dispatcher-lag` (critical) and `webhooks-backlog` — with webhooks configured: the dispatcher has not completed a
   cycle, or an event has been due without delivery, for longer than `ops.maxDispatcherLag` (default 5 min);
 - `webhooks-dead` — events in dead-letter (retry with `webhook:retry-dead [event-id]` after fixing the endpoint);

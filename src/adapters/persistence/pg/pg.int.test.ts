@@ -451,7 +451,7 @@ describe("PostgreSQL repositories", () => {
       uow,
       clock,
       pageSize: 10,
-      maxPages: 2,
+      maxScans: 2,
     }).execute();
     await new VerifyTransfers({ adapter: chain, catalog, uow, clock, batchSize: 10 }).execute();
     const stats = await new SettlePayments({

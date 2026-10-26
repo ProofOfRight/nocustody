@@ -9,8 +9,10 @@ export class FakeChain implements ChainAdapter {
   readonly network: NetworkId;
   pages: TransferCandidate[][] = [];
   verdicts = new Map<string, VerificationResult | Error>();
-  /** Reported with every fetch: the scan used its whole page budget. */
-  exhausted = false;
+  /** Every fetch reports `more`, as if the indexer always had another page. */
+  alwaysMore = false;
+  /** Number of fetchIncoming calls. */
+  fetches = 0;
 
   constructor(network: NetworkId) {
     this.network = network;
@@ -29,11 +31,12 @@ export class FakeChain implements ChainAdapter {
   }
 
   async fetchIncoming(_asset: unknown, _addresses: unknown, cursor: string | null): Promise<FetchResult> {
+    this.fetches++;
     const i = cursor ? Number(cursor) : 0;
     return {
       candidates: this.pages[i] ?? [],
       next: String(Math.min(i + 1, this.pages.length)),
-      exhausted: this.exhausted,
+      more: this.alwaysMore || i + 1 < this.pages.length,
     };
   }
 
