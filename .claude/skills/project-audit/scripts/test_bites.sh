@@ -36,7 +36,7 @@ fail=0
 # The dev stand publishes PostgreSQL on 127.0.0.1:55432; the bites project must not (an override resets the ports).
 compose() { docker compose -p "$PROJECT" --project-directory "$wt" -f "$wt/compose.yaml" -f "$wt/.cache/bites.override.yaml" "$@"; }
 write_override() {
-    mkdir -p "$wt/.cache"
+    mkdir -p "$wt/.cache/vite-temp" "$wt/.cache/vite"
     printf 'services:\n  postgres:\n    ports: !reset []\n' > "$wt/.cache/bites.override.yaml"
 }
 cleanup() {
@@ -49,7 +49,10 @@ trap cleanup EXIT
 
 run_tests() {   # $1 — JSON report path relative to the worktree, $2… — test files
     local out="$1"; shift
-    compose run --rm -T -v "$ROOT/node_modules:/app/node_modules:ro" dev \
+    # node_modules read-only (the commit under test must not persist code into the main checkout's modules);
+    # vitest writes its config bundle and cache under node_modules, so those two directories get anonymous volumes.
+    compose run --rm -T -v "$ROOT/node_modules:/app/node_modules:ro" \
+        -v "$wt/.cache/vite-temp:/app/node_modules/.vite-temp" -v "$wt/.cache/vite:/app/node_modules/.vite" dev \
         npx vitest run --reporter=json --outputFile="$out" "$@" >/dev/null 2>&1
 }
 
