@@ -265,7 +265,7 @@ project's core).
 - Repository protection: `.github/CODEOWNERS` covers the payment path
   (`src/domain`, `src/application`, `src/adapters/*` except `aml`, `alerts`,
   `pricing`, `system`; `src/app`), security docs and ADRs, agent instructions,
-  CI, toolchain, `deploy/`, `tools/`, `examples/`; check that a new
+  CI, toolchain, `deploy/`, `src/tools/`, `examples/`; check that a new
   security-relevant path is in it. Branch and tag rulesets are maintainer
   settings outside the repository (docs/releasing.md) — note if they are
   unknown.

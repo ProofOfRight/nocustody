@@ -48,5 +48,5 @@
 /src/app/                 @ProofOfRight
 
 # The address canary and the integration examples merchants copy (webhook signature verification)
-/tools/                   @ProofOfRight
+/src/tools/               @ProofOfRight
 /examples/                @ProofOfRight
