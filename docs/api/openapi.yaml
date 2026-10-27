@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nocustody merchant API
-  version: 0.5.1
+  version: 0.6.0
   description: |
     Self-hosted, watch-only crypto payment gateway. Amounts are decimal strings, never JSON numbers.
     Authentication: `Authorization: Bearer nck_<id>_<secret>` (create keys with `node src/app/cli.ts apikey:create`).
