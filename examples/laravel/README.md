@@ -48,9 +48,13 @@ Point the gateway's `webhooks.url` at `https://<shop>/nocustody/webhook`.
 - An event is never lost between "recorded" and "processed": if queueing fails, the webhook answers 500 and the
   gateway retries; an event left unprocessed for 10 minutes is queued again by the scheduler.
 - The events `invoice.underpaid`, `invoice.overpaid`, `invoice.paid_late`, `invoice.aml_hold` and
-  `transfer.unmatched` need a person: the payer sent something other than the invoice asked for. Decide by the
-  **event type**: a paid invoice goes through `aml_pending` to `completed` in the same cycle, so `paid`, `overpaid`
-  and `paid_late` are not statuses you will read back. Refunds are manual, from the merchant's own wallet.
+  `transfer.unmatched` need a person: the payer sent something other than the invoice asked for. The job decides this
+  by the **event type**, not by the re-read status: a paid invoice goes through `aml_pending` to `completed` in the
+  same cycle, so `paid`, `overpaid` and `paid_late` are not statuses you will read back. Access is still granted only
+  on `completed`. Refunds are manual, from the merchant's own wallet.
+- `NocustodyClient::createInvoice()` does not send `success_url` / `cancel_url`. To show the hosted page's return
+  buttons, add them to the request body; their origins must be in `api.paymentPage.returnOrigins` and the page must be
+  enabled ([docs/api.md](../../docs/api.md)).
 - Without the hosted page, show the payer `payment.address_display`, the exact `payment.amount` and, on TON,
   `payment.memo` from the invoice ([docs/api.md](../../docs/api.md)).
 - The plain-PHP example in [examples/php](../php/) has the same signature check without Laravel.

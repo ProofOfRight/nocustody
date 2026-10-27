@@ -24,6 +24,9 @@ final class HandleNocustodyEvent implements ShouldQueue
     use InteractsWithQueue;
     use Queueable;
 
+    /** The payer sent something other than the invoice asked for: a person decides (refunds are manual). */
+    private const NEEDS_A_PERSON = ['invoice.underpaid', 'invoice.overpaid', 'invoice.paid_late', 'invoice.aml_hold'];
+
     public int $tries = 10;
 
     public function __construct(public readonly string $eventId)
@@ -60,9 +63,15 @@ final class HandleNocustodyEvent implements ShouldQueue
                 if ($invoice['status'] === 'completed') {
                     // YOUR CODE: grant access for $orderId here, in this transaction, guarded by the order's state.
                     Log::info('nocustody: order paid', ['order' => $orderId, 'invoice' => $invoice['id']]);
-                } elseif (in_array($invoice['status'], ['underpaid', 'overpaid', 'paid_late', 'aml_hold'], true)) {
-                    // YOUR CODE: needs a human — notify support with $orderId and the amounts in $invoice.
-                    Log::warning('nocustody: invoice needs attention', ['order' => $orderId, 'status' => $invoice['status']]);
+                }
+                // By the event type, not the status: an overpaid or late invoice is already "completed" when re-read.
+                if (in_array($event->type, self::NEEDS_A_PERSON, true)) {
+                    // YOUR CODE: notify support with $orderId and the amounts in $invoice.
+                    Log::warning('nocustody: invoice needs attention', [
+                        'order' => $orderId,
+                        'event' => $event->type,
+                        'status' => $invoice['status'],
+                    ]);
                 }
             } elseif ($event->type === 'transfer.unmatched') {
                 // A payment that matched no invoice (wrong amount, no memo, too late): resolve it manually.

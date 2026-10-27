@@ -2,7 +2,9 @@
 
 Plain PHP 8.1+ with `ext-curl`, no Composer packages.
 
-- `NocustodyClient.php` — create and read invoices (decimal strings, `Idempotency-Key`).
+- `NocustodyClient.php` — create and read invoices (decimal strings, `Idempotency-Key`). It does not send
+  `success_url` / `cancel_url`; add them to the request body if you use the hosted page's return buttons
+  ([docs/api.md](../../docs/api.md)).
 - `webhook.php` — receive events: verifies `X-Signature` over the raw body with `hash_equals`, rejects timestamps older
   than 5 minutes, runs each event id once under a file lock and records the id only after the work succeeded (the
   file-based store is for the example; in production keep processed event ids in your database, with the check and
