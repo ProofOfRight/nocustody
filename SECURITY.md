@@ -31,7 +31,8 @@ Security fixes go into the latest minor release line and `main`.
 
 | Version | Supported |
 |---|---|
-| 0.4.x | latest patch (0.4.0) |
+| 0.5.x | latest patch (0.5.0) |
+| 0.4.x | no — upgrade to 0.5.x (breaking: `price` is set for invoices priced in the asset, see CHANGELOG) |
 | 0.3.x | no — upgrade to 0.4.x; 0.3.0 lets anyone stop the TON scanner with a few large messages to the jetton-wallet |
 | 0.2.x | no — upgrade: 0.2.1 lets a TON comment stop crediting for the whole network and credits transfers that predate the invoice by up to 30 s; 0.2.0 does not run the monitor role |
 | 0.1.x | no — misses TON jetton payments sent with `forward_ton_amount = 0`; upgrade |
