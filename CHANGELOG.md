@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 Before 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
+## [Unreleased]
+
+### Added
+
+- Receiving address status `retired` ([ADR-0037](docs/adr/0037-retired-receiving-addresses.md)): pinned, not used for
+  new invoices, not watched, never shown to payers; its invoices stay readable and `invoice:aml-resolve` works on them.
+  For a compromised address or one frozen by the token issuer. A transfer to it after retiring is not detected.
+- `payment.address_available` in invoice responses.
+- Alert `invoice-address-unpinned` (critical): an invoice that can still be paid points at an address missing from the
+  config.
+
+### Changed
+
+- An invoice whose stored address is not a pinned address of its asset no longer fails every read
+  (`invoice.address_unpinned` is gone). It no longer stops invoice expiry and the worker cycle, and `GET /v1/invoices`,
+  `GET /v1/invoices/{id}`, `invoice:show` and `invoice:aml-resolve` work on it. Its address is never shown:
+  `payment.address`, `payment.address_display` and `payment.uri` are null, and the payment page shows no payment
+  details. The same applies to invoices on a `retired` address.
+- The worker refuses to start while an invoice that can still be paid points at an address removed from the config;
+  with only closed invoices on it, it logs a warning. Mark such an address `retired` instead of deleting it.
+
 ## [0.5.1] - 2026-10-27
 
 Examples and documentation only: no change to the gateway's code, schema, config or pinned checksum.
