@@ -35,7 +35,10 @@ export interface PaymentInstructions {
   readonly memo: string | null;
 }
 
-/** Fiat price and the rate locked into the invoice for its TTL (null when priced directly in the asset). */
+/**
+ * The price exactly as the merchant gave it and the rate locked into the invoice for its TTL. Priced directly in the
+ * asset, the rate fields are null. Invoices created before 0.5.0 that were priced in the asset have no price at all.
+ */
 export interface LockedPrice {
   readonly amount: string;
   readonly currency: string;

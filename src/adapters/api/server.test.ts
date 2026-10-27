@@ -207,6 +207,25 @@ describe("merchant API", () => {
     });
   });
 
+  it("keeps a price in the asset's own symbol exactly as sent, with null rate fields", async () => {
+    const { create } = await setup();
+    const r = await create({
+      merchant_order_id: "o1",
+      price: { amount: "3.00", currency: "USDT" },
+      asset: "usdt-tron",
+    });
+    expect(r.statusCode).toBe(201);
+    expect(r.json()).toMatchObject({ payment: { amount: "3.010000" } });
+    expect(r.json().price).toEqual({
+      amount: "3.00",
+      currency: "USDT",
+      rate: null,
+      rate_source: null,
+      rate_at: null,
+      rate_path: null,
+    });
+  });
+
   it("is idempotent by Idempotency-Key; the same key with another body is refused", async () => {
     const { create, body } = await setup();
     const first = await create();
@@ -372,6 +391,14 @@ describe("merchant API", () => {
       headers: auth(),
     });
     expect(r.json()).toMatchObject({ asset: "usdt-tron", amount: "10.000000" });
+    const direct = await app.inject({
+      url: "/v1/quotes?amount=3&currency=USDT&asset=usdt-tron",
+      headers: auth(),
+    });
+    expect(direct.json()).toMatchObject({
+      amount: "3.000000",
+      price: { amount: "3", currency: "USDT", rate: null, rate_path: null },
+    });
     expect(store.data.invoices.size).toBe(0);
   });
 

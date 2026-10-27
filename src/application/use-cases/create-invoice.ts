@@ -173,12 +173,20 @@ export class CreateInvoice {
 }
 
 /**
- * Whether an existing invoice was created from the same order: same asset and, for a fiat price, the same amount and
- * currency; for a price given in the asset itself, the invoice amount is the base plus a unique-amount step (0..max).
+ * Whether an existing invoice was created from the same order: same asset and the same price amount and currency,
+ * compared in minimal units ("3" and "3.00" are one price). An invoice priced in the asset before 0.5.0 stored no
+ * price; for it the invoice amount must be the base plus a unique-amount step (0..max).
  */
 function sameOrder(invoice: Invoice, input: CreateInvoiceInput, settings: AssetSettings): boolean {
   const s = invoice.state;
   if (s.asset.id !== input.assetId) return false;
+  if (s.price && s.price.currency === settings.priceSymbol) {
+    if (input.priceCurrency !== settings.priceSymbol) return false;
+    return (
+      Money.parse(settings.asset, s.price.amount).units ===
+      Money.parse(settings.asset, input.priceAmount).units
+    );
+  }
   if (s.price) {
     if (s.price.currency !== input.priceCurrency || !isIsoCurrency(s.price.currency)) return false;
     const cur = currency(s.price.currency);

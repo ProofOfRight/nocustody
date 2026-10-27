@@ -22,8 +22,8 @@ export interface Quote {
   readonly asset: Asset;
   /** Amount in the asset before any unique-amount step, rounded up. */
   readonly base: Money;
-  /** Null when the price is already in the asset. */
-  readonly price: LockedPrice | null;
+  /** The price as given; its rate fields are null when the price is already in the asset. */
+  readonly price: LockedPrice;
 }
 
 /** Converts a price into the asset with a fresh rate (cross rates, markup, rounding up). No side effects. */
@@ -42,7 +42,19 @@ export class QuotePrice {
     const settings = this.#catalog.get(input.assetId);
     const asset = settings.asset;
     if (input.currency === settings.priceSymbol) {
-      return { asset, base: Money.parse(asset, input.amount), price: null };
+      // No conversion, so no rate: a "1/1" would read as a rate from some source.
+      return {
+        asset,
+        base: Money.parse(asset, input.amount),
+        price: {
+          amount: input.amount,
+          currency: input.currency,
+          rate: null,
+          rateSource: null,
+          rateAt: null,
+          ratePath: null,
+        },
+      };
     }
     if (!isIsoCurrency(input.currency) || !this.#pricing.currencies.has(input.currency)) {
       throw new ApplicationError("pricing.currency_disabled", `currency ${input.currency} is not enabled`);

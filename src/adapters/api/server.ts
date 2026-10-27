@@ -588,14 +588,12 @@ export class ApiServer {
         return ok({
           asset: quote.asset.id,
           amount: quote.base.toDecimalString(),
-          price: quote.price
-            ? {
-                amount: quote.price.amount,
-                currency: quote.price.currency,
-                rate: quote.price.rate,
-                rate_path: quote.price.ratePath,
-              }
-            : null,
+          price: {
+            amount: quote.price.amount,
+            currency: quote.price.currency,
+            rate: quote.price.rate,
+            rate_path: quote.price.ratePath,
+          },
           note: "indicative: the invoice locks its own rate and may add a unique-amount step",
         });
       }),

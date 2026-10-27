@@ -124,7 +124,14 @@ paths:
                 properties:
                   asset: { type: string }
                   amount: { $ref: "#/components/schemas/Decimal" }
-                  price: { type: [object, "null"] }
+                  price:
+                    type: object
+                    description: The price as given; rate and rate_path are null when it is in the asset's price symbol
+                    properties:
+                      amount: { $ref: "#/components/schemas/Decimal" }
+                      currency: { type: string }
+                      rate: { type: [string, "null"], description: Rate as a fraction "num/den" }
+                      rate_path: { type: [string, "null"] }
                   note: { type: string }
         "503": { $ref: "#/components/responses/Error" }
 components:
@@ -233,13 +240,16 @@ components:
               { type: [string, "null"], description: "Wallet deep link (ton://transfer/...) where supported" }
         price:
           type: [object, "null"]
+          description: |
+            The price exactly as the merchant gave it (amount and currency). Priced in the asset's price symbol
+            (e.g. USDT), the rate fields are null. Null only for invoices priced in the asset before 0.5.0.
           properties:
             amount: { $ref: "#/components/schemas/Decimal" }
             currency: { type: string }
-            rate: { type: string, description: Locked rate as a fraction "num/den" }
-            rate_source: { type: string }
-            rate_at: { type: string, format: date-time }
-            rate_path: { type: string }
+            rate: { type: [string, "null"], description: Locked rate as a fraction "num/den" }
+            rate_source: { type: [string, "null"] }
+            rate_at: { type: [string, "null"], format: date-time }
+            rate_path: { type: [string, "null"] }
         received: { $ref: "#/components/schemas/Decimal" }
         payments:
           type: array

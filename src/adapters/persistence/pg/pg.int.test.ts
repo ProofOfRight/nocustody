@@ -356,7 +356,17 @@ describe("PostgreSQL repositories", () => {
       priceCurrency: "USDT",
       assetId: USDT_TRON.id,
     });
-    expect((await pinnedUow.run((r) => r.invoices.findById(invoice.id)))?.id).toBe(invoice.id);
+    const stored = await pinnedUow.run((r) => r.invoices.findById(invoice.id));
+    expect(stored?.id).toBe(invoice.id);
+    // a price in the asset itself round-trips with null rate fields
+    expect(stored?.state.price).toEqual({
+      amount: "10",
+      currency: "USDT",
+      rate: null,
+      rateSource: null,
+      rateAt: null,
+      ratePath: null,
+    });
     await pool.query("UPDATE invoices SET pay_address = $2 WHERE id = $1", [
       invoice.id,
       "TAttacker11111111111111111111111111",
