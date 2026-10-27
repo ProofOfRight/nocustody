@@ -14,7 +14,7 @@ Starting list of threats and mitigations for the gateway. Requirements contribut
 
 | Threat | Mitigation |
 |---|---|
-| Receiving address substitution (server / admin / frontend compromise) | Addresses, contracts, providers and money policies pinned in config with a checksum ([ADR-0031](adr/0031-pinned-config-scope.md)), verified at startup, before every invoice and every minute, alert on mismatch; a stored invoice address outside the pinned list is refused; no API to change addresses; canary on another host checks every form a payer sees |
+| Receiving address substitution (server / admin / frontend compromise) | Addresses, contracts, providers and money policies pinned in config with a checksum ([ADR-0031](adr/0031-pinned-config-scope.md)), verified at startup, before every invoice and every minute, alert on mismatch; a stored invoice address outside the pinned list is never shown and raises an alert (ADR-0037); no API to change addresses; canary on another host checks every form a payer sees |
 | Fake token / jetton / master contract | Contract / master taken from config, never from metadata; TON — our own jetton-wallet via `get_wallet_address` |
 | Failed or reverted transaction ("Flash USDT") | Credit only final and successful transactions (TRON solidified + `SUCCESS`; TON masterchain, no bounce, jetton-wallet transaction not aborted; native coin: the credited amount of the credit phase, no outgoing messages) |
 | Forged provider response | TLS only, finalized-state query, optional second source, reconciliation |

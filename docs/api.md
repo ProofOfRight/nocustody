@@ -35,6 +35,9 @@ were created before 0.5.0.
 Show the payer `payment.address_display`, `payment.amount` (exact — the amount may include a small unique add-on)
 and, on TON, `payment.memo` as the transfer comment. `payment.uri` is a wallet deep link where one exists. Or send
 the payer to the hosted page `payment.page` if it is enabled ([payment-page.md](payment-page.md)).
+If the operator retired the invoice's address ([ADR-0037](adr/0037-retired-receiving-addresses.md)),
+`payment.address_available` is false and `payment.address`, `payment.address_display` and `payment.uri` are null: the
+invoice must not be paid any more. A newly created invoice always has its address.
 
 Optional `success_url` and `cancel_url` give the hosted page a "Back to the merchant's website" link: `success_url`
 once the payment is received, `cancel_url` until then. They must be https on an origin listed in

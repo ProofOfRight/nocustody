@@ -27,6 +27,9 @@ Always written to the log; optionally to Telegram (send-only bot, it never reads
 Repeats of the same condition are muted for `cooldown`. Alerts:
 
 - `address_pin_violation` (critical) — the pinned parts of `config.json` changed on disk; new invoices are blocked;
+- `invoice-address-unpinned` (critical) — an invoice that can still be paid points at an address that is not in the
+  config. Start-up refuses that state, so the database was changed behind the gateway's back: its address is not
+  shown, but find out how it got there (ADR-0037);
 - `scanner-lag:<network>` (critical) — no successful cycle for longer than `ops.maxScannerLag` (defaults: TRON 5 min,
   TON 2 min);
 - `scanner-budget:<asset>` — rows were still unread after every scan of a cycle: more transactions than one cycle
@@ -149,11 +152,18 @@ An address's `status` is part of the pinned checksum, so each step below needs a
 
 1. Add the new address as `active` and mark the old one `draining`: new invoices go to the new address, the old one
    stays watched, so its open invoices can still be paid and late transfers are not missed.
-2. Keep the old address as `draining` for as long as you need its invoices. Every invoice is checked against the
-   pinned addresses whenever it is read (`invoice.address_unpinned`), and invoices are kept forever: once the address
-   is removed, an open invoice on it stops the worker cycle, and its past invoices can no longer be read through
-   `GET /v1/invoices`, `invoice:show` or resolved with `invoice:aml-resolve`. Remove it only after `ttl` + `grace`
-   and only if you accept that.
+2. After `ttl` + `grace` of the last invoice on it, mark the old address `retired` (or leave it `draining`). A retired
+   address is no longer watched and its address is never shown again, but its invoices stay readable in the API and
+   `invoice:show`, and `invoice:aml-resolve` works on them ([ADR-0037](adr/0037-retired-receiving-addresses.md)).
+
+If the address is compromised or frozen by the token issuer, mark it `retired` at once instead of `draining`. Open
+invoices on it stop showing payment details (the API returns `payment.address: null`, `address_available: false`; the
+page tells the payer not to send funds) and expire normally. A transfer that still reaches the address is **not
+detected**: handle it by hand from your wallet.
+
+Prefer `retired` over deleting the address from the config. If you delete it while an invoice on it can still be paid,
+the worker refuses to start; with only closed invoices left it starts and logs a warning, and those invoices are
+readable without their address.
 
 ## External hosts
 

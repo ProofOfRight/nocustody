@@ -33,8 +33,8 @@ persistence and the outbox are all live. It **resets the schema of `TEST_DATABAS
    container, so a config inside it is one `git add` away from a commit), e.g. `~/nocustody-testnet/nile.config.json`,
    and put the receiving address into `assets[0].addresses`.
 3. Run with that directory mounted read-only (it waits up to the grace period and prints the invoice state every
-   15 s). Use a separate or throwaway database: an open invoice on an address that is not in this config stops the
-   cycle (`invoice.address_unpinned`). The test database is reset by the tests anyway:
+   15 s). Use a separate or throwaway database: an open invoice on an address that is not in this config makes the
+   worker refuse to start. The test database is reset by the tests anyway:
 
 ```bash
 docker compose run --rm -v ~/nocustody-testnet:/cfg:ro -e E2E_MODE=live -e NOCUSTODY_CONFIG=/cfg/nile.config.json -e DATABASE_URL=postgres://nocustody:nocustody@postgres:5432/nocustody_test dev npm run e2e:nile
