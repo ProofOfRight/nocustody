@@ -17,8 +17,11 @@ Every invoice then has `payment.page` = `/pay/{id}` in the API response. Redirec
   otherwise the address (TRON) — the payer types the amount;
 - a countdown to `expires_at` and the invoice status, refreshed every 10 seconds from `GET /pay/{id}/status`
   (status, received amount and deadlines only — no order id, no payments, no sender addresses) until the invoice is
-  final or its grace period is over; `underpaid` keeps polling (a top-up completes it);
-- for an invoice that can no longer be paid (expired past grace, cancelled, completed) the page shows the status only:
+  received (`paid`, `overpaid`, `paid_late`, `aml_pending`, `completed`), refused (`aml_hold`, `rejected`, `cancelled`)
+  or its grace period is over; `underpaid` keeps polling (on TON a top-up with the same memo completes it). A later
+  change after `aml_pending` (to `aml_hold` or `rejected`) is shown only after a reload;
+- for an invoice that can no longer be paid (any status other than `awaiting_payment`, `confirming`, `underpaid` and
+  `expired`, or any status once the grace period is over) the page shows the status only:
   no amount, address or QR code, so a payer who opens an old link cannot send to a pair a newer invoice may hold;
 - a "Back to the merchant's website" link when the invoice has return URLs: `success_url` once the payment is
   received, `cancel_url` until then. Only https URLs on an origin from `api.paymentPage.returnOrigins` are accepted
