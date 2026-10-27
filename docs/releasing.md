@@ -51,8 +51,11 @@ docker buildx build --no-cache --builder repro --platform linux/amd64,linux/arm6
   --provenance=false --sbom=false \
   --output type=oci,dest=nocustody.tar,rewrite-timestamp=true --metadata-file metadata.json .
 jq -r '."containerimage.digest"' metadata.json   # must equal the released digest
+docker buildx rm repro
 ```
 
 Use the BuildKit version from the release workflow of that tag. Keep `--no-cache` when the builder has built
 anything before: `rewrite-timestamp` only lowers file times newer than `SOURCE_DATE_EPOCH`, so a layer taken from the
 cache of an earlier build keeps its older times and the digest differs, although the files are the same.
+Remove the builder after the check: the `docker-container` driver keeps a running container and a cache volume of
+several gigabytes, and the next rebuild creates a fresh builder and runs with `--no-cache` anyway.
