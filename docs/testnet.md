@@ -29,11 +29,15 @@ persistence and the outbox are all live. It **resets the schema of `TEST_DATABAS
 
 1. Create a Nile account in TronLink (switch the network to Nile), get TRX and USDT from the faucet.
    Use a **second** account as the receiving address — the gateway only needs its public address.
-2. Copy `examples/nile.config.json`, put the receiving address into `assets[0].addresses`.
-3. Run (it waits up to the grace period and prints the invoice state every 15 s):
+2. Copy `examples/nile.config.json` to a directory **outside the repository** (the repository is mounted into the
+   container, so a config inside it is one `git add` away from a commit), e.g. `~/nocustody-testnet/nile.config.json`,
+   and put the receiving address into `assets[0].addresses`.
+3. Run with that directory mounted read-only (it waits up to the grace period and prints the invoice state every
+   15 s). Use a separate or throwaway database: an open invoice on an address that is not in this config stops the
+   cycle (`invoice.address_unpinned`). The test database is reset by the tests anyway:
 
 ```bash
-docker compose run --rm -e E2E_MODE=live -e NOCUSTODY_CONFIG=/app/my-nile.config.json dev npm run e2e:nile
+docker compose run --rm -v ~/nocustody-testnet:/cfg:ro -e E2E_MODE=live -e NOCUSTODY_CONFIG=/cfg/nile.config.json -e DATABASE_URL=postgres://nocustody:nocustody@postgres:5432/nocustody_test dev npm run e2e:nile
 ```
 
 4. Send exactly the printed amount of USDT from the first account to the receiving address.
@@ -42,11 +46,12 @@ docker compose run --rm -e E2E_MODE=live -e NOCUSTODY_CONFIG=/app/my-nile.config
 ## Running the worker yourself
 
 ```bash
-export NOCUSTODY_CONFIG=/app/my-nile.config.json
-docker compose run --rm -e NOCUSTODY_CONFIG dev node src/app/cli.ts config:hash   # pinned checksum
-docker compose run --rm -e NOCUSTODY_CONFIG dev npm run db:migrate
-docker compose run --rm -e NOCUSTODY_CONFIG -e NOCUSTODY_PINNED_SHA256=<hash> dev node src/app/cli.ts invoice:create --order o1 --amount 1 --currency USD --asset usdt-nile
-docker compose run --rm -e NOCUSTODY_CONFIG -e NOCUSTODY_PINNED_SHA256=<hash> dev node src/app/cli.ts run
+export NOCUSTODY_CONFIG=/cfg/nile.config.json
+R="docker compose run --rm -v $HOME/nocustody-testnet:/cfg:ro -e NOCUSTODY_CONFIG"
+$R dev node src/app/cli.ts config:hash   # pinned checksum
+$R dev npm run db:migrate
+$R -e NOCUSTODY_PINNED_SHA256=<hash> dev node src/app/cli.ts invoice:create --order o1 --amount 1 --currency USD --asset usdt-nile
+$R -e NOCUSTODY_PINNED_SHA256=<hash> dev node src/app/cli.ts run
 ```
 
 The database role must be allowed to `CREATE EXTENSION btree_gist` once (the first migration needs it for the
