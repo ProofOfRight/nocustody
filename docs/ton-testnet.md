@@ -53,8 +53,8 @@ Replays two recorded, finalized testnet payments: 1.227528 test USDT with a comm
 3. Copy `examples/ton-testnet.config.json` to a directory **outside the repository** (the repository is mounted into
    the container, so a config inside it is one `git add` away from a commit), e.g.
    `~/nocustody-testnet/ton.config.json`, and fill in the addresses. Run with that directory mounted read-only and a
-   separate or throwaway database: an open invoice on an address that is not in this config stops the cycle
-   (`invoice.address_unpinned`). The test database is reset by the tests anyway:
+   separate or throwaway database: an open invoice on an address that is not in this config makes the worker
+   refuse to start. The test database is reset by the tests anyway:
 
 ```bash
 docker compose run --rm -v ~/nocustody-testnet:/cfg:ro -e E2E_MODE=live -e NOCUSTODY_CONFIG=/cfg/ton.config.json -e DATABASE_URL=postgres://nocustody:nocustody@postgres:5432/nocustody_test dev npm run e2e:ton

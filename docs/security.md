@@ -8,8 +8,9 @@ These rules are mandatory for all code in this repository. Threats they address:
 - Receiving addresses, contracts, providers, amount policies, pricing, AML, depeg and the webhook URL are pinned in
   config with a checksum supplied separately ([ADR-0031](adr/0031-pinned-config-scope.md)), verified at start-up,
   before every invoice and once a minute by the monitor; on mismatch the gateway alerts and stops issuing invoices.
-  There is no API, bot command or admin UI to change addresses, and an invoice whose stored address is not a pinned
-  address of its asset is refused when read.
+  There is no API, bot command or admin UI to change addresses, and an invoice's stored address is shown to payers
+  only if it is a pinned, non-retired address of its asset; an open invoice on any other address raises an alert
+  ([ADR-0037](adr/0037-retired-receiving-addresses.md)).
 - The verifier compares the recipient against the pinned list, not against a mutable table.
 
 ## Verification

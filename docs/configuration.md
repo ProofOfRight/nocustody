@@ -34,7 +34,7 @@ command that changes receiving addresses.
 | `symbol` | — | display only, never used to identify the asset |
 | `priceSymbol` | — | symbol used for price conversion (`USDT`) |
 | `strategy` | `unique-amount` | how payments are told apart: `unique-amount` per address, or `memo` (TON comment) with unique amount as a fallback |
-| `addresses[]` | — | `{ address, status: active \| draining, jettonWallet? }`. New invoices use `active` addresses; `draining` ones are still watched. TON jettons need the owner's `jettonWallet`, verified with `get_wallet_address` at startup |
+| `addresses[]` | — | `{ address, status: active \| draining \| retired, jettonWallet? }`. New invoices use `active` addresses; `draining` ones are still watched; `retired` ones are not watched and never shown, kept so that their invoices stay readable ([ADR-0037](adr/0037-retired-receiving-addresses.md)). At least one `active`. TON jettons need the owner's `jettonWallet`, verified with `get_wallet_address` at startup |
 | `amounts.step` | — | unique-amount step added to the price (`"0.01"`) |
 | `amounts.maxSlots` | — | parallel open invoices per address and base amount (1–999) |
 | `amounts.dustThreshold` | `"0"` | incoming transfers below this are ignored (address poisoning); a zero-value transfer is always ignored |
