@@ -74,6 +74,7 @@ One section per network family, required when an asset uses it.
 | `paymentPage.enabled` | `false` | hosted page at `/pay/{id}` ([payment-page.md](payment-page.md)) |
 | `paymentPage.defaultLanguage` | `en` | `en`, `ru`, `fr`, `fa`, `zh-CN` |
 | `paymentPage.publicRateLimitPerMinute` | `600` | shared limit for the public `/pay/*` routes |
+| `paymentPage.returnOrigins` | `[]` | origins (`https://shop.example`, no path) that invoices' `success_url` / `cancel_url` may point at; not pinned ([ADR-0035](adr/0035-payment-return-urls.md)) |
 
 API keys are created with the `apikey:create` command ([api.md](api.md)).
 

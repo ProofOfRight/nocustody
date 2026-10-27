@@ -157,6 +157,24 @@ describe("payment page", () => {
     );
   });
 
+  it("return URLs: the success button once received (instead of the hint), the cancel link until then", () => {
+    const urls = { successUrl: "https://shop.example/ok?a=1&b=2", cancelUrl: "https://shop.example/back" };
+    const waiting = renderPaymentPage({ ...view, ...urls }, "ru", "n");
+    expect(waiting).toMatch(/id="back-success" href="https:\/\/shop\.example\/ok\?a=1&amp;b=2"[^>]* hidden>/);
+    expect(waiting).toMatch(
+      /id="back-cancel" href="https:\/\/shop\.example\/back" rel="noopener noreferrer">/,
+    );
+    expect(waiting).toContain(`>${MESSAGES.ru.backToMerchant}<`);
+    const paid = renderPaymentPage({ ...view, ...urls, status: "completed", payable: false }, "en", "n");
+    expect(paid).toMatch(/id="back-success"[^>]*rel="noopener noreferrer">/);
+    expect(paid).toMatch(/id="back-cancel"[^>]* hidden>/);
+    expect(paid).toMatch(/id="done-hint" hidden>/);
+    // without URLs: no links at all
+    const plain = renderPaymentPage(view, "en", "n");
+    expect(plain).not.toContain(`id="back-success"`);
+    expect(plain).not.toContain(`id="back-cancel"`);
+  });
+
   it("payable: payable statuses inside the grace period only", () => {
     const grace = new Date("2026-10-26T13:30:00Z");
     const before = new Date("2026-10-26T13:00:00Z");

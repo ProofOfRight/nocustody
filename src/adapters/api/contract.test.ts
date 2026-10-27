@@ -64,6 +64,7 @@ describe("docs/api/openapi.yaml against the server", () => {
       "invalid_request",
       "idempotency_key_required",
       "idempotency_mismatch",
+      "return_url_not_allowed",
       "rate_limited",
       "not_found",
       "method_not_allowed",

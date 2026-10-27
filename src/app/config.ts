@@ -108,6 +108,20 @@ const apiSchema = z
         enabled: z.boolean().default(false),
         defaultLanguage: z.enum(["en", "ru", "fr", "fa", "zh-CN"]).default("en"),
         publicRateLimitPerMinute: z.number().int().min(1).max(1_000_000).default(600),
+        /**
+         * Origins the merchant's return URLs (`success_url`, `cancel_url`) may point at, e.g. "https://shop.example".
+         * Empty: invoices with return URLs are refused. Not pinned: a return URL never decides money (ADR-0035).
+         */
+        returnOrigins: z
+          .array(
+            z
+              .string()
+              .refine((s) => URL.canParse(s) && new URL(s).protocol === "https:" && new URL(s).origin === s, {
+                message: 'an https origin without path or trailing slash, e.g. "https://shop.example"',
+              }),
+          )
+          .max(100)
+          .default([]),
       })
       .strict()
       .prefault({}),

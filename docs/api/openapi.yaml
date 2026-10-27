@@ -148,7 +148,7 @@ components:
                     description: |
                       Stable machine code. Transport: unauthorized, forbidden, invalid_request, invalid_json,
                       unsupported_media_type, payload_too_large, idempotency_key_required, idempotency_mismatch,
-                      rate_limited, not_found, method_not_allowed, conflict, internal. Application: asset.unknown,
+                      return_url_not_allowed, rate_limited, not_found, method_not_allowed, conflict, internal. Application: asset.unknown,
                       pricing.currency_disabled, pricing.no_rate, pricing.depeg_block, invoice.zero_amount,
                       invoice.order_mismatch, allocation.no_free_slot, allocation.no_address,
                       allocation.memo_collision, allocation.bad_memo, integrity.pin_violation,
@@ -192,6 +192,18 @@ components:
                 description: "ISO 4217 code enabled in config, or the asset's price symbol (e.g. USDT)",
               }
         asset: { type: string, example: usdt-tron }
+        success_url:
+          type: string
+          maxLength: 2048
+          description: |
+            Hosted page: "Back to the merchant's website" button once the payment is received. https on an origin
+            listed in api.paymentPage.returnOrigins, otherwise 422 return_url_not_allowed. Not a proof of payment.
+        cancel_url:
+          type: string
+          maxLength: 2048
+          description: |
+            Hosted page: the same link while the invoice is not paid (the payer changed their mind, the invoice
+            expired, was cancelled or is under review). Same rules as success_url.
     Invoice:
       type: object
       properties:
@@ -241,3 +253,5 @@ components:
         created_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
         grace_until: { type: string, format: date-time }
+        success_url: { type: [string, "null"] }
+        cancel_url: { type: [string, "null"] }

@@ -10,7 +10,7 @@ import type { ApiKeyRecord, ApiScope, ChainAdapter, Clock, UnitOfWork } from "..
 import type { CreateInvoice } from "../../application/use-cases/create-invoice.ts";
 import type { QuotePrice } from "../../application/use-cases/quote-price.ts";
 import { DomainError } from "../../domain/errors.ts";
-import { INVOICE_STATUSES, type Invoice } from "../../domain/invoice.ts";
+import { INVOICE_STATUSES, type Invoice, MAX_RETURN_URL_LENGTH } from "../../domain/invoice.ts";
 import { authenticate, isTokenShaped } from "./keys.ts";
 import { type Lang, pickLanguage } from "./page/i18n.ts";
 import { contentSecurityPolicy, isPayable, renderPaymentPage } from "./page/render.ts";
@@ -24,7 +24,12 @@ export interface ApiDeps {
   readonly rateLimitPerMinute: number;
   readonly onError?: (err: unknown) => void;
   /** Hosted payment page at /pay/:id; null = disabled (headless only). */
-  readonly paymentPage?: { readonly defaultLanguage: Lang; readonly publicRateLimitPerMinute: number } | null;
+  readonly paymentPage?: {
+    readonly defaultLanguage: Lang;
+    readonly publicRateLimitPerMinute: number;
+    /** Origins (`https://host[:port]`) that `success_url` / `cancel_url` may point at; empty = none accepted. */
+    readonly returnOrigins?: ReadonlySet<string>;
+  } | null;
 }
 
 /** Request bodies above this size are refused with 413. */
@@ -38,8 +43,21 @@ const createSchema = z
     merchant_order_id: z.string().min(1).max(128),
     price: z.object({ amount: decimal, currency: z.string().regex(/^[A-Z][A-Z0-9]{1,9}$/) }).strict(),
     asset: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
+    success_url: z.string().min(1).max(MAX_RETURN_URL_LENGTH).optional(),
+    cancel_url: z.string().min(1).max(MAX_RETURN_URL_LENGTH).optional(),
   })
   .strict();
+
+/**
+ * Whether a return URL may be shown to payers: https, no credentials, and an origin from the configured list. Checked
+ * when the invoice is created and again when the page is rendered, so a URL written into the database by somebody
+ * else, or an origin removed from the config since, never becomes a button.
+ */
+export function isAllowedReturnUrl(raw: string, origins: ReadonlySet<string>): boolean {
+  if (!URL.canParse(raw)) return false;
+  const u = new URL(raw);
+  return u.protocol === "https:" && u.username === "" && u.password === "" && origins.has(u.origin);
+}
 const listSchema = z
   .object({
     status: z.enum(STATUSES).optional(),
@@ -145,6 +163,8 @@ export function invoiceDto(inv: Invoice, adapters: readonly ChainAdapter[]) {
     created_at: s.createdAt.toISOString(),
     expires_at: s.expiresAt.toISOString(),
     grace_until: s.graceUntil.toISOString(),
+    success_url: s.successUrl,
+    cancel_url: s.cancelUrl,
   };
 }
 
@@ -419,6 +439,8 @@ export class ApiServer {
     };
 
     const page = d.paymentPage ?? null;
+    const shownUrl = (url: string | null): string | null =>
+      url !== null && isAllowedReturnUrl(url, page?.returnOrigins ?? new Set()) ? url : null;
     const pageRoutes: Route[] = page
       ? [
           route("GET", "/pay/:id", null, async (req) => {
@@ -442,6 +464,8 @@ export class ApiServer {
                 graceUntil: s.graceUntil.toISOString(),
                 statusUrl: `/pay/${encodeURIComponent(s.id)}/status`,
                 payable: isPayable(s.status, s.graceUntil, d.clock.now()),
+                successUrl: shownUrl(s.successUrl),
+                cancelUrl: shownUrl(s.cancelUrl),
               },
               lang,
               nonce,
@@ -492,11 +516,26 @@ export class ApiServer {
           return r.invoices.findById(prev.invoiceId);
         });
         if (replayed) return ok(this.#dto(replayed));
+        const origins = d.paymentPage?.returnOrigins ?? new Set<string>();
+        for (const [field, url] of [
+          ["success_url", body.success_url],
+          ["cancel_url", body.cancel_url],
+        ] as const) {
+          if (url !== undefined && !isAllowedReturnUrl(url, origins)) {
+            throw new HttpError(
+              422,
+              "return_url_not_allowed",
+              `${field}: an https URL on an origin listed in api.paymentPage.returnOrigins is required`,
+            );
+          }
+        }
         const { invoice, created } = await d.createInvoice.execute({
           merchantOrderId: body.merchant_order_id,
           priceAmount: body.price.amount,
           priceCurrency: body.price.currency,
           assetId: body.asset,
+          successUrl: body.success_url ?? null,
+          cancelUrl: body.cancel_url ?? null,
         });
         try {
           await d.uow.run((r) => r.idempotency.insert(key.id, idem, requestSha256, invoice.id));

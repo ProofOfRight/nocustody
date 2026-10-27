@@ -22,6 +22,12 @@ export interface PageView {
    * must not see an address, amount or QR code to pay.
    */
   readonly payable: boolean;
+  /**
+   * The merchant's return URLs, already checked against the configured origins (null = no button). Shown as a link,
+   * never followed automatically: success once the payment is received, cancel otherwise.
+   */
+  readonly successUrl?: string | null;
+  readonly cancelUrl?: string | null;
 }
 
 const PAYABLE_STATUSES = new Set(["awaiting_payment", "confirming", "underpaid", "expired"]);
@@ -87,6 +93,8 @@ a{color:var(--brand-ink)}a:hover{color:var(--brand-ink-hover)}
 .status.ok{background:var(--brand-tint);border-color:var(--secondary-line);color:var(--brand-ink)}
 .status.warn,.warning{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-ink)}
 .status.err{background:#fff;border-color:var(--danger-line);color:var(--danger)}
+.back{align-self:center;display:inline-flex;align-items:center;min-height:44px;padding:0 12px;font-size:14px;font-weight:500}
+[hidden]{display:none!important}
 nav{margin-top:16px;display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
 nav a{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;border-radius:10px;font-size:14px;font-weight:500;text-decoration:none}
 nav a:hover{background:#fff}nav a[aria-current]{color:var(--ink);font-weight:700}
@@ -98,6 +106,7 @@ const SCRIPT = `
   var d = JSON.parse(document.getElementById("page-data").textContent);
   var statusEl = document.getElementById("status"), timerEl = document.getElementById("timer");
   var hintEl = document.getElementById("done-hint");
+  var successEl = document.getElementById("back-success"), cancelEl = document.getElementById("back-cancel");
   // Stop polling on a final status, or once the grace period is over (an expired invoice stays "expired" forever).
   // "underpaid" is not final: a top-up with the same memo completes the invoice.
   var FINAL = {paid:1,overpaid:1,paid_late:1,completed:1,aml_pending:1,aml_hold:1,rejected:1,cancelled:1};
@@ -106,7 +115,9 @@ const SCRIPT = `
   function show(s){
     statusEl.textContent = d.statusText[s] || s;
     statusEl.className = "status " + (OK[s] ? "ok" : (s === "awaiting_payment" || s === "confirming") ? "" : s === "expired" ? "warn" : "err");
-    hintEl.hidden = !OK[s];
+    hintEl.hidden = !OK[s] || !!successEl;
+    if (successEl) successEl.hidden = !OK[s];
+    if (cancelEl) cancelEl.hidden = !!OK[s];
   }
   function tick(){
     if (!timerEl) return;
@@ -140,6 +151,7 @@ const statusText = (t: Messages, status: string): string =>
 export function renderPaymentPage(v: PageView, lang: Lang, nonce: string): string {
   const t = MESSAGES[lang];
   const qrPayload = v.uri ?? v.address;
+  const received = RECEIVED_STATUSES.has(v.status);
   const only = t.onlyAsset.replace("{asset}", esc(v.assetSymbol)).replace("{network}", esc(v.networkName));
   const field = (id: string, label: string, value: string) =>
     `<div class="field"><div class="label">${esc(label)}</div><div class="box"><div class="value" id="${id}">${esc(value)}</div>` +
@@ -179,8 +191,10 @@ ${v.uri ? `<a class="btn" href="${esc(v.uri)}" rel="noopener noreferrer">${esc(t
     : ""
 }
 <div class="status" id="status" role="status" aria-live="polite">${esc(statusText(t, v.status))}</div>
-<p class="muted" id="done-hint"${RECEIVED_STATUSES.has(v.status) ? "" : " hidden"}>${esc(t.doneHint)}</p>
+<p class="muted" id="done-hint"${received && !v.successUrl ? "" : " hidden"}>${esc(t.doneHint)}</p>
+${v.successUrl ? `<a class="btn" id="back-success" href="${esc(v.successUrl)}" rel="noopener noreferrer"${received ? "" : " hidden"}>${esc(t.backToMerchant)}</a>` : ""}
 ${v.payable ? `<div class="muted">${esc(t.timeLeft)}: <span id="timer" class="value"></span></div>` : ""}
+${v.cancelUrl ? `<a class="back" id="back-cancel" href="${esc(v.cancelUrl)}" rel="noopener noreferrer"${received ? " hidden" : ""}>${esc(t.backToMerchant)}</a>` : ""}
 </div>
 <nav>${langs}</nav>
 </main>

@@ -20,12 +20,17 @@ Every invoice then has `payment.page` = `/pay/{id}` in the API response. Redirec
   final or its grace period is over; `underpaid` keeps polling (a top-up completes it);
 - for an invoice that can no longer be paid (expired past grace, cancelled, completed) the page shows the status only:
   no amount, address or QR code, so a payer who opens an old link cannot send to a pair a newer invoice may hold;
+- a "Back to the merchant's website" link when the invoice has return URLs: `success_url` once the payment is
+  received, `cancel_url` until then. Only https URLs on an origin from `api.paymentPage.returnOrigins` are accepted
+  and shown; the page never redirects by itself ([ADR-0035](adr/0035-payment-return-urls.md),
+  [api.md](api.md#creating-invoices));
 - light theme only; the font is the system one (Inter when it is installed on the payer's device), no web fonts;
 - languages: English, Russian, French, Persian (right-to-left), Simplified Chinese — `?lang=` or the browser's
   `Accept-Language`.
 
 ## Security
 
+- A visit to `success_url` is not a payment: anybody can open it. Credit orders from webhooks or the API only.
 - No external resources: inline CSS and JS only, strict `Content-Security-Policy` with a fresh nonce per response,
   `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `noindex`.
 - The address comes from the invoice's stored payment instructions, which were taken from the pinned config — the
