@@ -27,6 +27,7 @@ attacker watching the address (TRC-20 events are public within seconds) could ta
 
 ## Consequences
 
-- A payment made within 5 s of creating an invoice from a machine whose clock is more than 5 s behind the gateway
-  is quarantined as `transfer.unmatched` and resolved by hand; this needs a broken clock on the gateway.
+- If the gateway's clock runs more than 5 s ahead of the chain, a payment made right after the invoice was created
+  can carry a block time earlier than `created_at` − 5 s; it is quarantined as `transfer.unmatched` and resolved by
+  hand. This needs a broken clock on the gateway.
 - Operators who run the gateway on a host without time synchronisation must fix that first (docs/going-live.md).

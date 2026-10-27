@@ -7,7 +7,7 @@
 
 `make check` runs tests, `vitest.config.ts`, `scripts/` and about 120 dev packages in the dev container, which mounts
 the whole repository read-write (`.git`, `.claude/`, untracked notes such as `CLAUDE.local.md`), has the network and
-receives `TRONGRID_API_KEY`. The container user has the host user's uid. A malicious pull request or a compromised
+receives `TRONGRID_API_KEY`. The container user (`node`, uid 1000) is usually the host user's uid as well. A malicious pull request or a compromised
 package in a dependency update could write `.git/hooks` or `core.fsmonitor` in `.git/config` (run by the host's git,
 including the `git status` an agent runs at start-up), rewrite agent settings, or send keys and notes away.
 `CLAUDE.md` tells agents to run `make check`, so an agent would do this by itself.

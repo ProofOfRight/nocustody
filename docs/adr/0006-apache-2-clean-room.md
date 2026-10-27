@@ -9,7 +9,7 @@ Need an explicit patent grant, contribution terms without a CLA, protection of t
 
 ## Decision
 
-License under Apache-2.0. `LICENSE` and `NOTICE` at the root, `SPDX-License-Identifier: Apache-2.0` header in sources, DCO (`Signed-off-by`) checked in CI. Dependencies only under compatible licenses (MIT/BSD/ISC/Apache); GPL/AGPL/LGPL dependencies are forbidden and checked in CI. Code from GPL projects (BEpusdt, epusdt, Bicycle, Spice harvester, SHKeeper) is not copied or used as a template.
+License under Apache-2.0. `LICENSE` and `NOTICE` at the root, `SPDX-License-Identifier: Apache-2.0` header in sources, DCO (`Signed-off-by`) checked in CI. Dependencies only under compatible permissive licenses (MIT/BSD/ISC/Apache, also 0BSD, BlueOak-1.0.0, CC0-1.0 and Python-2.0; the exact allowlist is in `scripts/check-licenses.ts`); GPL/AGPL/LGPL dependencies are forbidden and checked in CI. Code from GPL projects (BEpusdt, epusdt, Bicycle, Spice harvester, SHKeeper) is not copied or used as a template.
 
 ## Consequences
 

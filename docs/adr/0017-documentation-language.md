@@ -1,6 +1,6 @@
 # 0017. Documentation language
 
-- Status: accepted, amended by [0020](0020-internal-docs-outside-repo.md)
+- Status: working-docs part superseded by [0020](0020-internal-docs-outside-repo.md); the rest still accepted
 - Date: 2026-10-26
 
 ## Context

@@ -21,9 +21,9 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0012](0012-fastify-manual-di.md) | 2026-10-26 | Fastify with a hand-written composition root | superseded in part |
 | [0013](0013-single-package-npm.md) | 2026-10-26 | Single package, npm, enforced layer boundaries | accepted |
 | [0014](0014-postgresql-only.md) | 2026-10-26 | PostgreSQL only, `pg` driver, plain SQL migrations | accepted |
-| [0015](0015-thin-chain-clients.md) | 2026-10-26 | Thin in-house chain clients; official libraries only where parsing is risky | accepted |
+| [0015](0015-thin-chain-clients.md) | 2026-10-26 | Thin in-house chain clients; official libraries only where parsing is risky | amended |
 | [0016](0016-single-tenant.md) | 2026-10-26 | Single-tenant installations | accepted |
-| [0017](0017-documentation-language.md) | 2026-10-26 | Documentation language | amended |
+| [0017](0017-documentation-language.md) | 2026-10-26 | Documentation language | superseded in part |
 | [0018](0018-node-26-docker-dev.md) | 2026-10-26 | Node.js 26; development runs entirely in Docker | accepted |
 | [0019](0019-private-consumer-notes.md) | 2026-10-26 | Consumer-specific notes stay out of the public repository | superseded |
 | [0020](0020-internal-docs-outside-repo.md) | 2026-10-26 | Internal working docs are kept outside the public repository | accepted |
@@ -35,7 +35,7 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0026](0026-qr-code-library.md) | 2026-10-26 | qrcode-generator for QR codes | accepted |
 | [0027](0027-hosted-payment-page.md) | 2026-10-26 | Hosted payment page without external resources | accepted |
 | [0028](0028-container-image.md) | 2026-10-26 | Production container image from scratch with the official Node binary | accepted |
-| [0029](0029-release-provenance.md) | 2026-10-26 | Releases: tag-triggered workflow, GitHub artifact attestations, own SBOM | accepted |
+| [0029](0029-release-provenance.md) | 2026-10-26 | Releases: tag-triggered workflow, GitHub artifact attestations, own SBOM | amended |
 | [0030](0030-early-payment-tolerance.md) | 2026-10-26 | Early-payment tolerance of 5 seconds, separate from the slot margin | accepted |
 | [0031](0031-pinned-config-scope.md) | 2026-10-26 | The pinned checksum covers everything that decides money, not only addresses | accepted |
 | [0032](0032-repository-hosting.md) | 2026-10-26 | The repository is hosted under the maintainer's account | accepted |

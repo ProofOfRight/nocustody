@@ -1,6 +1,6 @@
 # 0015. Thin in-house chain clients; official libraries only where parsing is risky
 
-- Status: accepted
+- Status: accepted; the TON part finalised by [0024](0024-unlicense-allowed.md)
 - Date: 2026-10-26
 
 ## Context
