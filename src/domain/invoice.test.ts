@@ -14,7 +14,7 @@ import { type AmountSlot, amountSlot, blocksNewSlot, matchSlot } from "./amount-
 import { defineAsset } from "./asset.ts";
 import { chainAddress } from "./chain-address.ts";
 import { DomainError } from "./errors.ts";
-import { Invoice } from "./invoice.ts";
+import { Invoice, MAX_RETURN_URL_LENGTH } from "./invoice.ts";
 import { Money } from "./money.ts";
 import { networkId } from "./network.ts";
 import { TRON, USDT_TRON } from "./test-fixtures.ts";
@@ -57,6 +57,23 @@ describe("Invoice lifecycle", () => {
     expect(inv.state.graceUntil).toEqual(at(90 * MIN));
     expect(inv.pullEvents().map((e) => e.type)).toEqual(["invoice.created"]);
     expect(inv.pullEvents()).toEqual([]);
+  });
+
+  it("keeps the return URLs it was created with; none by default; too long is refused", () => {
+    expect(newInvoice().state).toMatchObject({ successUrl: null, cancelUrl: null });
+    const base = {
+      id: "inv-2",
+      merchantOrderId: "order-2",
+      instructions: { address: ADDR, amount: usdt("10.01"), memo: null },
+      price: null,
+      ttlMs: 30 * MIN,
+      graceMs: 60 * MIN,
+    };
+    const ok = { successUrl: "https://shop.example/ok", cancelUrl: "https://shop.example/back" };
+    expect(Invoice.create({ ...base, ...ok }, T0).state).toMatchObject(ok);
+    const long = `https://shop.example/${"a".repeat(MAX_RETURN_URL_LENGTH)}`;
+    expect(code(() => Invoice.create({ ...base, successUrl: long }, T0))).toBe("invoice.return_url");
+    expect(code(() => Invoice.create({ ...base, cancelUrl: "" }, T0))).toBe("invoice.return_url");
   });
 
   it("detected → confirming → paid on exact amount", () => {

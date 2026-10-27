@@ -68,6 +68,12 @@ export interface InvoiceState {
   readonly status: InvoiceStatus;
   readonly payments: readonly PaymentRecord[];
   readonly amlReason: string | null;
+  /**
+   * Where the payment page sends the payer back to the merchant (a button, never an automatic redirect): after the
+   * payment is received, or when the invoice can no longer be paid. Never a proof of payment.
+   */
+  readonly successUrl: string | null;
+  readonly cancelUrl: string | null;
   /** Optimistic concurrency version, incremented on every change. */
   readonly version: number;
 }
@@ -79,7 +85,12 @@ export interface NewInvoice {
   readonly price: LockedPrice | null;
   readonly ttlMs: number;
   readonly graceMs: number;
+  readonly successUrl?: string | null;
+  readonly cancelUrl?: string | null;
 }
+
+/** Longest return URL accepted. */
+export const MAX_RETURN_URL_LENGTH = 2048;
 
 const PAYABLE: ReadonlySet<InvoiceStatus> = new Set([
   "awaiting_payment",
@@ -117,6 +128,12 @@ export class Invoice {
       "invoice.grace",
       "grace must be non-negative",
     );
+    for (const url of [input.successUrl, input.cancelUrl])
+      invariant(
+        url == null || (url.length > 0 && url.length <= MAX_RETURN_URL_LENGTH),
+        "invoice.return_url",
+        `return url must be 1..${MAX_RETURN_URL_LENGTH} characters`,
+      );
     invariant(!input.instructions.amount.isZero(), "invoice.amount", "amount must be positive");
     invariant(
       input.instructions.address.network === input.instructions.amount.asset.network,
@@ -138,6 +155,8 @@ export class Invoice {
         status: "awaiting_payment",
         payments: [],
         amlReason: null,
+        successUrl: input.successUrl ?? null,
+        cancelUrl: input.cancelUrl ?? null,
         version: 0,
       },
       null,

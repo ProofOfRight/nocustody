@@ -83,6 +83,8 @@ interface InvoiceRow {
   grace_until: Date;
   status: InvoiceStatus;
   aml_reason: string | null;
+  success_url: string | null;
+  cancel_url: string | null;
   version: number;
 }
 
@@ -168,6 +170,8 @@ function repositories(db: PoolClient, assets: AssetResolver, pinned: PinnedAddre
         at: p.paid_at,
       })),
       amlReason: r.aml_reason,
+      successUrl: r.success_url,
+      cancelUrl: r.cancel_url,
       version: r.version,
     };
     return Invoice.restore(Object.freeze(state));
@@ -266,8 +270,9 @@ function repositories(db: PoolClient, assets: AssetResolver, pinned: PinnedAddre
         try {
           await db.query(
             `INSERT INTO invoices (id, merchant_order_id, network, asset_id, expected_units, pay_address,
-               pay_amount_units, memo, price, created_at, expires_at, grace_until, status, aml_reason, version)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+               pay_amount_units, memo, price, created_at, expires_at, grace_until, status, aml_reason, version,
+               success_url, cancel_url)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
             [
               s.id,
               s.merchantOrderId,
@@ -284,6 +289,8 @@ function repositories(db: PoolClient, assets: AssetResolver, pinned: PinnedAddre
               s.status,
               s.amlReason,
               s.version,
+              s.successUrl,
+              s.cancelUrl,
             ],
           );
         } catch (e) {

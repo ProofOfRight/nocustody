@@ -16,6 +16,12 @@ export interface CreateInvoiceInput {
   /** ISO 4217 code enabled in config, or the asset's price symbol (e.g. "USDT") for prices already in crypto. */
   readonly priceCurrency: string;
   readonly assetId: string;
+  /**
+   * Return URLs for the payment page, already checked against the configured origins by the caller. Not part of the
+   * order: a retry with other URLs gets the existing invoice with the URLs it was created with.
+   */
+  readonly successUrl?: string | null;
+  readonly cancelUrl?: string | null;
 }
 
 export interface CreateInvoiceResult {
@@ -140,6 +146,8 @@ export class CreateInvoice {
         price,
         ttlMs: settings.ttlMs,
         graceMs: settings.graceMs,
+        successUrl: input.successUrl ?? null,
+        cancelUrl: input.cancelUrl ?? null,
       },
       now,
     );

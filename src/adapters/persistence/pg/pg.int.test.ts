@@ -449,6 +449,8 @@ describe("PostgreSQL repositories", () => {
       priceAmount: "10",
       priceCurrency: "USD",
       assetId: "usdt-tron",
+      successUrl: "https://shop.example/thanks?o=1",
+      cancelUrl: null,
     });
     const b = await create.execute({
       merchantOrderId: "o2",
@@ -467,6 +469,9 @@ describe("PostgreSQL repositories", () => {
         })
       ).created,
     ).toBe(false);
+    const withUrls = await uow.run((r) => r.invoices.findById(a.invoice.id));
+    expect(withUrls?.state).toMatchObject({ successUrl: "https://shop.example/thanks?o=1", cancelUrl: null });
+    expect((await uow.run((r) => r.invoices.findById(b.invoice.id)))?.state.successUrl).toBeNull();
 
     now += MIN;
     const c = {
