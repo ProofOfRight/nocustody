@@ -135,8 +135,18 @@ Canary invoices simply expire.
 
 The gateway never holds keys. Recommended practice: receiving addresses on a hardware wallet; sweep regularly to cold
 storage you never publish; a separate quarantine address for `aml_hold` funds; copy withdrawal addresses only from
-your wallet's address book (address poisoning); rotate receiving addresses (mark the old one `draining` — it stays
-watched); refunds are made manually from your wallet.
+your wallet's address book (address poisoning); rotate receiving addresses (see below); refunds are made manually
+from your wallet.
+
+### Rotating a receiving address
+
+An address's `status` is part of the pinned checksum, so each step below needs a new `NOCUSTODY_PINNED_SHA256`
+(`config:hash`) and a restart.
+
+1. Add the new address as `active` and mark the old one `draining`: new invoices go to the new address, the old one
+   stays watched, so its open invoices can still be paid and late transfers are not missed.
+2. Remove the old address only when it has no open invoices left (at least `ttl` + `grace` after step 1). An open
+   invoice on an address that is no longer in the config stops the worker cycle (`invoice.address_unpinned`).
 
 ## External hosts
 
