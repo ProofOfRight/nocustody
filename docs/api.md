@@ -38,7 +38,8 @@ the payer to the hosted page `payment.page` if it is enabled ([payment-page.md](
 
 Optional `success_url` and `cancel_url` give the hosted page a "Back to the merchant's website" link: `success_url`
 once the payment is received, `cancel_url` until then. They must be https on an origin listed in
-`api.paymentPage.returnOrigins`, otherwise the request is refused with `422 return_url_not_allowed`. A retry for the
+`api.paymentPage.returnOrigins`, otherwise the request is refused with `422 return_url_not_allowed`; with the page
+disabled (`api.paymentPage.enabled: false`) every return URL is refused. A retry for the
 same `merchant_order_id` with other URLs returns the existing invoice with the URLs it was created with.
 
 **A visit to `success_url` is not a payment.** Anybody can open that URL. Credit the order only from the
@@ -79,12 +80,23 @@ The receiver must:
 3. process each `id` once — delivery is at-least-once;
 4. answer `2xx` quickly and do the work asynchronously. Anything else is retried with exponential backoff
    (30 s, 1 min, 2 min, … up to 6 h, 15 attempts by default), then the event is dead-lettered and recorded in the
-   audit log.
+   audit log. A delivery refused by the SSRF policy (below) is dead-lettered at once, without retries.
 
 Event types: `invoice.created`, `invoice.transfer_detected`, `invoice.paid`, `invoice.underpaid`, `invoice.overpaid`,
 `invoice.paid_late`, `invoice.expired`, `invoice.cancelled` (reserved: nothing cancels an invoice yet),
 `invoice.aml_pending`, `invoice.aml_hold`, `invoice.completed`, `invoice.rejected`, `transfer.unmatched`
 (`object_id` is the transfer).
+
+`data` always has `object_id`; the other fields by event:
+
+| Event | Fields besides `object_id` |
+|---|---|
+| `invoice.created` | `merchant_order_id`, `address`, `amount`, `asset`, `expires_at` |
+| `invoice.transfer_detected` | `transfer_key` |
+| `invoice.paid`, `invoice.underpaid`, `invoice.overpaid`, `invoice.paid_late` | `transfer_key`, `amount` (this transfer), `received` (total), `expected`, `classification` (`exact`, `under_tolerated`, `under`, `over`), `late` |
+| `invoice.aml_hold` | `reason` |
+| `invoice.expired`, `invoice.cancelled`, `invoice.aml_pending`, `invoice.completed`, `invoice.rejected` | — |
+| `transfer.unmatched` | `reason`, `amount`, `to`, `from`, `asset` |
 
 A webhook tells you *when* to look, not *what* to do: grant access only after `GET /v1/invoices/{id}` answers
 `completed` (`invoice.completed` is the event to react to), never from the webhook body alone. A paid invoice goes

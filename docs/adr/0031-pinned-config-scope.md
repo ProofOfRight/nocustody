@@ -18,14 +18,16 @@ that changed the checksum, so nothing alerted.
 - The checksum (`nocustody-pinned-v2`) is the SHA-256 of a canonical JSON of: per asset its identity, addresses
   with status and jetton-wallet, amount policy (step, slots, dust, underpayment tolerance, late payments), TTL,
   grace, AML threshold, strategy and price symbol; the provider sections that answer the finality queries
-  (`network`, `apiUrl`, `apiKeyEnv`); `pricing` (currencies, markup, manual rates); `ops.aml`; `ops.depeg`; the
+  (`network`, `apiUrl`, `apiKeyEnv`); `pricing` (currencies, markup, manual rates); `ops.aml` (provider and blocklist path, not the list itself);
+  `ops.depeg` (symbol, deviation limit, sources; not `interval`); the
   webhook URL with `allowPrivateNetworks` and `allowHttp`. Amounts are compared in units, so a different spelling
   of the same amount is the same pin.
 - Not pinned, so operators can tune them without a new pin: timeouts, poll intervals, overlap, response limits,
   API bind address and rate limits, alerts, retention, `candidateMaxAge`, `maxScannerLag`, `maxDispatcherLag`,
   reconciliation sources (they only produce candidates for the normal verifier), log level.
 - A provider key variable (`apiKeyEnv`, `botTokenEnv`) may not name another secret (`database.urlEnv`,
-  `webhooks.secretEnv`, the pinned checksum, `POSTGRES_*`): otherwise the database password would travel to a
+  `webhooks.secretEnv`, the pinned checksum, `NOCUSTODY_DB_PASSWORD`) or look like a database variable (`POSTGRES_*`,
+  `PG*`, `DATABASE_*`): otherwise the database password would travel to a
   provider as an API key.
 - The guard that re-reads the file still compares this checksum: it runs before every invoice and once a minute in
   the monitor, and alerts through the alert router.

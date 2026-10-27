@@ -53,9 +53,12 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         "413": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
     get:
       summary: List invoices, newest first (scope invoices:read)
@@ -95,6 +98,9 @@ paths:
                 }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
   /v1/invoices/{id}:
     get:
       summary: Get an invoice (scope invoices:read)
@@ -106,13 +112,17 @@ paths:
             description: Invoice,
             content: { application/json: { schema: { $ref: "#/components/schemas/Invoice" } } },
           }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
   /v1/quotes:
     get:
       summary: Indicative conversion of a price into an asset, without creating an invoice (scope quotes:read)
       parameters:
         - { name: amount, in: query, required: true, schema: { $ref: "#/components/schemas/Decimal" } }
-        - { name: currency, in: query, required: true, schema: { type: string, example: JPY } }
+        - { name: currency, in: query, required: true, schema: { $ref: "#/components/schemas/Currency" } }
         - { name: asset, in: query, required: true, schema: { type: string, example: usdt-tron } }
       responses:
         "200":
@@ -133,6 +143,11 @@ paths:
                       rate: { type: [string, "null"], description: Rate as a fraction "num/den" }
                       rate_path: { type: [string, "null"] }
                   note: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
@@ -163,7 +178,14 @@ components:
                       validation codes such as decimal.precision.
                   message: { type: string }
   schemas:
-    Decimal: { type: string, pattern: "^(0|[1-9]\\d*)(\\.\\d+)?$", example: "10.50" }
+    Decimal: { type: string, pattern: "^(0|[1-9]\\d{0,30})(\\.\\d{1,36})?$", example: "10.50" }
+    Currency:
+      {
+        type: string,
+        pattern: "^[A-Z][A-Z0-9]{1,9}$",
+        example: JPY,
+        description: "ISO 4217 code enabled in config, or the asset's price symbol (e.g. USDT)",
+      }
     Status:
       type: string
       enum:
@@ -193,18 +215,15 @@ components:
           required: [amount, currency]
           properties:
             amount: { $ref: "#/components/schemas/Decimal" }
-            currency:
-              {
-                type: string,
-                description: "ISO 4217 code enabled in config, or the asset's price symbol (e.g. USDT)",
-              }
-        asset: { type: string, example: usdt-tron }
+            currency: { $ref: "#/components/schemas/Currency" }
+        asset: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$", example: usdt-tron }
         success_url:
           type: string
           maxLength: 2048
           description: |
             Hosted page: "Back to the merchant's website" button once the payment is received. https on an origin
-            listed in api.paymentPage.returnOrigins, otherwise 422 return_url_not_allowed. Not a proof of payment.
+            listed in api.paymentPage.returnOrigins (and the page enabled), otherwise 422 return_url_not_allowed. Not a
+            proof of payment.
         cancel_url:
           type: string
           maxLength: 2048

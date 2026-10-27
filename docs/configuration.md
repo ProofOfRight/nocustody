@@ -1,7 +1,7 @@
 # Configuration
 
 One JSON file, path in `NOCUSTODY_CONFIG`. It is validated strictly at startup: unknown keys, malformed addresses and
-non-https provider URLs are errors. The schema is [src/app/config.ts](../src/app/config.ts); examples are in
+non-https provider URLs are errors. `database` and `pricing` are required, even if empty (`{}`). The schema is [src/app/config.ts](../src/app/config.ts); examples are in
 [examples/](../examples/).
 
 The file holds **no secrets**. Keys and tokens are referenced by the name of an environment variable
@@ -42,7 +42,7 @@ command that changes receiving addresses.
 | `amounts.acceptLatePayments` | `true` | accept payments after `expires_at` but before `grace_until` (as `paid_late`) |
 | `ttl` | `30m` | invoice lifetime |
 | `grace` | `60m` | after expiry the (address, amount) slot or memo stays reserved this long |
-| `amlThreshold` | `"0"` | payments below this complete without AML screening; `"0"` screens everything |
+| `amlThreshold` | `"0"` | an invoice whose total received is below this completes without AML screening; `"0"` screens everything |
 
 Mainnet USDT: TRON `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`, TON jetton master
 `EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs` (6 decimals). Check them yourself against Tether's official
@@ -74,7 +74,7 @@ One section per network family, required when an asset uses it.
 | `paymentPage.enabled` | `false` | hosted page at `/pay/{id}` ([payment-page.md](payment-page.md)) |
 | `paymentPage.defaultLanguage` | `en` | `en`, `ru`, `fr`, `fa`, `zh-CN` |
 | `paymentPage.publicRateLimitPerMinute` | `600` | shared limit for the public `/pay/*` routes |
-| `paymentPage.returnOrigins` | `[]` | origins (`https://shop.example`, no path) that invoices' `success_url` / `cancel_url` may point at; not pinned ([ADR-0035](adr/0035-payment-return-urls.md)) |
+| `paymentPage.returnOrigins` | `[]` | origins (`https://shop.example`, no path) that invoices' `success_url` / `cancel_url` may point at; only with `paymentPage.enabled` (otherwise every return URL is refused); not pinned ([ADR-0035](adr/0035-payment-return-urls.md)) |
 
 API keys are created with the `apikey:create` command ([api.md](api.md)).
 
@@ -117,8 +117,8 @@ Monitoring, reconciliation, depeg protection, alerts and AML: see [operations.md
 | `aml { provider: noop \| blocklist, blocklistFile }` | `noop` |
 
 Durations must be above zero; intervals and timeouts between 1 s and 24 days. A provider key variable (`apiKeyEnv`,
-`botTokenEnv`) must not name another secret (`database.urlEnv`, `webhooks.secretEnv`, `NOCUSTODY_DB_PASSWORD`,
-`POSTGRES_*`).
+`botTokenEnv`) must not name another secret (`database.urlEnv`, `webhooks.secretEnv`, `NOCUSTODY_PINNED_SHA256`,
+`NOCUSTODY_DB_PASSWORD`) or look like a database variable (`POSTGRES_*`, `PG*`, `DATABASE_*`).
 
 ## `database`
 
