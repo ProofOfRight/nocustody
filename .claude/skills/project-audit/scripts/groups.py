@@ -27,7 +27,7 @@ GROUPS = {
     # Persistence, system adapters and the composition root: config, container, CLI, integrity, logger.
     "platform": r"^src/adapters/(persistence|system)/|^src/app/",
     # Repository checks, e2e scenarios, SBOM, the canary.
-    "tooling": r"^scripts/|^tools/",
+    "tooling": r"^scripts/|^src/tools/",
     # Build, deployment and CI (read by the infrastructure security agent together with `tooling`).
     "infra": r"^(Dockerfile|\.dockerignore|compose\.yaml|Makefile|\.npmrc|package\.json|package-lock\.json|"
              r"biome\.json|tsconfig[a-z.]*\.json|vitest\.config\.ts|\.dependency-cruiser\.mjs)$|"
