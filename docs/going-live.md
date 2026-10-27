@@ -33,7 +33,9 @@ Every external host is configured explicitly; nothing else is contacted ([securi
 - [ ] Keys created, stored only in `.env` (`chmod 600`).
 - [ ] The key headers for Tronscan and tonapi depend on the plan; if a request is refused, set `apiKeyHeader` in
       `ops.reconcile.tron` / `ops.reconcile.ton` ([operations.md](operations.md)).
-- [ ] The providers are reachable **from the server**: run `make e2e-mainnet` there from a source checkout (below).
+- [ ] TronGrid and toncenter are reachable **from the server**: run `make e2e-mainnet` there from a source checkout
+      (below). It does not contact Tronscan, tonapi, the exchanges or Telegram: check those with the first
+      reconciliation run, `ops:status` (depeg reading) and a test alert (section 5).
 
 ## 3. Configuration
 
@@ -54,13 +56,16 @@ Every external host is configured explicitly; nothing else is contacted ([securi
 From a source checkout on the server (Docker only):
 
 ```bash
+make install
 make up
 make e2e-mainnet
 ```
 
 It replays real, recent, finalized USDT payments of other people (TRON and TON) through the scanner, the finality
 verifier and settlement against the live providers. Nothing is sent and no keys are involved. It shows that the
-providers answer from this host and that their responses are what the gateway expects.
+providers answer from this host and that their responses are what the gateway expects. `TRONGRID_API_KEY` from the
+environment is passed to the dev container; `TONCENTER_API_KEY` is not, so the TON part runs without a key (1
+request/s).
 
 ## 5. Deploy
 
@@ -69,7 +74,9 @@ providers answer from this host and that their responses are what the gateway ex
 - [ ] Webhook endpoint of the merchant verifies signatures ([api.md](api.md)); the secret is not the API key.
 - [ ] `ops:status` shows scanner heartbeats for both networks.
 - [ ] The address canary runs from another host ([operations.md](operations.md#address-canary)).
-- [ ] A test alert reached the operator (for example, stop the gateway longer than the scanner lag limit).
+- [ ] A test alert reached the operator. Stopping the gateway sends nothing: the monitor runs in the same process
+      (watch `/health` from outside for that). For example, set `ops.maxScannerLag` of one network shorter than its
+      `pollInterval` (not pinned), restart, wait for `scanner-lag:<network>` within a minute or two, then revert.
 
 ## 6. Small-amount test payments
 
@@ -81,8 +88,10 @@ Pay from a wallet that is not a receiving wallet, 1–2 USDT each:
 - [ ] Less than the amount → `underpaid`, webhook `invoice.underpaid`. On TON a top-up with the same memo is added
       and completes the invoice; on TRON a top-up has a different amount, matches no slot (`transfer.unmatched`) and
       is settled by the merchant manually.
-- [ ] After expiry, within grace → `paid_late` (or refused, if `acceptLatePayments` is off).
-- [ ] `invoice:show <id>` shows the transfer and the audit decision for each case.
+- [ ] After expiry, within grace → webhook `invoice.paid_late`, then `completed` (`paid_late` is an event, not a
+      stored status), or not credited if `acceptLatePayments` is off.
+- [ ] `invoice:show <id>` shows the status, the received amount, the payments and the webhook events for each case;
+      the reasons of the decisions are in the `audit_log` table.
 - [ ] Reconciliation runs without findings.
 
 ## 7. Operating

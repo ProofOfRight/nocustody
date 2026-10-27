@@ -44,8 +44,9 @@ Replays two recorded, finalized testnet payments: 1.227528 test USDT with a comm
 
 ## Live mode (you pay)
 
-1. In Tonkeeper enable the testnet, create two wallets, get test GRAM from the testnet faucet bot and test jettons
-   if you want to test USDT. Use the second wallet as the receiving wallet — the gateway only needs its address.
+1. In Tonkeeper enable the testnet, create two wallets, get test GRAM from the testnet faucet bot and test jettons.
+   Live mode invoices the **first** TON asset of the config; in the example that is the test USDT, so test jettons
+   are needed. To pay in GRAM instead, put the GRAM asset first. Use the second wallet as the receiving wallet — the gateway only needs its address.
 2. Find the receiving wallet's jetton-wallet for the master, e.g.
    `https://testnet.toncenter.com/api/v3/jetton/wallets?owner_address=<wallet>&jetton_address=<master>`.
    The gateway re-checks it with `get_wallet_address` at startup, so a wrong value cannot slip through.
