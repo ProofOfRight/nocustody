@@ -111,6 +111,44 @@ describe("monitor: health", () => {
     expect(s.sent.at(-1)).toMatchObject({ key: `scanner-lag:${TRON}`, severity: "critical" });
   });
 
+  it("alerts on open invoices whose stored address is not in the pin, not on retired ones (ADR-0037)", async () => {
+    const retired = chainAddress(TRON, "TAddrR111111111111111111111111111");
+    const s = setup({
+      asset: settings({
+        addresses: [
+          { address: ADDR, status: "active", tokenAccount: null },
+          { address: retired, status: "retired", tokenAccount: null },
+        ],
+      }),
+    });
+    await s.store.run((r) => r.heartbeats.ok(`scanner:${TRON}`, s.clock.now()));
+    const { invoice } = await s.create.execute({
+      merchantOrderId: "o1",
+      priceAmount: "10",
+      priceCurrency: "USDT",
+      assetId: USDT_TRON.id,
+    });
+    const moveTo = (address: string) => {
+      const state = s.store.data.invoices.get(invoice.id);
+      if (!state) throw new Error("invoice missing");
+      s.store.data.invoices.set(invoice.id, {
+        ...state,
+        instructions: { ...state.instructions, address: chainAddress(TRON, address) },
+      });
+    };
+    moveTo(retired.value);
+    expect(await s.monitor.checkHealth()).toEqual([]);
+    moveTo("TUnpinned1111111111111111111111111");
+    const problems = await s.monitor.checkHealth();
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("TUnpinned1111111111111111111111111");
+    expect(s.sent.at(-1)).toMatchObject({ key: "invoice-address-unpinned", severity: "critical" });
+    // closed (past grace): history only, no alert
+    s.advance(91 * MIN);
+    await s.store.run((r) => r.heartbeats.ok(`scanner:${TRON}`, s.clock.now()));
+    expect(await s.monitor.checkHealth()).toEqual([]);
+  });
+
   it("re-checks the pinned config every health cycle and alerts on a violation (not only on invoice creation)", async () => {
     let ok = true;
     const s = setup({

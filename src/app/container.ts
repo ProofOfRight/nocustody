@@ -18,7 +18,7 @@ import { ManualRateTable } from "../adapters/pricing/manual-table.ts";
 import { CoinbaseUsdtUsd, KrakenUsdtUsd } from "../adapters/pricing/peg-sources.ts";
 import { cryptoIds, cryptoMemos, systemClock } from "../adapters/system/system.ts";
 import { HttpWebhookSender } from "../adapters/webhooks/http-sender.ts";
-import { AssetCatalog } from "../application/catalog.ts";
+import { AssetCatalog, unpinnedUsage } from "../application/catalog.ts";
 import type {
   AlertSink,
   AmlScreener,
@@ -97,11 +97,7 @@ export function buildContainer(o: ContainerOptions) {
   const clock = o.clock ?? systemClock;
   const pool = createPool(o.databaseUrl, { max: 10, statementTimeoutMs: 60_000 });
   const catalog = new AssetCatalog(o.config.assets);
-  const uow = new PgUnitOfWork(
-    pool,
-    new Map(o.config.assets.map((s) => [s.asset.id, s.asset])),
-    new Map(o.config.assets.map((s) => [s.asset.id, new Set(s.addresses.map((a) => a.address.value))])),
-  );
+  const uow = new PgUnitOfWork(pool, new Map(o.config.assets.map((s) => [s.asset.id, s.asset])));
   const onSettleError = (subject: string, err: unknown) =>
     logger.error({ subject, err: err instanceof Error ? err.message : String(err) }, "settlement failed");
   // A random first slot: the pair a previous invoice just released is not the next one handed out.
@@ -223,6 +219,27 @@ export function buildContainer(o: ContainerOptions) {
 
   const workers: NetworkWorker[] = [];
   const startupChecks: Array<() => Promise<string[]>> = [];
+  // An address removed from the config while invoices on it can still be paid is a mistake: payments to it would no
+  // longer be seen. Mark it `retired` instead (ADR-0037). Only closed invoices left on it: history, a warning.
+  startupChecks.push(async () => {
+    const stray = unpinnedUsage(
+      catalog,
+      await uow.run((r) => r.invoices.addressUsage({ openOnly: false, now: clock.now() })),
+    );
+    for (const u of stray.filter((x) => x.open === 0)) {
+      logger.warn(
+        { asset: u.assetId, address: u.address, invoices: u.total },
+        "closed invoices point at an address that is not in the config; their address is hidden, list it as retired",
+      );
+    }
+    return stray
+      .filter((u) => u.open > 0)
+      .map(
+        (u) =>
+          `${u.assetId}: ${u.open} open invoice(s) on ${u.address}, which is not in the config; ` +
+          "restore it as draining (or retired) until they are closed",
+      );
+  });
   const tron = o.config.raw.tron;
   if (tron) {
     const adapter = new TronAdapter({
@@ -377,6 +394,7 @@ export function buildContainer(o: ContainerOptions) {
       createInvoice,
       quotePrice,
       adapters: workers.map((w) => w.adapter),
+      catalog,
       clock,
       rateLimitPerMinute: o.config.raw.api.rateLimitPerMinute,
       paymentPage: o.config.raw.api.paymentPage.enabled
@@ -389,7 +407,7 @@ export function buildContainer(o: ContainerOptions) {
       onError,
     });
 
-  /** Network-level startup checks (e.g. TON jetton-wallet binding); throws if any fails. */
+  /** Startup checks (open invoices on removed addresses, TON jetton-wallet binding); throws if any fails. */
   const verifyStartup = async (): Promise<void> => {
     const problems = (await Promise.all(startupChecks.map((c) => c()))).flat();
     if (problems.length > 0)

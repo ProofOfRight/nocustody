@@ -8,8 +8,11 @@ import { ApplicationError } from "./errors.ts";
 
 export interface ReceivingAddress {
   readonly address: ChainAddress;
-  /** active: used for new invoices and watched; draining: watched only. */
-  readonly status: "active" | "draining";
+  /**
+   * active: used for new invoices and watched; draining: watched only; retired: neither watched nor shown to payers,
+   * kept in the pin so that its invoices stay readable (history, AML decisions). ADR-0037.
+   */
+  readonly status: "active" | "draining" | "retired";
   /**
    * Account that holds the token for this owner, where the network has one (TON jetton-wallet, later Solana ATA).
    * Pinned like the address itself; null when not applicable.
@@ -72,5 +75,27 @@ export class AssetCatalog {
 }
 
 export function watchedAddresses(settings: AssetSettings): ChainAddress[] {
-  return settings.addresses.map((a) => a.address);
+  return settings.addresses.filter((a) => a.status !== "retired").map((a) => a.address);
+}
+
+/**
+ * Whether an invoice's stored address may be shown to a payer: it must be a pinned, non-retired address of the
+ * invoice's asset. A stored address outside the pin (a removed address, or a row written behind the gateway's back)
+ * is never shown; ADR-0037.
+ */
+export function isShownAddress(settings: AssetSettings, address: string): boolean {
+  return settings.addresses.some((a) => a.address.value === address && a.status !== "retired");
+}
+
+/** Whether `address` is in the pinned list of the asset, whatever its status. */
+export function isPinnedAddress(settings: AssetSettings, address: string): boolean {
+  return settings.addresses.some((a) => a.address.value === address);
+}
+
+/** Stored (asset, address) pairs whose address is not in the asset's pinned list at all (ADR-0037). */
+export function unpinnedUsage<U extends { readonly assetId: string; readonly address: string }>(
+  catalog: AssetCatalog,
+  usage: readonly U[],
+): U[] {
+  return usage.filter((u) => !isPinnedAddress(catalog.get(u.assetId), u.address));
 }

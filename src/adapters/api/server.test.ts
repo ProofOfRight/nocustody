@@ -68,6 +68,8 @@ async function client(api: ApiServer) {
   };
 }
 const ADDR = chainAddress(TRON, "TAddrA111111111111111111111111111");
+const DRAINING = chainAddress(TRON, "TAddrD111111111111111111111111111");
+const RETIRED = chainAddress(TRON, "TAddrR111111111111111111111111111");
 
 async function setup(
   opts: {
@@ -83,7 +85,11 @@ async function setup(
     asset: USDT_TRON,
     priceSymbol: "USDT",
     strategy: "unique-amount",
-    addresses: [{ address: ADDR, status: "active", tokenAccount: null }],
+    addresses: [
+      { address: ADDR, status: "active", tokenAccount: null },
+      { address: DRAINING, status: "draining", tokenAccount: null },
+      { address: RETIRED, status: "retired", tokenAccount: null },
+    ],
     amountPolicy: STRICT_AMOUNT_POLICY,
     uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 99 }),
     ttlMs: 1_800_000,
@@ -125,6 +131,7 @@ async function setup(
         : createInvoice,
       quotePrice: new QuotePrice(catalog, pricing, rates),
       adapters: [new FakeChain(TRON)],
+      catalog,
       clock,
       rateLimitPerMinute: opts.rateLimit ?? 1_000,
       paymentPage: opts.page
@@ -502,6 +509,43 @@ describe("hosted payment page", () => {
       graceUntil: new Date(T0.getTime() + 3_600_000),
     });
     expect((await app.inject({ url: inv.payment.page })).body).toContain(inv.payment.address);
+  });
+
+  it("an invoice on a retired or unpinned address shows no address in the API or on the page (ADR-0037)", async () => {
+    const { app, create, store, auth } = await setup({ page: true });
+    const inv = (await create()).json();
+    const state = store.data.invoices.get(inv.id);
+    if (!state) throw new Error("invoice missing");
+    const moveTo = (address: string) =>
+      store.data.invoices.set(inv.id, {
+        ...state,
+        instructions: { ...state.instructions, address: chainAddress(TRON, address) },
+      });
+    for (const hidden of [RETIRED.value, "TUnpinned1111111111111111111111111"]) {
+      moveTo(hidden);
+      const one = (await app.inject({ url: `/v1/invoices/${inv.id}`, headers: auth() })).json();
+      expect(one.payment).toMatchObject({
+        address: null,
+        address_display: null,
+        uri: null,
+        address_available: false,
+      });
+      const list = await app.inject({ url: "/v1/invoices", headers: auth() });
+      expect(list.statusCode).toBe(200);
+      expect(list.body).not.toContain(hidden);
+      const page = await app.inject({ url: inv.payment.page });
+      expect(page.statusCode).toBe(200);
+      expect(page.body).not.toContain(hidden);
+      expect(page.body).not.toContain("<svg");
+      expect(page.body).toContain("This invoice can no longer be paid");
+    }
+    // draining: still watched, so still shown
+    moveTo(DRAINING.value);
+    const drained = (await app.inject({ url: `/v1/invoices/${inv.id}`, headers: auth() })).json();
+    expect(drained.payment).toMatchObject({ address: DRAINING.value, address_available: true });
+    const page = (await app.inject({ url: inv.payment.page })).body;
+    expect(page).toContain(DRAINING.value);
+    expect(page).not.toContain("This invoice can no longer be paid");
   });
 
   it("return URLs: only https on a configured origin; stored, returned and shown as links", async () => {

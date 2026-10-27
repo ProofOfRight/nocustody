@@ -10,7 +10,8 @@ export interface PageView {
   readonly assetSymbol: string;
   readonly networkName: string;
   readonly amount: string;
-  readonly address: string;
+  /** Null when the address may not be shown (retired or not pinned, ADR-0037); `payable` is then false. */
+  readonly address: string | null;
   readonly memo: string | null;
   readonly uri: string | null;
   readonly expiresAt: string;
@@ -22,6 +23,8 @@ export interface PageView {
    * must not see an address, amount or QR code to pay.
    */
   readonly payable: boolean;
+  /** The invoice could still be paid, but its address was withdrawn: tell the payer not to send funds. */
+  readonly addressWithdrawn?: boolean;
   /**
    * The merchant's return URLs, already checked against the configured origins (null = no button). Shown as a link,
    * never followed automatically: success once the payment is received, cancel otherwise.
@@ -150,7 +153,7 @@ const statusText = (t: Messages, status: string): string =>
 
 export function renderPaymentPage(v: PageView, lang: Lang, nonce: string): string {
   const t = MESSAGES[lang];
-  const qrPayload = v.uri ?? v.address;
+  const qrPayload = v.uri ?? v.address ?? "";
   const received = RECEIVED_STATUSES.has(v.status);
   const only = t.onlyAsset.replace("{asset}", esc(v.assetSymbol)).replace("{network}", esc(v.networkName));
   const field = (id: string, label: string, value: string) =>
@@ -175,7 +178,7 @@ export function renderPaymentPage(v: PageView, lang: Lang, nonce: string): strin
 <div class="card">
 <h1>${esc(t.title)}</h1>
 ${
-  v.payable
+  v.payable && v.address !== null
     ? `<div class="total">
 <div class="muted">${esc(t.send)}</div>
 <div class="amount-row"><div class="amount"><span id="amount" class="value">${esc(v.amount)}</span> ${esc(v.assetSymbol)}</div>
@@ -184,12 +187,13 @@ ${
 </div>
 <p class="warning">${only}</p>
 <div class="field"><div class="label">${esc(t.network)}</div><div>${esc(v.networkName)}</div></div>
-${field("address", t.toAddress, v.address)}
+${field("address", t.toAddress, v.address ?? "")}
 ${v.memo ? `${field("memo", t.memo, v.memo)}<p class="warning">${esc(t.memoWarning)}</p>` : ""}
 <div class="qr">${qrSvg(qrPayload, esc(t.qr))}</div>
 ${v.uri ? `<a class="btn" href="${esc(v.uri)}" rel="noopener noreferrer">${esc(t.openWallet)}</a>` : ""}`
     : ""
 }
+${v.addressWithdrawn ? `<p class="warning">${esc(t.addressWithdrawn)}</p>` : ""}
 <div class="status" id="status" role="status" aria-live="polite">${esc(statusText(t, v.status))}</div>
 <p class="muted" id="done-hint"${received && !v.successUrl ? "" : " hidden"}>${esc(t.doneHint)}</p>
 ${v.successUrl ? `<a class="btn" id="back-success" href="${esc(v.successUrl)}" rel="noopener noreferrer"${received ? "" : " hidden"}>${esc(t.backToMerchant)}</a>` : ""}

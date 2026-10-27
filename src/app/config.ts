@@ -49,7 +49,7 @@ const assetSchema = z
         z
           .object({
             address: z.string().min(1),
-            status: z.enum(["active", "draining"]),
+            status: z.enum(["active", "draining", "retired"]),
             /** TON jetton assets: this owner's jetton-wallet; verified with get_wallet_address at startup. */
             jettonWallet: z.string().min(1).optional(),
           })

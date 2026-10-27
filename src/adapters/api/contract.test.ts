@@ -29,6 +29,7 @@ const server = (page: boolean) =>
       new RateService([]),
     ),
     adapters: [],
+    catalog: new AssetCatalog([]),
     clock: { now: () => new Date(0) },
     rateLimitPerMinute: 1,
     paymentPage: page ? { defaultLanguage: "en", publicRateLimitPerMinute: 1 } : null,

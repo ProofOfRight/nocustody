@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Operations monitor: scanner heartbeat staleness, dead webhooks, never-final candidates, depeg, reconciliation.
+// Operations monitor: scanner heartbeat staleness, dead webhooks, never-final candidates, depeg, reconciliation,
+// open invoices on addresses outside the pinned config.
 // Raises alerts; the only state it changes is the depeg guard (blocks new invoices) and reconciled candidates.
 import { isDust } from "../../domain/amount-policy.ts";
 import type { NetworkId } from "../../domain/network.ts";
 import type { Rational } from "../../domain/rational.ts";
-import { type AssetCatalog, watchedAddresses } from "../catalog.ts";
+import { type AssetCatalog, unpinnedUsage, watchedAddresses } from "../catalog.ts";
 import type {
   AlertSink,
   Clock,
@@ -95,6 +96,24 @@ export class Monitor {
           message: problems.at(-1) ?? "",
         });
       }
+    }
+    // Start-up refuses open invoices on an address missing from the config, so one appearing later was written to the
+    // database behind the gateway's back. Its address is never shown to payers (ADR-0037); say so loudly.
+    const stray = unpinnedUsage(
+      this.#d.catalog,
+      await uow.run((r) => r.invoices.addressUsage({ openOnly: true, now: clock.now() })),
+    );
+    if (stray.length > 0) {
+      problems.push(
+        `open invoices point at addresses outside the pinned config (not shown to payers): ${stray
+          .map((u) => `${u.assetId} ${u.address} (${u.open})`)
+          .join(", ")}`,
+      );
+      await alerts.send({
+        key: "invoice-address-unpinned",
+        severity: "critical",
+        message: problems.at(-1) ?? "",
+      });
     }
     const beats = await uow.run((r) => r.heartbeats.list());
     for (const [network, maxLag] of maxScannerLagMs) {

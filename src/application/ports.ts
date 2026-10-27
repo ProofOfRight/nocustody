@@ -174,6 +174,13 @@ export interface AmlScreener {
 
 // ---- persistence -------------------------------------------------------------------------------------------------
 
+export interface AddressUsage {
+  readonly assetId: string;
+  readonly address: string;
+  readonly open: number;
+  readonly total: number;
+}
+
 export interface InvoiceRepository {
   findById(id: string): Promise<Invoice | null>;
   findByMerchantOrderId(merchantOrderId: string): Promise<Invoice | null>;
@@ -182,6 +189,11 @@ export interface InvoiceRepository {
   update(invoice: Invoice): Promise<void>;
   listExpirable(now: Date, limit: number): Promise<Invoice[]>;
   listByStatus(status: InvoiceStatus, limit: number): Promise<Invoice[]>;
+  /**
+   * Invoice counts per stored (asset, address), for checking stored addresses against the pin (ADR-0037). `open`
+   * counts invoices a payment sent at `now` could still be credited to; with `openOnly` only such pairs are listed.
+   */
+  addressUsage(filter: { openOnly: boolean; now: Date }): Promise<AddressUsage[]>;
   /** For the merchant API: newest first, optional status filter and lower bound on creation time. */
   /**
    * Newest first (created_at descending, then id ascending). `before` is the last invoice of the previous page:

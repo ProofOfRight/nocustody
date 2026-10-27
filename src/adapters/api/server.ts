@@ -5,6 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { z } from "zod";
+import { type AssetCatalog, isShownAddress } from "../../application/catalog.ts";
 import { ApplicationError, type ApplicationErrorCode, ConcurrencyError } from "../../application/errors.ts";
 import type { ApiKeyRecord, ApiScope, ChainAdapter, Clock, UnitOfWork } from "../../application/ports.ts";
 import type { CreateInvoice } from "../../application/use-cases/create-invoice.ts";
@@ -20,6 +21,8 @@ export interface ApiDeps {
   readonly createInvoice: CreateInvoice;
   readonly quotePrice: QuotePrice;
   readonly adapters: readonly ChainAdapter[];
+  /** Pinned assets and addresses: an invoice's stored address is shown only if it is pinned and not retired. */
+  readonly catalog: AssetCatalog;
   readonly clock: Clock;
   readonly rateLimitPerMinute: number;
   readonly onError?: (err: unknown) => void;
@@ -115,15 +118,19 @@ export const APP_ERRORS: Readonly<Record<ApplicationErrorCode, number | null>> =
   "allocation.no_address": 503,
   "allocation.memo_collision": 503,
   "integrity.pin_violation": 503,
-  "invoice.address_unpinned": 500,
   "allocation.bad_memo": 500,
   "config.duplicate_asset": null,
   "invoice.not_found": null,
 };
 
-export function invoiceDto(inv: Invoice, adapters: readonly ChainAdapter[]) {
+/**
+ * `addressShown` false (a retired or unpinned address, ADR-0037): the address, its display form and the URI are
+ * null, so nothing built from this response can send a payer there.
+ */
+export function invoiceDto(inv: Invoice, adapters: readonly ChainAdapter[], addressShown: boolean) {
   const s = inv.state;
   const adapter = adapters.find((a) => a.network === s.asset.network);
+  const shown = addressShown ? s.instructions.address : null;
   return {
     id: s.id,
     merchant_order_id: s.merchantOrderId,
@@ -136,12 +143,13 @@ export function invoiceDto(inv: Invoice, adapters: readonly ChainAdapter[]) {
       contract: s.asset.contract,
     },
     payment: {
-      address: s.instructions.address.value,
-      address_display: adapter?.formatAddress?.(s.instructions.address) ?? s.instructions.address.value,
+      address: shown?.value ?? null,
+      address_display: shown ? (adapter?.formatAddress?.(shown) ?? shown.value) : null,
+      address_available: addressShown,
       amount: s.instructions.amount.toDecimalString(),
       amount_units: s.instructions.amount.units.toString(),
       memo: s.instructions.memo,
-      uri: adapter?.buildPaymentUri(s.instructions) ?? null,
+      uri: shown ? (adapter?.buildPaymentUri(s.instructions) ?? null) : null,
     },
     price: s.price
       ? {
@@ -379,9 +387,14 @@ export class ApiServer {
   }
 
   #dto(inv: Invoice) {
-    const dto = invoiceDto(inv, this.#d.adapters);
+    const dto = invoiceDto(inv, this.#d.adapters, this.#addressShown(inv));
     const page = this.#d.paymentPage ? `/pay/${encodeURIComponent(inv.id)}` : null;
     return { ...dto, payment: { ...dto.payment, page } };
+  }
+
+  #addressShown(inv: Invoice): boolean {
+    const s = inv.state;
+    return isShownAddress(this.#d.catalog.get(s.asset.id), s.instructions.address.value);
   }
 
   /** One shared bucket for unauthenticated routes (behind a proxy all clients share an address anyway). */
@@ -450,6 +463,7 @@ export class ApiServer {
             const lang = pickLanguage(req.query.lang, req.headers["accept-language"], page.defaultLanguage);
             const nonce = randomBytes(18).toString("base64");
             const adapter = d.adapters.find((x) => x.network === s.asset.network);
+            const shown = this.#addressShown(inv);
             const html = renderPaymentPage(
               {
                 id: s.id,
@@ -457,13 +471,16 @@ export class ApiServer {
                 assetSymbol: s.asset.symbol,
                 networkName: adapter?.displayName ?? s.asset.network,
                 amount: s.instructions.amount.toDecimalString(),
-                address: adapter?.formatAddress?.(s.instructions.address) ?? s.instructions.address.value,
+                address: shown
+                  ? (adapter?.formatAddress?.(s.instructions.address) ?? s.instructions.address.value)
+                  : null,
                 memo: s.instructions.memo,
-                uri: adapter?.buildPaymentUri(s.instructions) ?? null,
+                uri: shown ? (adapter?.buildPaymentUri(s.instructions) ?? null) : null,
                 expiresAt: s.expiresAt.toISOString(),
                 graceUntil: s.graceUntil.toISOString(),
                 statusUrl: `/pay/${encodeURIComponent(s.id)}/status`,
-                payable: isPayable(s.status, s.graceUntil, d.clock.now()),
+                payable: shown && isPayable(s.status, s.graceUntil, d.clock.now()),
+                addressWithdrawn: !shown && isPayable(s.status, s.graceUntil, d.clock.now()),
                 successUrl: shownUrl(s.successUrl),
                 cancelUrl: shownUrl(s.cancelUrl),
               },
