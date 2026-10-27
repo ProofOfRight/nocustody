@@ -124,15 +124,21 @@ record of every crediting decision.
 
 ## Address canary
 
-Run `tools/canary.ts` from **another host** every few minutes (cron). It creates a small invoice through the public
+Run the canary from **another host** every few minutes (cron). It creates a small invoice through the public
 API and checks that every address a payer could see — `payment.address`, `payment.address_display` and the address
 inside `payment.uri` — is one you expect, catching a tampered server, config or proxy. List every form your
 addresses appear in (for TON both the raw `0:…` and the user-friendly form). The order id is random, so a tampered
 server cannot recognise canary requests; https is required (`CANARY_ALLOW_HTTP=1` for a test stand).
 
+It ships in the image as `/app/dist/tools/canary.js` and uses only the Node standard library, so the other host
+needs Docker and the same image digest you verified for the gateway (or Node 26 and a checkout, `node
+src/tools/canary.ts`):
+
 ```bash
-CANARY_API_URL=https://pay.example.org CANARY_API_KEY=nck_... CANARY_ASSET=usdt-tron \
-CANARY_PRICE="1 USDT" CANARY_EXPECTED=TYourAddress1,TYourAddress2 node tools/canary.ts
+docker run --rm --read-only --entrypoint /usr/local/bin/node \
+  -e CANARY_API_URL=https://pay.example.org -e CANARY_API_KEY=nck_... -e CANARY_ASSET=usdt-tron \
+  -e "CANARY_PRICE=1 USDT" -e CANARY_EXPECTED=TYourAddress1,TYourAddress2 \
+  ghcr.io/proofofright/nocustody:<version>@sha256:<digest> /app/dist/tools/canary.js
 ```
 
 Exit codes: 0 ok, 1 unexpected address (alert immediately), 2 could not check. Use a key with `invoices:write` only.

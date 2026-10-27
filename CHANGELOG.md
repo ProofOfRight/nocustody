@@ -14,6 +14,9 @@ Before 1.0, minor versions may contain breaking changes; they are listed under *
 - `payment.address_available` in invoice responses.
 - Alert `invoice-address-unpinned` (critical): an invoice that can still be paid points at an address missing from the
   config.
+- The address canary ships in the image as `/app/dist/tools/canary.js` (moved from `tools/` to `src/tools/`), so it
+  runs on another host from the same verified image digest; `scripts/smoke-image.sh` checks it. A layer rule keeps it
+  on Node built-ins only.
 
 ### Changed
 
