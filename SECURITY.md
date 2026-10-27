@@ -31,7 +31,8 @@ Security fixes go into the latest minor release line and `main`.
 
 | Version | Supported |
 |---|---|
-| 0.5.x | latest patch (0.5.1) |
+| 0.6.x | latest patch (0.6.0) |
+| 0.5.x | no — upgrade to 0.6.x: removing a receiving address from the config stops invoice expiry and the worker cycle and breaks reading its invoices (ADR-0037); `payment.address` may now be null, see CHANGELOG |
 | 0.4.x | no — upgrade to 0.5.x (breaking: `price` is set for invoices priced in the asset, see CHANGELOG) |
 | 0.3.x | no — upgrade to 0.4.x; 0.3.0 lets anyone stop the TON scanner with a few large messages to the jetton-wallet |
 | 0.2.x | no — upgrade: 0.2.1 lets a TON comment stop crediting for the whole network and credits transfers that predate the invoice by up to 30 s; 0.2.0 does not run the monitor role |
