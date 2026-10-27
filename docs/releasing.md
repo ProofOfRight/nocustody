@@ -41,7 +41,7 @@ For maintainers. Decisions: [ADR-0028](adr/0028-container-image.md) (image),
 ## Reproducing a release build
 
 ```bash
-git checkout vX.Y.Z
+git clone --branch vX.Y.Z https://github.com/<owner>/nocustody.git nocustody-vX.Y.Z && cd nocustody-vX.Y.Z
 export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
 docker buildx create --name repro --driver docker-container \
   --driver-opt image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c
@@ -54,8 +54,11 @@ jq -r '."containerimage.digest"' metadata.json   # must equal the released diges
 docker buildx rm repro
 ```
 
-Use the BuildKit version from the release workflow of that tag. Keep `--no-cache` when the builder has built
-anything before: `rewrite-timestamp` only lowers file times newer than `SOURCE_DATE_EPOCH`, so a layer taken from the
-cache of an earlier build keeps its older times and the digest differs, although the files are the same.
+Use the BuildKit version from the release workflow of that tag. `rewrite-timestamp` only lowers file times newer
+than `SOURCE_DATE_EPOCH`; an older time stays in the image and the digest differs, although the files are the same.
+Hence two rules. Build from a fresh clone, not from a working copy where you ran `git checkout`: files that did not
+change keep the time they were first written (CI checks out fresh, so every file is newer and gets lowered). And keep
+`--no-cache` when the builder has built anything before: a layer taken from the cache of an earlier build keeps its
+older times.
 Remove the builder after the check: the `docker-container` driver keeps a running container and a cache volume of
 several gigabytes, and the next rebuild creates a fresh builder and runs with `--no-cache` anyway.
