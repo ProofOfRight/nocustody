@@ -17,8 +17,7 @@
     "apiUrl": "https://toncenter.com",
     "apiKeyEnv": "TONCENTER_API_KEY",
     "startFrom": "2026-11-01T00:00:00Z",
-    "pollInterval": "10s",
-    "minInterval": "200ms"
+    "pollInterval": "10s"
   },
   "assets": [
     {

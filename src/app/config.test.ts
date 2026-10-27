@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { chainAddress } from "../domain/chain-address.ts";
 import type { NetworkId } from "../domain/network.ts";
-import { type AddressValidators, assertPinned, ConfigError, parseConfig } from "./config.ts";
+import { type AddressValidators, assertPinned, ConfigError, loadConfigFile, parseConfig } from "./config.ts";
 import { addressValidators } from "./container.ts";
 import { parseDuration } from "./duration.ts";
 import { ConfigFilePinGuard } from "./integrity.ts";
@@ -341,5 +341,20 @@ describe("TON config", () => {
       addressValidators,
     );
     expect(friendly.assets[0]?.addresses[0]?.address.value).toBe(OWNER);
+  });
+});
+
+describe("example configs", () => {
+  const dir = join(import.meta.dirname, "../../examples");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".config.json"));
+  // The examples carry REPLACE_WITH_... placeholders for the operator's addresses: accept any address, check the rest.
+  const anyAddress = (network: NetworkId, raw: string) => chainAddress(network, raw);
+  const placeholders: AddressValidators = new Map([
+    ["tron", anyAddress],
+    ["ton", anyAddress],
+  ]);
+  it("are found", () => expect(files.length).toBeGreaterThan(0));
+  it.each(files)("%s passes the same validation as at startup", (f) => {
+    expect(() => loadConfigFile(join(dir, f), placeholders)).not.toThrow();
   });
 });
