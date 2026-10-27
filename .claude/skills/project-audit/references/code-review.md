@@ -26,7 +26,8 @@ would tell you if you forgot one.
      amount policies and slots; memos; domain events; no I/O, no packages,
      no `node:*`) ← `src/application` (use cases `CreateInvoice`,
      `QuotePrice`, `IngestTransfers`, `VerifyTransfers`, `SettlePayments`,
-     `ExpireInvoices`, `ResolveAmlHold`, `DispatchWebhooks`, `Monitor`;
+     `ExpireInvoices`, `ScreenPayments`, `ResolveAmlHold`, `DispatchWebhooks`,
+     `Monitor`;
      ports in `ports.ts`; strategies `UniqueAmountStrategy`, `MemoStrategy`;
      the asset catalogue) ← `src/adapters` (chains `tron`, `ton`; `http`
      JSON client; `persistence/pg`; `api` with the payment page; `webhooks`;
@@ -149,7 +150,8 @@ would tell you if you forgot one.
      candidates, a finalized-state query gives facts; the second source in
      reconciliation only produces candidates;
    - *pinned configuration* with a checksum supplied separately at deploy
-     time and re-checked by the integrity guard before every invoice;
+     time and re-checked by the integrity guard before every invoice and
+     once a minute by the monitor;
    - *exact arithmetic*: `bigint` units, `Rational` rates, decimal strings
      at the boundary, rounding up once;
    - *thin HTTPS JSON client* (ADR-0015): https only, same host, timeout,
