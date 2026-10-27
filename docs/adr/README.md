@@ -43,3 +43,4 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0034](0034-untrusted-code-sandbox.md) | 2026-10-27 | Code from others runs only in a sandbox | accepted |
 | [0035](0035-payment-return-urls.md) | 2026-10-27 | Return URLs on the hosted payment page | accepted |
 | [0036](0036-fixed-hosts-for-optional-services.md) | 2026-10-27 | Fixed hosts for the depeg check and Telegram alerts | accepted |
+| [0037](0037-retired-receiving-addresses.md) | 2026-10-27 | Retired receiving addresses; a stored address outside the pin is hidden, not fatal | accepted |
