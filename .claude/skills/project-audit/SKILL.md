@@ -36,10 +36,11 @@ before each phase**, even if it was read before: `code-review.md`
 For `quick`, the base is the final commit of the previous audit. Pull
 requests are merged without merge commits, so the convention is: the
 audit's final commit (and the squashed commit, if any) has a subject
-that starts with `audit:` or `audit(`.
+that starts with `audit:`. Changes to this skill made outside an audit
+use `audit(skill):` and are not a base.
 
 ```bash
-base=$(git log --format='%H %s' main | awk '$2 ~ /^audit(:|\()/ { print $1; exit }')
+base=$(git log --format='%H %s' main | awk '$2 ~ /^audit:/ { print $1; exit }')
 git diff --name-only "$base"..main -- src scripts tools   # quick scope
 ```
 
@@ -105,7 +106,9 @@ group; item 1 and the merge are done by the main session.
 
 - Layout: `python3 .claude/skills/project-audit/scripts/groups.py` prints
   the groups `domain`, `application`, `chains`, `edge`, `platform`,
-  `tooling`, `infra`; `groups.py <group>` lists the files for one agent.
+  `tooling`, `infra`, `examples`, `agents` (the last two go to security
+  agents, see `prompts.md`); `groups.py <group>` lists the files for one
+  agent.
   A file printed as `UNASSIGNED` gets a rule in the script first.
 - **Launch all agents in one message**: 5 reviewers (`domain`,
   `application`, `chains`, `edge`, `platform`) plus the phase 4 agents,
@@ -203,6 +206,8 @@ What was not run (no network, no keys) is named in the report as not run.
    proposals; "what to understand or verify yourself" (2–4 items); the
    pull request link. **A section of its own in the pull request
    description** lists every change under `.claude/`, `.github/`,
-   `scripts/`, `docs/security.md`, `CLAUDE.md`, `compose.yaml`,
-   `Makefile` and tool configs: these change what agents and checks do
-   (`CLAUDE.md`, "Untrusted input").
+   `scripts/`, `docs/security.md`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json`,
+   `compose.yaml`, `Makefile`, `Dockerfile`, `deploy/`, `docker/`,
+   `package.json`, `package-lock.json`, `.npmrc` and tool configs: these
+   change what agents, checks and the shipped image do (`CLAUDE.md`,
+   "Untrusted input").

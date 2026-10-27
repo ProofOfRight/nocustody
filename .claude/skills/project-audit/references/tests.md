@@ -123,7 +123,7 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - one candidate whose result cannot be stored does not stop verification or settlement; one failing transfer does not abort the settlement batch — `use-cases.test.ts :: one candidate whose result cannot be stored does not stop the others or the settlement` (settlement: the 0.2.1 path is still without a throwing-repository test)
 - a row whose asset is no longer configured is skipped by every cycle — NO TEST (the 0.2.1 fix; looked for a flow test with an unknown asset id in the database)
 - the shared cursor parses, re-reads the overlap, and guarantees progress after a burst (tight, then deeper pages) — `cursor.test.ts :: parses stored cursors and drops anything that is not a safe integer`, `cursor.test.ts :: re-reads the overlap, never before the floor, and starts tight after a scan without progress`, `cursor.test.ts :: a burst larger than the page budget cannot freeze the cursor: tight, then deeper pages, then back to normal`
-- a burst larger than the page budget cannot freeze either adapter's cursor; the scan reports the exhausted budget and the application alerts — `ton/adapter.test.ts :: a burst of transactions larger than the page budget cannot freeze the cursor`, `tron/adapter.test.ts :: a burst of transfers larger than the page budget cannot freeze the cursor`, `use-cases.test.ts :: alerts when a scan used its whole page budget: the scanner lags behind the chain`
+- a burst larger than the page budget cannot freeze either adapter's cursor; the scan reports the exhausted budget and the application alerts — `ton/adapter.test.ts :: a burst of transactions larger than the page budget cannot freeze the cursor`, `tron/adapter.test.ts :: a burst of transfers larger than the page budget cannot freeze the cursor`, `use-cases.test.ts :: alerts when rows are still unread after every scan of the cycle: the scanner lags behind the chain`
 
 ### TRON adapter and the JSON client
 <!-- covers: src/adapters/chains/tron/adapter.ts, src/adapters/chains/tron/address.ts,
@@ -221,7 +221,9 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 ### Operations: monitor, alerts, reconciliation, depeg, AML, canary
 <!-- covers: src/application/use-cases/monitor.ts, src/adapters/alerts/sinks.ts, src/adapters/pricing/peg-sources.ts,
      src/adapters/chains/tron/tronscan.ts, src/adapters/chains/ton/tonapi.ts, src/adapters/aml/blocklist.ts,
-     src/adapters/aml/noop.ts, tools/canary.ts -->
+     src/adapters/aml/noop.ts, src/application/use-cases/screen-payments.ts, tools/canary.ts -->
+- AML screening: below the threshold an invoice completes unscreened, above it is screened, a hold stops completion
+  and an unavailable screener defers it — `monitor.test.ts :: payments below the AML threshold complete without screening; above it are screened; holds can be resolved`, `use-cases.test.ts :: AML hold stops completion; an unavailable screener defers it`
 - scanner lag alert; dead-lettered webhooks alert — `monitor.test.ts :: alerts when a scanner has not succeeded within the allowed lag`, `monitor.test.ts :: alerts on dead-lettered webhooks`
 - depeg: deviation in basis points; blocks and unblocks; no answer blocks, one failing source only warns — `monitor.test.ts :: measures deviation from the peg in basis points`, `monitor.test.ts :: blocks new invoices while the price is off the peg and unblocks when it returns`, `monitor.test.ts :: blocks when no source answers; one failing source only warns`
 - reconciliation: missed transfers become candidates (the verifier decides) with an alert; unknown-to-second-source transfers reported; a failing second source is an alert, not a crash — `monitor.test.ts :: queues transfers the primary indexer missed as candidates (the verifier decides) and alerts`, `monitor.test.ts :: reports verified transfers the second source does not know`, `monitor.test.ts :: a failing second source is an alert, not a crash`
