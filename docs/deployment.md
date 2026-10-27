@@ -157,12 +157,23 @@ so tables added by an upgrade get the same grants. To rotate `NOCUSTODY_DB_PASSW
 ## Running roles separately
 
 All roles share the database and can run as separate services (or on separate hosts), for example a public API
-host and an internal worker:
+host and an internal worker. Next to the example `compose.yaml`, a `compose.override.yaml` replaces `gateway` with
+two services that keep its environment, database role and dependencies (Docker Compose 2.24 or later, for `!reset`):
 
 ```yaml
-  api:     { <<: *gateway, command: ["run", "--roles", "api"] }
-  workers: { <<: *gateway, command: ["run", "--roles", "worker,dispatcher,monitor"] }
+services:
+  gateway: !reset null
+  api:
+    extends: { file: compose.yaml, service: gateway }
+    command: ["run", "--roles", "api"]
+  workers:
+    extends: { file: compose.yaml, service: gateway }
+    command: ["run", "--roles", "worker,dispatcher,monitor"]
+    ports: !reset []
+    healthcheck: { disable: true } # /health is served by the api role
 ```
+
+Check the result with `docker compose config` before `docker compose up -d`.
 
 Run the [address canary](operations.md#address-canary) from a different host than the gateway.
 

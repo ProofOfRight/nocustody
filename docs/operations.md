@@ -74,7 +74,8 @@ Off by default — no requests to exchanges unless configured:
 ```
 
 If any source reports USDT/USD further than `maxDeviationBps` from 1.00 (an exact comparison), or no source answers,
-new invoices priced in that symbol are refused (`503 pricing.depeg_block`) until all sources are back in range.
+new invoices priced in that symbol are refused (`503 pricing.depeg_block`) until every source that answers is back in
+range; a source that does not answer while another does only raises `depeg:<symbol>:source`.
 The guard fails closed: with depeg protection configured, a missing reading or one older than three intervals (the
 monitor is not running) refuses new invoices as well. Existing invoices are not affected. `symbol` must be the
 `priceSymbol` of a configured asset.
@@ -90,6 +91,9 @@ monitor is not running) refuses new invoices as well. Existing invoices are not 
 - `noop` (default) clears everything; `blocklist` holds payments from senders listed in a local file (one address per
   line in any form the network accepts — TON user-friendly or raw, TRON base58 — optionally prefixed
   `network:address`, `#` comments) — no data leaves the server. A line that is not an address is a start-up error.
+  The file is read once at start-up (every process, CLI commands included), so it must be mounted into the container
+  — the example `deploy/compose.yaml` mounts only `config.json`, add a read-only volume for the list — and a changed
+  list takes effect after a restart. Only the path is pinned, not the contents.
 - A held invoice is `aml_hold`: access is not granted. Decide manually:
   `invoice:aml-resolve <id> approve|reject --note "…"`. Move held funds to a separate quarantine address yourself.
 - A screening service that is unavailable leaves the invoice `aml_pending`; it is retried every cycle.
@@ -145,8 +149,11 @@ An address's `status` is part of the pinned checksum, so each step below needs a
 
 1. Add the new address as `active` and mark the old one `draining`: new invoices go to the new address, the old one
    stays watched, so its open invoices can still be paid and late transfers are not missed.
-2. Remove the old address only when it has no open invoices left (at least `ttl` + `grace` after step 1). An open
-   invoice on an address that is no longer in the config stops the worker cycle (`invoice.address_unpinned`).
+2. Keep the old address as `draining` for as long as you need its invoices. Every invoice is checked against the
+   pinned addresses whenever it is read (`invoice.address_unpinned`), and invoices are kept forever: once the address
+   is removed, an open invoice on it stops the worker cycle, and its past invoices can no longer be read through
+   `GET /v1/invoices`, `invoice:show` or resolved with `invoice:aml-resolve`. Remove it only after `ttl` + `grace`
+   and only if you accept that.
 
 ## External hosts
 
