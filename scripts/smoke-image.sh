@@ -98,5 +98,17 @@ grep -q "TF34bV549WecfEHpo6gzMFWYrQXeHnK8Jq" "$DIR/page.html" || fail "payment p
 curl -fsS "$BASE/pay/$ID/status" | grep -q '"status":"awaiting_payment"' || fail "/pay/$ID/status"
 echo "ok   payment page and public status"
 
+# The address canary ships in the image (docs/operations.md): it accepts the pinned address and flags any other.
+canary() {
+  $COMPOSE exec -T -e CANARY_API_URL=http://127.0.0.1:8080 -e "CANARY_API_KEY=$TOKEN" -e CANARY_ASSET=usdt-nile \
+    -e "CANARY_PRICE=1.00 USD" -e CANARY_ALLOW_HTTP=1 -e "CANARY_EXPECTED=$1" \
+    gateway /usr/local/bin/node /app/dist/tools/canary.js >/dev/null 2>&1
+}
+canary TF34bV549WecfEHpo6gzMFWYrQXeHnK8Jq || fail "canary from the image did not accept the pinned address"
+rc=0
+canary TNPeeaaFB7K9cmo4uQpcU32zGK8G1NYqeL || rc=$?
+[ "$rc" = 1 ] || fail "canary from the image did not flag an unexpected address (exit $rc, want 1)"
+echo "ok   address canary from the image"
+
 status=0
 echo "SMOKE OK ($IMAGE)"
