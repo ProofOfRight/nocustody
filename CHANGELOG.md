@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 Before 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
+## [Unreleased]
+
+Migration `0006_return_urls` (two nullable columns). New optional config key `api.paymentPage.returnOrigins`, not
+pinned: no new pinned checksum.
+
+### Added
+
+- Return URLs: `POST /v1/invoices` takes optional `success_url` and `cancel_url` (https, on an origin from
+  `api.paymentPage.returnOrigins`, otherwise `422 return_url_not_allowed`); the hosted page shows a "Back to the
+  merchant's website" link, never redirects by itself ([ADR-0035](docs/adr/0035-payment-return-urls.md)).
+- Hosted page: once the payment is received it tells the payer they may close the page.
+
+### Changed
+
+- Hosted page: new look (card layout, status plates, larger touch targets); light theme only, the dark theme is
+  dropped for now.
+
 ## [0.3.2] - 2026-10-27
 
 Backlog of the 2026-10-26 audit. No migration, no config or pinned-checksum change.

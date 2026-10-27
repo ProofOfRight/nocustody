@@ -165,6 +165,7 @@ describe("config", () => {
       { ...base(), ops: { alerts: { cooldown: "1h" }, candidateMaxAge: "48h", maxDispatcherLag: "10m" } },
       { ...base(), ops: { retention: { deliveredWebhooks: "30d" } } },
       { ...base(), ops: { reconcile: { tron: { apiUrl: "https://apilist.tronscanapi.com" } } } },
+      { ...base(), api: { paymentPage: { enabled: true, returnOrigins: ["https://shop.example"] } } },
     ];
     for (const c of sameMoney) expect(parseConfig(c, validators).pinnedChecksum, JSON.stringify(c)).toBe(sum);
     expect(
@@ -173,6 +174,22 @@ describe("config", () => {
         validators,
       ).pinnedChecksum,
     ).toBe(withTron);
+  });
+
+  it("return origins: https origins only, no path, no trailing slash; none by default", () => {
+    expect(parseConfig(base(), validators).raw.api.paymentPage.returnOrigins).toEqual([]);
+    const page = (returnOrigins: string[]) => ({ ...base(), api: { paymentPage: { returnOrigins } } });
+    expect(
+      parseConfig(page(["https://shop.example", "https://pay.shop.example:8443"]), validators).raw.api
+        .paymentPage.returnOrigins,
+    ).toEqual(["https://shop.example", "https://pay.shop.example:8443"]);
+    for (const bad of [
+      "http://shop.example",
+      "https://shop.example/",
+      "https://shop.example/cart",
+      "shop.example",
+    ])
+      expect(() => parseConfig(page([bad]), validators), bad).toThrow(ConfigError);
   });
 
   it("a provider key variable must not be another secret", () => {

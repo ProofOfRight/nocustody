@@ -70,7 +70,13 @@ async function client(api: ApiServer) {
 const ADDR = chainAddress(TRON, "TAddrA111111111111111111111111111");
 
 async function setup(
-  opts: { rateLimit?: number; failing?: boolean | Error; page?: boolean; publicLimit?: number } = {},
+  opts: {
+    rateLimit?: number;
+    failing?: boolean | Error;
+    page?: boolean;
+    publicLimit?: number;
+    returnOrigins?: string[];
+  } = {},
 ) {
   const store = new InMemoryStore();
   const settings: AssetSettings = {
@@ -122,7 +128,11 @@ async function setup(
       clock,
       rateLimitPerMinute: opts.rateLimit ?? 1_000,
       paymentPage: opts.page
-        ? { defaultLanguage: "en", publicRateLimitPerMinute: opts.publicLimit ?? 1_000 }
+        ? {
+            defaultLanguage: "en",
+            publicRateLimitPerMinute: opts.publicLimit ?? 1_000,
+            returnOrigins: new Set(opts.returnOrigins ?? []),
+          }
         : null,
       onError: (e) => errors.push(e),
     }),
@@ -465,6 +475,51 @@ describe("hosted payment page", () => {
       graceUntil: new Date(T0.getTime() + 3_600_000),
     });
     expect((await app.inject({ url: inv.payment.page })).body).toContain(inv.payment.address);
+  });
+
+  it("return URLs: only https on a configured origin; stored, returned and shown as links", async () => {
+    const { app, create, body, store } = await setup({ page: true, returnOrigins: ["https://shop.example"] });
+    const urls = { success_url: "https://shop.example/thanks?o=1", cancel_url: "https://shop.example/cart" };
+    for (const [n, bad] of [
+      "http://shop.example/x",
+      "https://evil.example/x",
+      "https://shop.example.evil.example/x",
+      "https://user:pw@shop.example/x",
+      "javascript:alert(1)",
+      "not a url",
+    ].entries()) {
+      const r = await create({ ...body, success_url: bad }, `bad-${n}`);
+      expect(r.statusCode, bad).toBe(422);
+      expect(r.json().error.code, bad).toBe("return_url_not_allowed");
+    }
+    const r = await create({ ...body, ...urls });
+    expect(r.statusCode).toBe(201);
+    const inv = r.json();
+    expect(inv).toMatchObject(urls);
+    // awaiting payment: the cancel link only
+    const page = (await app.inject({ url: inv.payment.page })).body;
+    expect(page).toMatch(/<a class="back" id="back-cancel" href="https:\/\/shop\.example\/cart"[^>]*>/);
+    expect(page).toMatch(/<a class="btn" id="back-success"[^>]* hidden>/);
+    // received: the success button, the cancel link hidden
+    const state = store.data.invoices.get(inv.id);
+    if (!state) throw new Error("invoice missing");
+    store.data.invoices.set(inv.id, { ...state, status: "completed" });
+    const paid = (await app.inject({ url: inv.payment.page })).body;
+    expect(paid).toContain('href="https://shop.example/thanks?o=1" rel="noopener noreferrer">');
+    expect(paid).toMatch(/id="back-cancel"[^>]* hidden>/);
+    // a URL changed in the database to an origin that is not configured is never shown
+    store.data.invoices.set(inv.id, { ...state, status: "completed", successUrl: "https://evil.example/" });
+    expect((await app.inject({ url: inv.payment.page })).body).not.toContain("evil.example");
+  });
+
+  it("return URLs are refused when no origin is configured (or the page is off)", async () => {
+    for (const s of [await setup({ page: true }), await setup()]) {
+      const r = await s.create({ ...s.body, cancel_url: "https://shop.example/cart" });
+      expect(r.statusCode).toBe(422);
+      expect(r.json().error.code).toBe("return_url_not_allowed");
+      const plain = (await s.create(s.body, "k2")).json();
+      expect(plain).toMatchObject({ success_url: null, cancel_url: null });
+    }
   });
 
   it("public status reveals only status, received amount and deadlines", async () => {

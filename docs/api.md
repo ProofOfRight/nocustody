@@ -29,6 +29,14 @@ Show the payer `payment.address_display`, `payment.amount` (exact — the amount
 and, on TON, `payment.memo` as the transfer comment. `payment.uri` is a wallet deep link where one exists. Or send
 the payer to the hosted page `payment.page` if it is enabled ([payment-page.md](payment-page.md)).
 
+Optional `success_url` and `cancel_url` give the hosted page a "Back to the merchant's website" link: `success_url`
+once the payment is received, `cancel_url` until then. They must be https on an origin listed in
+`api.paymentPage.returnOrigins`, otherwise the request is refused with `422 return_url_not_allowed`. A retry for the
+same `merchant_order_id` with other URLs returns the existing invoice with the URLs it was created with.
+
+**A visit to `success_url` is not a payment.** Anybody can open that URL. Credit the order only from the
+`invoice.paid` / `invoice.completed` webhook or from `GET /v1/invoices/{id}`.
+
 ## Listing invoices
 
 `GET /v1/invoices` returns up to `limit` (≤ 100) invoices, newest first, filtered by `status` and `since`. For the

@@ -383,6 +383,7 @@ export function buildContainer(o: ContainerOptions) {
         ? {
             defaultLanguage: o.config.raw.api.paymentPage.defaultLanguage,
             publicRateLimitPerMinute: o.config.raw.api.paymentPage.publicRateLimitPerMinute,
+            returnOrigins: new Set(o.config.raw.api.paymentPage.returnOrigins),
           }
         : null,
       onError,
