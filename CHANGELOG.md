@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 Before 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
+## [Unreleased]
+
+Examples and documentation only: no change to the gateway's code, schema, config or pinned checksum.
+
+### Fixed
+
+- `examples/mainnet.config.json` did not pass validation (`ton.minInterval: "200ms"` is below the 1 s minimum); the
+  line is removed. A unit test now loads every `examples/*.config.json`.
+- Laravel example: `HandleNocustodyEvent` decided "needs a person" by the re-read invoice status, so overpaid and late
+  payments (already `completed` when re-read) never reached support; it now decides by the event type.
+- `docs/deployment.md`: the separate-roles example lost `NOCUSTODY_CONFIG`, the runtime database role and the port;
+  it is now a `compose.override.yaml` with `extends`.
+- Documentation brought in line with the code: OpenAPI response codes and patterns, webhook `data` fields per event,
+  return URLs only with the page enabled, address rotation (removing an address also breaks reading its past
+  invoices), depeg unblocking, AML blocklist mounting, the going-live checklist, payment-page polling, required config
+  sections, ADR statuses.
+
+### Added
+
+- [ADR-0036](docs/adr/0036-fixed-hosts-for-optional-services.md): the depeg sources and Telegram alerts use fixed,
+  documented hosts that config enables; `docs/security.md` states the rule accordingly.
+
 ## [0.5.0] - 2026-10-27
 
 The invoice keeps a price given in the asset itself (breaking: `price` is no longer `null` for it). No migration,
