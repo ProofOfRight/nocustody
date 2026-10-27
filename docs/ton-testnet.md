@@ -49,10 +49,14 @@ Replays two recorded, finalized testnet payments: 1.227528 test USDT with a comm
 2. Find the receiving wallet's jetton-wallet for the master, e.g.
    `https://testnet.toncenter.com/api/v3/jetton/wallets?owner_address=<wallet>&jetton_address=<master>`.
    The gateway re-checks it with `get_wallet_address` at startup, so a wrong value cannot slip through.
-3. Copy `examples/ton-testnet.config.json`, fill in the addresses and run:
+3. Copy `examples/ton-testnet.config.json` to a directory **outside the repository** (the repository is mounted into
+   the container, so a config inside it is one `git add` away from a commit), e.g.
+   `~/nocustody-testnet/ton.config.json`, and fill in the addresses. Run with that directory mounted read-only and a
+   separate or throwaway database: an open invoice on an address that is not in this config stops the cycle
+   (`invoice.address_unpinned`). The test database is reset by the tests anyway:
 
 ```bash
-docker compose run --rm -e E2E_MODE=live -e NOCUSTODY_CONFIG=/app/my-ton.config.json dev npm run e2e:ton
+docker compose run --rm -v ~/nocustody-testnet:/cfg:ro -e E2E_MODE=live -e NOCUSTODY_CONFIG=/cfg/ton.config.json -e DATABASE_URL=postgres://nocustody:nocustody@postgres:5432/nocustody_test dev npm run e2e:ton
 ```
 
 4. Send exactly the printed amount with the printed comment (a `ton://transfer/…` link is printed as well).
