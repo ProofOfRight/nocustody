@@ -108,6 +108,7 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - invoice → transfer → verified → paid → completed with outbox events and an audit trail — `use-cases.test.ts :: invoice → transfer → verified → paid → completed, with outbox events and audit trail`
 - the same transfer seen twice is credited once — `use-cases.test.ts :: is idempotent: the same transfer seen twice is credited once`
 - a transfer the verifier rejects (fake token, failed transaction) is never credited — `use-cases.test.ts :: does not credit a transfer the verifier rejects (fake token, failed tx)`
+- a retired address is neither watched nor shown; only addresses missing from the pin count as unpinned (ADR-0037) — `catalog.test.ts :: a retired address is neither watched nor shown; active and draining are both`, `catalog.test.ts :: only addresses missing from the pin count as unpinned; retired ones are pinned`
 - non-final and errored candidates are kept for a later attempt; never final → rejected after the max age — `use-cases.test.ts :: keeps non-final and errored candidates for a later attempt`, `monitor.test.ts :: rejects a candidate that never becomes final`
 - transfers matching no invoice are quarantined — `use-cases.test.ts :: quarantines transfers that match no invoice`
 - several transfers in one transaction are separate payments; the hint is never credited; the verified amount wins — `use-cases.test.ts :: several transfers in one transaction are separate payments; the hint is never credited`, `use-cases.test.ts :: credits the verified amount, not the indexer's claim`
@@ -173,13 +174,14 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - a migration marked `-- no-transaction` runs statement by statement (`CREATE INDEX CONCURRENTLY`) — `pg.int.test.ts :: a file marked -- no-transaction runs statement by statement, so CREATE INDEX CONCURRENTLY works`
 - candidates are per asset; a non-dust hint re-queues a dust row — `pg.int.test.ts :: stores each candidate tx once and each transfer once: UNIQUE(network, tx_hash, log_index)`
 - retention prunes delivered webhooks, idempotency keys and settled candidates only — `pg.int.test.ts :: retention: prunes delivered webhooks, idempotency keys and settled candidates older than the cutoff`, `monitor.test.ts :: prunes only what is configured, never payments or audit rows`
-- an invoice whose stored address is not pinned cannot be read — `pg.int.test.ts :: an invoice whose stored address is not a pinned address of its asset cannot be read (database tampering)`
+- an invoice on an address outside the pin is still read, does not stop expiry of the others, and is counted by `addressUsage` (ADR-0037) — `pg.int.test.ts :: an invoice on an address outside the pin is still read, expired and reported (ADR-0037)`
 - status CHECK constraints in the migrations equal the TypeScript unions — `pg.int.test.ts :: status CHECK constraints in the migrations equal the TypeScript unions`
 - amounts survive the numeric(78,0) ↔ bigint boundary above 2^53 — NO TEST (looked for a round-trip of an amount above Number.MAX_SAFE_INTEGER through a repository)
 
 ### Merchant API and keys
 <!-- covers: src/adapters/api/server.ts, src/adapters/api/keys.ts -->
 - health needs no key and reveals nothing — `server.test.ts :: health needs no key and reveals nothing`
+- an invoice on a retired or unpinned address shows no address in the API (null fields, `address_available: false`) or on the page (ADR-0037) — `server.test.ts :: an invoice on a retired or unpinned address shows no address in the API or on the page (ADR-0037)`
 - missing, malformed, unknown and revoked keys and keys without the scope are refused — `server.test.ts :: rejects missing, malformed, unknown and revoked keys, and keys without the scope`
 - invoice creation returns instructions and the locked rate; idempotent by Idempotency-Key, another body refused — `server.test.ts :: creates an invoice with payment instructions and locked rate`, `server.test.ts :: is idempotent by Idempotency-Key; the same key with another body is refused`
 - strict validation: decimal strings, no unknown fields, body size limit, __proto__ refused — `server.test.ts :: validates strictly: decimal strings only, no unknown fields, body size limit`, `server.test.ts :: an own __proto__ key in the body is an unknown field and is refused`
@@ -221,9 +223,10 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 ### Operations: monitor, alerts, reconciliation, depeg, AML, canary
 <!-- covers: src/application/use-cases/monitor.ts, src/adapters/alerts/sinks.ts, src/adapters/pricing/peg-sources.ts,
      src/adapters/chains/tron/tronscan.ts, src/adapters/chains/ton/tonapi.ts, src/adapters/aml/blocklist.ts,
-     src/adapters/aml/noop.ts, src/application/use-cases/screen-payments.ts, tools/canary.ts -->
+     src/adapters/aml/noop.ts, src/application/use-cases/screen-payments.ts, src/tools/canary.ts -->
 - AML screening: below the threshold an invoice completes unscreened, above it is screened, a hold stops completion
   and an unavailable screener defers it — `monitor.test.ts :: payments below the AML threshold complete without screening; above it are screened; holds can be resolved`, `use-cases.test.ts :: AML hold stops completion; an unavailable screener defers it`
+- an open invoice on an address outside the pin raises `invoice-address-unpinned`; a retired address or a closed invoice does not (ADR-0037) — `monitor.test.ts :: alerts on open invoices whose stored address is not in the pin, not on retired ones (ADR-0037)`
 - scanner lag alert; dead-lettered webhooks alert — `monitor.test.ts :: alerts when a scanner has not succeeded within the allowed lag`, `monitor.test.ts :: alerts on dead-lettered webhooks`
 - depeg: deviation in basis points; blocks and unblocks; no answer blocks, one failing source only warns — `monitor.test.ts :: measures deviation from the peg in basis points`, `monitor.test.ts :: blocks new invoices while the price is off the peg and unblocks when it returns`, `monitor.test.ts :: blocks when no source answers; one failing source only warns`
 - reconciliation: missed transfers become candidates (the verifier decides) with an alert; unknown-to-second-source transfers reported; a failing second source is an alert, not a crash — `monitor.test.ts :: queues transfers the primary indexer missed as candidates (the verifier decides) and alerts`, `monitor.test.ts :: reports verified transfers the second source does not know`, `monitor.test.ts :: a failing second source is an alert, not a crash`
@@ -263,8 +266,9 @@ phase 3 — signs of an "empty" test, manual mutations for money code.
 - `run` starts every role it accepts, including `monitor`, and refuses an unknown role — NO TEST (the 0.2.1 fix; `cli.ts` has no test harness; the loop helper and the composition root are tested below)
 - a loop keeps running after an exception in one cycle; cycles do not overlap; a stop request interrupts the sleep — `loop.test.ts :: keeps running after an exception in one cycle and never overlaps cycles`, `loop.test.ts :: a stop request interrupts the sleep: shutdown does not wait for the poll interval`, `loop.test.ts :: sleep resolves early on abort and leaves no timer behind`
 - the composition root wires every configured network and no other; an asset without a provider is refused; an idle pool client error is logged, not thrown — `container.test.ts :: wires every configured network and no other`, `container.test.ts :: refuses an asset whose network has no provider section`, `container.test.ts :: a connection error on an idle database client is logged, not thrown`
+- start-up refuses open invoices on an address removed from the config; draining, retired or only closed invoices start (ADR-0037) — `container.int.test.ts :: refuses to start while an open invoice points at an address removed from the config`, `container.int.test.ts :: starts when the address is kept as draining or retired`, `container.int.test.ts :: starts when only closed invoices are left on the removed address`
 - the whole stack end to end against live testnets and mainnet (read-only) — replay scripts in `scripts/e2e-*.ts` (phase 5)
-- the production image, migrations, all roles, key, invoice and page — `scripts/smoke-image.sh` (phase 5)
+- the production image, migrations, all roles, key, invoice, page and the address canary from the image — `scripts/smoke-image.sh` (phase 5)
 
 ### Repository policies and release tooling
 <!-- covers: scripts/check-layers.ts, scripts/check-licenses.ts, scripts/check-source.ts, scripts/check-dco.ts,

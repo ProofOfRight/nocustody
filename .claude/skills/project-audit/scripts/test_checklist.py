@@ -12,7 +12,7 @@ its repository path (`invoice.test.ts`, `tron/adapter.test.ts`); a title is the 
 Prints:
   DEAD REFERENCE — the test file or title does not exist (exit code 1: the checklist lies);
   NO TEST        — scenarios without a test (phase 2 writes them);
-  UNMENTIONED    — source modules under src/, scripts/, tools/ (tests, fixtures and fakes excluded) that are
+  UNMENTIONED    — source modules under src/ and scripts/ (tests, fixtures and fakes excluded) that are
                    in no covers/skip and are not named in the text — add a group or an item;
   UNREFERENCED   — test files the checklist never references.
 The script checks that a test EXISTS, not that it fails when the code breaks — that is phase 3.
@@ -23,7 +23,7 @@ import subprocess
 import sys
 
 CHECKLIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "tests.md")
-SOURCE_ROOTS = ("src", "scripts", "tools")
+SOURCE_ROOTS = ("src", "scripts")
 EXCLUDE = re.compile(r"\.test\.ts$|/fixtures/|/testing/|/test-fixtures\.ts$|\.sql$")
 # Modifier captured: .skip and .todo titles exist but prove nothing, so a reference to one is reported as dead.
 TITLE = re.compile(r"""^\s*(?:it|test)(?:\.(skip|only|todo|each|concurrent))?\((["'`])(.*?)\2""", re.M)

@@ -91,7 +91,7 @@ unnecessary questions.
 
 ## Phase 1. Architecture and code
 
-Scope: `src/`, `scripts/`, `tools/`, `deploy/`, `Dockerfile`,
+Scope: `src/`, `scripts/`, `deploy/`, `Dockerfile`,
 `compose.yaml`, `.github/`, `docs/` (in `quick`: what changed and its
 neighbours). Items in `code-review.md`: 1 layers, ports and extensibility
 (**the main item**: dependency direction, invariants, cost of a typical

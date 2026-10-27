@@ -23,7 +23,7 @@ hosts	src/adapters/alerts/sinks.ts	res = await this.#fetch(`https://api.telegram
 hosts	src/adapters/api/page/qr.ts	return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" shape-rendering="crispEdges" role="img" aria-label="${label}"><rect width="${n}" height="${n}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;	SVG XML namespace, not a network call	2026-10-26
 hosts	src/app/container.ts	return new KrakenUsdtUsd(exchange("https://api.kraken.com"));	Kraken / Coinbase peg sources, documented in docs/operations.md, used only when ops.depeg is configured	2026-10-26
 hosts	src/app/container.ts	return new CoinbaseUsdtUsd(exchange("https://api.exchange.coinbase.com"));	Kraken / Coinbase peg sources, documented in docs/operations.md, used only when ops.depeg is configured	2026-10-26
-hosts	tools/canary.ts	// CANARY_API_URL=https://pay.example.org CANARY_API_KEY=nck_... \	usage example in the header comment	2026-10-26
+hosts	src/tools/canary.ts	// CANARY_API_URL=https://pay.example.org CANARY_API_KEY=nck_... \	usage example in the header comment	2026-10-26
 numbers	src/adapters/api/page/i18n.ts	return { tag, q: qv ? Number(qv.slice(2)) : 1 };	Accept-Language quality value, not money	2026-10-26
 numbers	src/adapters/api/page/render.ts	var left = Math.max(0, Math.floor((Date.parse(d.expiresAt) - Date.now()) / 1000));	countdown seconds in the browser, not money	2026-10-26
 numbers	src/adapters/api/page/render.ts	timerEl.textContent = Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0");	countdown seconds in the browser, not money	2026-10-26
