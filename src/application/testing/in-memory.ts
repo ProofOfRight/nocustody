@@ -158,6 +158,28 @@ export class InMemoryStore implements UnitOfWork {
             )
             .slice(0, limit)
             .map((s) => Invoice.restore(s)),
+        addressUsage: async ({ openOnly, now }) => {
+          const usage = new Map<string, { assetId: string; address: string; open: number; total: number }>();
+          for (const s of d().invoices.values()) {
+            const open =
+              ["awaiting_payment", "confirming", "underpaid", "expired"].includes(s.status) &&
+              s.graceUntil.getTime() >= now.getTime();
+            if (openOnly && !open) continue;
+            const key = `${s.asset.id}\n${s.instructions.address.value}`;
+            const u = usage.get(key) ?? {
+              assetId: s.asset.id,
+              address: s.instructions.address.value,
+              open: 0,
+              total: 0,
+            };
+            u.total++;
+            if (open) u.open++;
+            usage.set(key, u);
+          }
+          return [...usage.values()].sort((a, b) =>
+            a.assetId === b.assetId ? (a.address < b.address ? -1 : 1) : a.assetId < b.assetId ? -1 : 1,
+          );
+        },
         search: async ({ status, since, before, limit }) => {
           const order = (a: InvoiceState, b: { createdAt: Date; id: string }) =>
             b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);

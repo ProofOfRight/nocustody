@@ -5,13 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { AssetCatalog } from "../../../application/catalog.ts";
+import { AssetCatalog, unpinnedUsage } from "../../../application/catalog.ts";
 import { ConcurrencyError } from "../../../application/errors.ts";
 import { CANDIDATE_STATUSES, TRANSFER_STATUSES } from "../../../application/ports.ts";
 import { RateService } from "../../../application/rates.ts";
 import { UniqueAmountStrategy } from "../../../application/strategies/unique-amount.ts";
 import { FakeChain } from "../../../application/testing/fake-chain.ts";
 import { CreateInvoice } from "../../../application/use-cases/create-invoice.ts";
+import { ExpireInvoices } from "../../../application/use-cases/expire-invoices.ts";
 import { IngestTransfers } from "../../../application/use-cases/ingest-transfers.ts";
 import { ScreenPayments } from "../../../application/use-cases/screen-payments.ts";
 import { SettlePayments } from "../../../application/use-cases/settle-payments.ts";
@@ -326,38 +327,41 @@ describe("PostgreSQL repositories", () => {
     expect((await pool.query("SELECT count(*)::int AS n FROM outbox")).rows[0].n).toBe(1);
   });
 
-  it("an invoice whose stored address is not a pinned address of its asset cannot be read (database tampering)", async () => {
-    const pinnedUow = new PgUnitOfWork(pool, assets, new Map([[USDT_TRON.id, new Set([ADDR.value])]]));
+  it("an invoice on an address outside the pin is still read, expired and reported (ADR-0037)", async () => {
+    const catalog = new AssetCatalog([
+      {
+        asset: USDT_TRON,
+        priceSymbol: "USDT",
+        strategy: "unique-amount",
+        addresses: [{ address: ADDR, status: "active", tokenAccount: null }],
+        amountPolicy: STRICT_AMOUNT_POLICY,
+        uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 9 }),
+        ttlMs: 30 * MIN,
+        graceMs: 60 * MIN,
+        amlThresholdUnits: 0n,
+      },
+    ]);
+    let n = 0;
     const create = new CreateInvoice({
-      uow: pinnedUow,
-      catalog: new AssetCatalog([
-        {
-          asset: USDT_TRON,
-          priceSymbol: "USDT",
-          strategy: "unique-amount",
-          addresses: [{ address: ADDR, status: "active", tokenAccount: null }],
-          amountPolicy: STRICT_AMOUNT_POLICY,
-          uniqueAmount: uniqueAmountPolicy({ stepUnits: 10_000n, maxSlots: 9 }),
-          ttlMs: 30 * MIN,
-          graceMs: 60 * MIN,
-          amlThresholdUnits: 0n,
-        },
-      ]),
+      uow,
+      catalog,
       pricing: { currencies: new Set(), markupBps: new Map() },
       rates: new RateService([new ManualRateTable([])]),
       strategies: () => new UniqueAmountStrategy(),
       clock: { now: () => T0 },
-      ids: { newId: () => "inv-pinned" },
+      ids: { newId: () => `inv-pin-${++n}` },
       integrity: { check: async () => ({ ok: true }) },
     });
-    const { invoice } = await create.execute({
-      merchantOrderId: "o-pin",
-      priceAmount: "10",
-      priceCurrency: "USDT",
-      assetId: USDT_TRON.id,
-    });
-    const stored = await pinnedUow.run((r) => r.invoices.findById(invoice.id));
-    expect(stored?.id).toBe(invoice.id);
+    const order = (id: string) =>
+      create.execute({
+        merchantOrderId: id,
+        priceAmount: "10",
+        priceCurrency: "USDT",
+        assetId: USDT_TRON.id,
+      });
+    const { invoice } = await order("o-pin");
+    const { invoice: neighbour } = await order("o-pin-2");
+    const stored = await uow.run((r) => r.invoices.findById(invoice.id));
     // a price in the asset itself round-trips with null rate fields
     expect(stored?.state.price).toEqual({
       amount: "10",
@@ -367,13 +371,30 @@ describe("PostgreSQL repositories", () => {
       rateAt: null,
       ratePath: null,
     });
-    await pool.query("UPDATE invoices SET pay_address = $2 WHERE id = $1", [
-      invoice.id,
-      "TAttacker11111111111111111111111111",
+    const attacker = "TAttacker11111111111111111111111111";
+    await pool.query("UPDATE invoices SET pay_address = $2 WHERE id = $1", [invoice.id, attacker]);
+
+    // Readable (history, AML decisions); whether the address may be shown is decided where it is shown.
+    expect((await uow.run((r) => r.invoices.findById(invoice.id)))?.state.instructions.address.value).toBe(
+      attacker,
+    );
+    const listed = await uow.run((r) => r.invoices.search({ limit: 10 }));
+    expect(listed.map((i) => i.id).sort()).toEqual([invoice.id, neighbour.id].sort());
+
+    const usage = await uow.run((r) => r.invoices.addressUsage({ openOnly: true, now: T0 }));
+    expect(unpinnedUsage(catalog, usage)).toEqual([
+      { assetId: USDT_TRON.id, address: attacker, open: 1, total: 1 },
     ]);
-    await expect(pinnedUow.run((r) => r.invoices.findById(invoice.id))).rejects.toMatchObject({
-      code: "invoice.address_unpinned",
-    });
+
+    // One such invoice does not stop expiry of the others.
+    const later = new Date(T0.getTime() + 31 * MIN);
+    expect(await new ExpireInvoices({ uow, clock: { now: () => later }, batchSize: 10 }).execute()).toBe(2);
+    const afterGrace = new Date(T0.getTime() + 91 * MIN);
+    expect(await uow.run((r) => r.invoices.addressUsage({ openOnly: true, now: afterGrace }))).toEqual([]);
+    expect(await uow.run((r) => r.invoices.addressUsage({ openOnly: false, now: afterGrace }))).toEqual([
+      { assetId: USDT_TRON.id, address: ADDR.value, open: 0, total: 1 },
+      { assetId: USDT_TRON.id, address: attacker, open: 0, total: 1 },
+    ]);
   });
 
   it("search pages newest first by (created_at, id) and continues strictly after `before`", async () => {

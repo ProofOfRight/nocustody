@@ -12,7 +12,6 @@ export type ApplicationErrorCode =
   | "allocation.no_address"
   | "allocation.no_free_slot"
   | "integrity.pin_violation"
-  | "invoice.address_unpinned"
   | "invoice.not_found"
   | "invoice.order_mismatch"
   | "invoice.zero_amount"

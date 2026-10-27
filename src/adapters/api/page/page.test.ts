@@ -47,7 +47,7 @@ const view: PageView = {
 
 describe("QR code", () => {
   it("decodes back to exactly the encoded payment data (independent decoder)", () => {
-    for (const text of ["TF34bV549WecfEHpo6gzMFWYrQXeHnK8Jq", view.uri ?? "", view.address]) {
+    for (const text of ["TF34bV549WecfEHpo6gzMFWYrQXeHnK8Jq", view.uri ?? "", view.address ?? ""]) {
       expect(decode(text)).toBe(text);
     }
   });

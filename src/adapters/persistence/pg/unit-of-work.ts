@@ -29,26 +29,25 @@ import { type TxRef, txRef } from "../../../domain/tx-ref.ts";
  */
 export type AssetResolver = ReadonlyMap<string, Asset>;
 
-/** Receiving addresses per asset id (every status), from the pinned config: an invoice must point at one of them. */
-export type PinnedAddresses = ReadonlyMap<string, ReadonlySet<string>>;
+/** SQL condition on `invoices` ($3 = now): a payment sent now could still be credited to the invoice. */
+const OPEN_INVOICE =
+  "status IN ('awaiting_payment', 'confirming', 'underpaid', 'expired') AND grace_until >= $3";
 
 /** PostgreSQL unit of work: one transaction per `run`, repositories bound to its connection. */
 export class PgUnitOfWork implements UnitOfWork {
   readonly #pool: Pool;
   readonly #assets: AssetResolver;
-  readonly #pinned: PinnedAddresses | null;
 
-  constructor(pool: Pool, assets: AssetResolver, pinned: PinnedAddresses | null = null) {
+  constructor(pool: Pool, assets: AssetResolver) {
     this.#pool = pool;
     this.#assets = assets;
-    this.#pinned = pinned;
   }
 
   async run<T>(work: (repos: Repositories) => Promise<T>): Promise<T> {
     const client = await this.#pool.connect();
     try {
       await client.query("BEGIN");
-      const result = await work(repositories(client, this.#assets, this.#pinned));
+      const result = await work(repositories(client, this.#assets));
       await client.query("COMMIT");
       return result;
     } catch (e) {
@@ -126,7 +125,7 @@ interface TransferRow {
   reason: string | null;
 }
 
-function repositories(db: PoolClient, assets: AssetResolver, pinned: PinnedAddresses | null): Repositories {
+function repositories(db: PoolClient, assets: AssetResolver): Repositories {
   const assetIds = [...assets.keys()];
   const assetOf = (id: string): Asset => {
     const a = assets.get(id);
@@ -137,14 +136,8 @@ function repositories(db: PoolClient, assets: AssetResolver, pinned: PinnedAddre
   const toInvoice = (r: InvoiceRow, payments: PaymentRow[]): Invoice => {
     const asset = assetOf(r.asset_id);
     const network = r.network as NetworkId;
-    // Defence in depth: the address shown to payers comes from this row. Somebody with write access to the database
-    // must not be able to turn it into an address that is not in the pinned config.
-    if (pinned && !pinned.get(r.asset_id)?.has(r.pay_address)) {
-      throw new ApplicationError(
-        "invoice.address_unpinned",
-        `invoice ${r.id} points at ${r.pay_address}, which is not a pinned address of ${r.asset_id}`,
-      );
-    }
+    // The stored address is not checked against the pin here: an invoice on a removed address must stay readable.
+    // Whoever shows an address to a payer checks it (isShownAddress, ADR-0037).
     const state: InvoiceState = {
       id: r.id,
       merchantOrderId: r.merchant_order_id,
@@ -323,6 +316,27 @@ function repositories(db: PoolClient, assets: AssetResolver, pinned: PinnedAddre
           limit,
           assetIds,
         ]),
+      addressUsage: async ({ openOnly, now }) => {
+        // Open = a payment sent now could still be credited: the page's payable statuses, inside the grace period.
+        const { rows } = await db.query<{
+          asset_id: string;
+          pay_address: string;
+          open: string;
+          total: string;
+        }>(
+          `SELECT asset_id, pay_address,
+             count(*) FILTER (WHERE ${OPEN_INVOICE}) AS open, count(*) AS total
+           FROM invoices WHERE asset_id = ANY($1::text[]) AND ($2::boolean IS FALSE OR ${OPEN_INVOICE})
+           GROUP BY asset_id, pay_address ORDER BY asset_id, pay_address`,
+          [assetIds, openOnly, now],
+        );
+        return rows.map((r) => ({
+          assetId: r.asset_id,
+          address: r.pay_address,
+          open: Number(r.open),
+          total: Number(r.total),
+        }));
+      },
       search: ({ status, since, before, limit }) =>
         loadInvoices(
           `($1::text IS NULL OR status = $1) AND ($2::timestamptz IS NULL OR created_at >= $2)

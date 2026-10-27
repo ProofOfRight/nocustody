@@ -86,6 +86,9 @@ describe("config", () => {
       parseConfig(withAsset({ addresses: [{ address: A1, status: "draining" }] }), validators),
     ).toThrow("no active address");
     expect(() =>
+      parseConfig(withAsset({ addresses: [{ address: A1, status: "retired" }] }), validators),
+    ).toThrow("no active address");
+    expect(() =>
       parseConfig(
         withAsset({
           addresses: [
@@ -113,6 +116,12 @@ describe("config", () => {
         addresses: [
           { address: A1, status: "active" },
           { address: A2, status: "active" },
+        ],
+      }),
+      withAsset({
+        addresses: [
+          { address: A1, status: "active" },
+          { address: A2, status: "retired" },
         ],
       }),
       withAsset({ contract: A1 }),
