@@ -24,6 +24,13 @@ export default {
       to: { path: "^src/app/" },
     },
     {
+      name: "tools-are-standalone",
+      comment: "src/tools (the address canary): Node built-ins only, independent of the gateway it checks",
+      severity: "error",
+      from: { path: "^src/tools/" },
+      to: { dependencyTypesNot: ["core"] },
+    },
+    {
       name: "no-circular",
       severity: "error",
       from: {},

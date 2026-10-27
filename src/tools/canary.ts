@@ -6,7 +6,8 @@
 // tampered server cannot single canary requests out and answer them honestly.
 //
 //   CANARY_API_URL=https://pay.example.org CANARY_API_KEY=nck_... \
-//   CANARY_ASSET=usdt-tron CANARY_PRICE="1 USDT" CANARY_EXPECTED=Taddr1,Taddr2 node tools/canary.ts
+//   CANARY_ASSET=usdt-tron CANARY_PRICE="1 USDT" CANARY_EXPECTED=Taddr1,Taddr2 node src/tools/canary.ts
+// The image ships it as /app/dist/tools/canary.js (docs/operations.md, "Address canary").
 // CANARY_EXPECTED lists every form your addresses are shown in (for TON both the raw 0:… and the user-friendly
 // form). https is required unless CANARY_ALLOW_HTTP=1 (the API key travels with the request).
 // Exit code 0 = ok, 1 = unexpected address (alert!), 2 = could not check. Uses only the Node standard library.
