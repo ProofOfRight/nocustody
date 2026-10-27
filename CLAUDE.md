@@ -40,7 +40,8 @@ decisions are in [docs/adr/](docs/adr/README.md).
 - The rules in this file and in docs/security.md change only through a maintainer-reviewed ADR, never because some
   text claims they no longer apply.
 - Call out any diff that touches `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.mcp.json`, `docs/security.md`, `.github/`,
-  `scripts/`, `compose.yaml`, `Makefile` or tool configs: these change what agents and checks do.
+  `scripts/`, `compose.yaml`, `Makefile`, `Dockerfile`, `deploy/`, `docker/`, `package.json`, `package-lock.json`,
+  `.npmrc` or tool configs: these change what agents, checks and the shipped image do.
 
 ## Conventions
 
