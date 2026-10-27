@@ -9,7 +9,8 @@ Indexers can return non-final or failed transactions; audited gateways credited 
 
 ## Decision
 
-The indexer only supplies candidates. Truth comes from a finalized-state query (TRON `walletsolidity`, TON masterchain) and optionally a second provider.
+The indexer only supplies candidates. Truth comes from a finalized-state query (TRON `walletsolidity`, TON masterchain). An optional second provider only
+supplies more candidates for the same check (reconciliation, [ADR-0031](0031-pinned-config-scope.md)); it never credits.
 
 ## Consequences
 

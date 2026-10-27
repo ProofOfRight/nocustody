@@ -97,13 +97,14 @@ Storage: PostgreSQL only ([ADR-0014](adr/0014-postgresql-only.md)); queues use `
 
 - All amounts are `bigint` in minimal units; comparison is **exact** (no prefix or rounded matching).
 - Unique amount strategy: base amount plus a configurable step (`amounts.step`, e.g. 0.01 USDT) times k on an
-  address, k chosen at random among the free slots so a just-released pair is not handed out next; when the slots run
-  out, the next address of the pool is used ([ADR-0030](adr/0030-early-payment-tolerance.md)).
+  address. The search for a free k starts at a random position and takes the first free slot from there, so a
+  just-released pair is not usually handed out next ([ADR-0030](adr/0030-early-payment-tolerance.md)); when an address
+  has no free slot, the next active address of the pool is tried.
 - Memo strategy (one wallet, TON): a memo from `node:crypto` without look-alike characters, unique per network
   forever; a unique-amount slot is reserved too when one is free. A transfer with a known memo pays that invoice
   (the amount may then be under/over); without a memo it must match a unique amount exactly.
-- A slot (address, amount) or memo stays locked until `expires_at + grace`, so a late payment within grace cannot
-  settle a newer invoice; a transfer whose block time is more than 5 s before the invoice was created is never
+- A slot (address, amount) stays locked until `expires_at + grace` (a memo is never reused), so a late payment within
+  grace cannot settle a newer invoice; a transfer whose block time is more than 5 s before the invoice was created is never
   credited to it ([ADR-0030](adr/0030-early-payment-tolerance.md)).
 - Underpayment and overpayment are separate statuses governed by policies; there is no "95% counts as paid" default.
 - Transfers below the dust threshold are ignored and logged.
