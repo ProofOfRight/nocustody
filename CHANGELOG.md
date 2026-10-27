@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 Before 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
+## [Unreleased]
+
+No migration, no config or pinned-checksum change.
+
+### Changed
+
+- **Breaking:** an invoice priced in the asset's own price symbol (e.g. `{"amount": "3.00", "currency": "USDT"}` for
+  `usdt-tron`) now keeps its price: `price` is `{amount, currency}` exactly as sent, with `rate`, `rate_source`,
+  `rate_at` and `rate_path` set to `null`, instead of `price: null`. Merchants can compare `price` with the order
+  before crediting it, whatever the currency. `price` stays `null` for such invoices created before this version.
+  `GET /v1/quotes` returns a `price` object for these prices as well.
+
+### Fixed
+
+- `merchant_order_id` idempotency for a price in the asset: a retry is compared with the stored price in minimal
+  units (`"3"` and `"3.00"` are the same price). Before, any price that fit the unique-amount steps of the invoice
+  amount counted as the same order (a retry with 10.01 USDT returned the 10.02 USDT invoice of a 10 USDT order).
+
 ## [0.4.0] - 2026-10-27
 
 Hosted payment page: new look and return URLs to the merchant's website. Migration 0006 (two nullable columns)

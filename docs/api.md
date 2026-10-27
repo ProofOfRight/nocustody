@@ -23,7 +23,14 @@ Requests are rate-limited per key (`api.rateLimitPerMinute`).
 `POST /v1/invoices` requires an `Idempotency-Key` header. Retrying with the same key and the same body returns the
 same invoice; the same key with a different body is refused (`422 idempotency_mismatch`). `merchant_order_id` is
 unique as well: a second request for the same order returns the existing invoice (`200`) when the price, currency
-and asset are the same, and is refused with `409 invoice.order_mismatch` when they differ.
+and asset are the same, and is refused with `409 invoice.order_mismatch` when they differ. Amounts are compared in
+minimal units, so `"3"` and `"3.00"` are the same price.
+
+The invoice keeps the price in `price`: `amount` and `currency` exactly as you sent them, plus the locked rate
+(`rate`, `rate_source`, `rate_at`, `rate_path`). A price in the asset's price symbol (e.g. `USDT` for `usdt-tron`)
+is not converted, so its rate fields are `null`. Before crediting an order, re-read the invoice and compare
+`price.amount` and `price.currency` with the order. `price` is `null` only for invoices priced in the asset that
+were created before 0.5.0.
 
 Show the payer `payment.address_display`, `payment.amount` (exact — the amount may include a small unique add-on)
 and, on TON, `payment.memo` as the transfer comment. `payment.uri` is a wallet deep link where one exists. Or send

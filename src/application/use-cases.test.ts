@@ -4,6 +4,7 @@ import { ManualRateTable } from "../adapters/pricing/manual-table.ts";
 import { amountPolicy, STRICT_AMOUNT_POLICY, uniqueAmountPolicy } from "../domain/amount-policy.ts";
 import { defineAsset } from "../domain/asset.ts";
 import { chainAddress } from "../domain/chain-address.ts";
+import type { InvoiceState } from "../domain/invoice.ts";
 import { Money } from "../domain/money.ts";
 
 import { TRON, USDT_TRON } from "../domain/test-fixtures.ts";
@@ -251,11 +252,37 @@ describe("CreateInvoice", () => {
     await s.order("o1");
     expect(await errCode(s.order("o1", "999"))).toBe("invoice.order_mismatch");
     expect(await errCode(s.order("o1", "10", "JPY"))).toBe("invoice.order_mismatch");
-    // Priced in the asset itself: the invoice amount is base + unique-amount step, which still counts as the same.
+    // Priced in the asset itself: the price is kept as given and compared exactly, in minimal units.
     const direct = await s.order("o2", "10", "USDT");
-    expect(direct.invoice.state.price).toBeNull();
-    expect((await s.order("o2", "10", "USDT")).created).toBe(false);
+    expect(direct.invoice.state.instructions.amount.toDecimalString()).toBe("10.020000");
+    expect((await s.order("o2", "10.00", "USDT")).created).toBe(false);
     expect(await errCode(s.order("o2", "11", "USDT"))).toBe("invoice.order_mismatch");
+    // within the unique-amount steps of the invoice amount, but not the same price
+    expect(await errCode(s.order("o2", "10.01", "USDT"))).toBe("invoice.order_mismatch");
+    expect(await errCode(s.order("o2", "10", "USD"))).toBe("invoice.order_mismatch");
+  });
+
+  it("keeps a price in the asset's own symbol as given, without a rate", async () => {
+    const s = setup();
+    const { invoice } = await s.order("o1", "3.00", "USDT");
+    expect(invoice.state.price).toEqual({
+      amount: "3.00",
+      currency: "USDT",
+      rate: null,
+      rateSource: null,
+      rateAt: null,
+      ratePath: null,
+    });
+    expect((s.store.data.invoices.get(invoice.id) as InvoiceState).price?.amount).toBe("3.00");
+  });
+
+  it("still matches an invoice priced in the asset before 0.5.0 (no stored price) by its amount", async () => {
+    const s = setup();
+    const { invoice } = await s.order("o1", "10", "USDT");
+    const stored = s.store.data.invoices.get(invoice.id) as InvoiceState;
+    s.store.data.invoices.set(invoice.id, { ...stored, price: null });
+    expect((await s.order("o1", "10", "USDT")).created).toBe(false);
+    expect(await errCode(s.order("o1", "11", "USDT"))).toBe("invoice.order_mismatch");
   });
 
   it("stores the return URLs; a retry with other URLs gets the invoice as it was created", async () => {
@@ -307,7 +334,7 @@ describe("CreateInvoice", () => {
     const s = setup();
     const { invoice } = await s.order("o1", "5", "USDT");
     expect(invoice.state.expected.toDecimalString()).toBe("5.010000");
-    expect(invoice.state.price).toBeNull();
+    expect(invoice.state.price).toMatchObject({ amount: "5", currency: "USDT", rate: null });
   });
 
   it("refuses to issue payment instructions when the pinned config was tampered with", async () => {
