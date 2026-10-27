@@ -23,7 +23,7 @@ Starting list of threats and mitigations for the gateway. Requirements contribut
 | Lost events on restart | Scanner cursor advances only after durable write; transactional outbox |
 | Forged / replayed webhook to the merchant | HMAC over timestamp + event id + body; webhook secret separate from the API key |
 | Dust / address poisoning | Zero-value transfers always ignored, threshold for the rest, ignore and log, merchant guidance in docs |
-| Provider rate-limit exhaustion (dust spam) | Filters, limits, alerts, second key / provider |
+| Provider rate-limit exhaustion (dust spam) | Filters, limits, alerts (`scanner-lag`); the operator switches to another key or provider in config |
 | Stalling the scanner with oversized transactions (anyone can send our TON jetton-wallet messages with bodies up to 256 KiB) | Response size limit per request; the TON scan halves its page until the answer fits instead of failing every cycle; a scanner that stops advancing raises an alert |
 | Issuer (Tether) freezes USDT on an address | Address pool, rotation, regular sweeps by the merchant, AML |
 | Compromised npm dependency | Minimal dependencies, lockfile, `npm ci --ignore-scripts`, audit in CI ([ADR-0007](adr/0007-minimal-dependencies.md)) |
