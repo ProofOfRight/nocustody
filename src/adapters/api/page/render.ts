@@ -53,19 +53,42 @@ export function contentSecurityPolicy(nonce: string): string {
   ].join("; ");
 }
 
+// Light theme only. Inter is used when installed locally; no web fonts are loaded (ADR-0027).
 const CSS = `
-:root{color-scheme:light dark;--fg:#111;--bg:#fff;--muted:#666;--box:#f4f4f5;--ok:#15803d;--warn:#b45309;--err:#b91c1c}
-@media (prefers-color-scheme:dark){:root{--fg:#eee;--bg:#18181b;--muted:#a1a1aa;--box:#27272a}}
-*{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",Tahoma,sans-serif;color:var(--fg);background:var(--bg)}
-main{max-width:30rem;margin:0 auto;padding:1.25rem}h1{font-size:1.25rem;margin:0 0 1rem}
-.amount{font-size:1.75rem;font-weight:700;margin:.25rem 0}.muted{color:var(--muted);font-size:.875rem}
-.field{background:var(--box);border-radius:.5rem;padding:.75rem;margin:.75rem 0}.label{font-size:.8rem;color:var(--muted)}
-.value{font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;direction:ltr;unicode-bidi:embed;text-align:start}
-button,.btn{font:inherit;border:1px solid var(--muted);background:transparent;color:inherit;border-radius:.375rem;padding:.3rem .75rem;margin-top:.4rem;cursor:pointer;text-decoration:none;display:inline-block}
-.qr{display:block;width:14rem;max-width:80%;margin:1rem auto;background:#fff;padding:.25rem;border-radius:.25rem}
-.status{font-weight:600;margin:1rem 0;padding:.75rem;border-radius:.5rem;background:var(--box)}
-.status.ok{color:var(--ok)}.status.warn{color:var(--warn)}.status.err{color:var(--err)}
-.warning{color:var(--warn);font-size:.875rem}nav{margin-top:1.5rem;font-size:.8rem}nav a{color:var(--muted);margin-inline-end:.75rem}
+:root{color-scheme:light;--ink:#0f1a14;--ink-2:#3d4c44;--ink-3:#4a5a52;--brand:#0b7a50;--brand-ink:#0b6b47;--brand-ink-hover:#08523a;
+--brand-tint:#e6f4ec;--selected:#eef6f1;--secondary-line:#b9d3c5;--line:#dce5e0;--field:#c5d3cb;--page:#f4f7f5;--inner:#fbfcfb;
+--warn-bg:#fff6e0;--warn-ink:#6b4300;--warn-line:#f1dfae;--danger:#b42318;--danger-line:#f3c7c2;--ring:0 0 0 3px rgba(11,122,80,.35)}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",Tahoma,sans-serif;color:var(--ink);background:var(--page)}
+main{max-width:34rem;margin:0 auto;padding:40px 20px}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:16px}
+h1{font-size:20px;line-height:1.3;font-weight:700;margin:0}
+.muted{color:var(--ink-3);font-size:13px;line-height:1.45}
+.total{background:var(--page);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.amount-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.amount{font-size:28px;line-height:1.25;font-weight:700}
+.field{display:flex;flex-direction:column;gap:6px}.label{font-size:13px;color:var(--ink-3)}
+.box{display:flex;align-items:center;gap:8px;padding:6px;padding-inline-start:12px;border-radius:10px;border:1px solid var(--line);background:var(--inner);min-height:52px}
+.box>.value{flex:1;min-width:0}
+.value{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px;word-break:break-all;direction:ltr;unicode-bidi:embed;text-align:start}
+.amount .value{font-size:inherit}
+button,.btn{font:inherit;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;border-radius:10px}
+button{flex:none;min-height:40px;padding:0 12px;font-size:14px;border:1px solid var(--secondary-line);background:#fff;color:var(--brand-ink)}
+button:hover{background:var(--selected);border-color:var(--brand)}button.done{background:var(--selected);border-color:var(--brand)}
+.btn{min-height:48px;padding:0 20px;border-radius:12px;border:1px solid var(--brand);background:var(--brand);color:#fff;width:100%}
+.btn:hover{background:var(--brand-ink);border-color:var(--brand-ink)}
+a{color:var(--brand-ink)}a:hover{color:var(--brand-ink-hover)}
+:focus-visible{outline:none;box-shadow:var(--ring)}
+.qr{display:block;width:14rem;max-width:80%;margin:0 auto;background:#fff;padding:8px;border:1px solid var(--line);border-radius:12px}
+.status,.warning{margin:0;padding:14px 16px;border-radius:12px;font-size:14px;border:1px solid var(--line);background:var(--page);color:var(--ink-2)}
+.status{font-weight:600}
+.status.ok{background:var(--brand-tint);border-color:var(--secondary-line);color:var(--brand-ink)}
+.status.warn,.warning{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-ink)}
+.status.err{background:#fff;border-color:var(--danger-line);color:var(--danger)}
+nav{margin-top:16px;display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
+nav a{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;border-radius:10px;font-size:14px;font-weight:500;text-decoration:none}
+nav a:hover{background:#fff}nav a[aria-current]{color:var(--ink);font-weight:700}
+@media (max-width:480px){main{padding:16px}.card{padding:18px}.btn{min-height:44px}}
 `;
 
 const SCRIPT = `
@@ -94,7 +117,10 @@ const SCRIPT = `
   document.querySelectorAll("button[data-copy]").forEach(function(b){
     b.addEventListener("click", function(){
       var text = document.getElementById(b.getAttribute("data-copy")).textContent;
-      var done = function(){ var t = b.textContent; b.textContent = d.copied; setTimeout(function(){ b.textContent = t; }, 1500); };
+      var done = function(){
+        var t = b.textContent; b.textContent = d.copied; b.classList.add("done");
+        setTimeout(function(){ b.textContent = t; b.classList.remove("done"); }, 2000);
+      };
       if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function(){});
     });
   });
@@ -112,10 +138,11 @@ export function renderPaymentPage(v: PageView, lang: Lang, nonce: string): strin
   const qrPayload = v.uri ?? v.address;
   const only = t.onlyAsset.replace("{asset}", esc(v.assetSymbol)).replace("{network}", esc(v.networkName));
   const field = (id: string, label: string, value: string) =>
-    `<div class="field"><div class="label">${esc(label)}</div><div class="value" id="${id}">${esc(value)}</div>` +
-    `<button type="button" data-copy="${id}">${esc(t.copy)}</button></div>`;
+    `<div class="field"><div class="label">${esc(label)}</div><div class="box"><div class="value" id="${id}">${esc(value)}</div>` +
+    `<button type="button" data-copy="${id}" aria-live="polite">${esc(t.copy)}</button></div></div>`;
   const langs = LANGUAGES.map(
-    (l) => `<a href="?lang=${encodeURIComponent(l)}" hreflang="${l}">${esc(l)}</a>`,
+    (l) =>
+      `<a href="?lang=${encodeURIComponent(l)}" hreflang="${l}"${l === lang ? ' aria-current="true"' : ""}>${esc(l)}</a>`,
   ).join("");
   return `<!doctype html>
 <html lang="${lang}" dir="${isRtl(lang) ? "rtl" : "ltr"}">
@@ -129,23 +156,27 @@ export function renderPaymentPage(v: PageView, lang: Lang, nonce: string): strin
 </head>
 <body>
 <main>
+<div class="card">
 <h1>${esc(t.title)}</h1>
 ${
   v.payable
-    ? `<div class="muted">${esc(t.send)}</div>
-<div class="amount"><span id="amount" class="value">${esc(v.amount)}</span> ${esc(v.assetSymbol)}</div>
-<button type="button" data-copy="amount">${esc(t.copy)}</button>
-<p class="muted">${esc(t.exactly)}</p>
+    ? `<div class="total">
+<div class="muted">${esc(t.send)}</div>
+<div class="amount-row"><div class="amount"><span id="amount" class="value">${esc(v.amount)}</span> ${esc(v.assetSymbol)}</div>
+<button type="button" data-copy="amount" aria-live="polite">${esc(t.copy)}</button></div>
+<div class="muted">${esc(t.exactly)}</div>
+</div>
 <p class="warning">${only}</p>
 <div class="field"><div class="label">${esc(t.network)}</div><div>${esc(v.networkName)}</div></div>
 ${field("address", t.toAddress, v.address)}
 ${v.memo ? `${field("memo", t.memo, v.memo)}<p class="warning">${esc(t.memoWarning)}</p>` : ""}
 <div class="qr">${qrSvg(qrPayload, esc(t.qr))}</div>
-${v.uri ? `<p><a class="btn" href="${esc(v.uri)}" rel="noopener noreferrer">${esc(t.openWallet)}</a></p>` : ""}`
+${v.uri ? `<a class="btn" href="${esc(v.uri)}" rel="noopener noreferrer">${esc(t.openWallet)}</a>` : ""}`
     : ""
 }
 <div class="status" id="status" role="status" aria-live="polite">${esc(statusText(t, v.status))}</div>
 ${v.payable ? `<div class="muted">${esc(t.timeLeft)}: <span id="timer" class="value"></span></div>` : ""}
+</div>
 <nav>${langs}</nav>
 </main>
 <script type="application/json" id="page-data">${jsonForHtml({

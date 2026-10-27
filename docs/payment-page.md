@@ -20,6 +20,7 @@ Every invoice then has `payment.page` = `/pay/{id}` in the API response. Redirec
   final or its grace period is over; `underpaid` keeps polling (a top-up completes it);
 - for an invoice that can no longer be paid (expired past grace, cancelled, completed) the page shows the status only:
   no amount, address or QR code, so a payer who opens an old link cannot send to a pair a newer invoice may hold;
+- light theme only; the font is the system one (Inter when it is installed on the payer's device), no web fonts;
 - languages: English, Russian, French, Persian (right-to-left), Simplified Chinese — `?lang=` or the browser's
   `Accept-Language`.
 
