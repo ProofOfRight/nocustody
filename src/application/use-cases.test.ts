@@ -167,8 +167,19 @@ function setup(
     const screened = await screen.execute();
     return { ...settled, ...screened, errors: settled.errors + screened.errors };
   };
-  const order = (id: string, amount = "10", cur = "USD") =>
-    create.execute({ merchantOrderId: id, priceAmount: amount, priceCurrency: cur, assetId: "usdt-tron" });
+  const order = (
+    id: string,
+    amount = "10",
+    cur = "USD",
+    urls: { successUrl?: string; cancelUrl?: string } = {},
+  ) =>
+    create.execute({
+      merchantOrderId: id,
+      priceAmount: amount,
+      priceCurrency: cur,
+      assetId: "usdt-tron",
+      ...urls,
+    });
   return {
     store,
     clock,
@@ -245,6 +256,17 @@ describe("CreateInvoice", () => {
     expect(direct.invoice.state.price).toBeNull();
     expect((await s.order("o2", "10", "USDT")).created).toBe(false);
     expect(await errCode(s.order("o2", "11", "USDT"))).toBe("invoice.order_mismatch");
+  });
+
+  it("stores the return URLs; a retry with other URLs gets the invoice as it was created", async () => {
+    const s = setup();
+    const urls = { successUrl: "https://shop.example/ok", cancelUrl: "https://shop.example/back" };
+    const a = await s.order("o1", "10", "USD", urls);
+    expect(a.invoice.state).toMatchObject(urls);
+    const again = await s.order("o1", "10", "USD", { successUrl: "https://shop.example/other" });
+    expect(again.created).toBe(false);
+    expect(again.invoice.state).toMatchObject(urls);
+    expect((await s.order("o2")).invoice.state).toMatchObject({ successUrl: null, cancelUrl: null });
   });
 
   it("a concurrent create for the same order answers with the invoice that won", async () => {

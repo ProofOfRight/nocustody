@@ -41,3 +41,4 @@ Template: `# NNNN. Title`, then Status, Date, and Context / Decision / Consequen
 | [0032](0032-repository-hosting.md) | 2026-10-26 | The repository is hosted under the maintainer's account | accepted |
 | [0033](0033-release-isolated-signing.md) | 2026-10-27 | Release: build, attest and publish in separate jobs | accepted |
 | [0034](0034-untrusted-code-sandbox.md) | 2026-10-27 | Code from others runs only in a sandbox | accepted |
+| [0035](0035-payment-return-urls.md) | 2026-10-27 | Return URLs on the hosted payment page | accepted |
