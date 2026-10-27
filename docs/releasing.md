@@ -10,7 +10,7 @@ For maintainers. Decisions: [ADR-0028](adr/0028-container-image.md) (image),
   repository.
 - Environment `release` with required reviewers (Settings → Environments), so a pushed tag waits for approval.
 - A ruleset for `main`: changes only through pull requests with a code-owner review, the CI checks (`check`,
-  both `image` jobs, `dco`) required and up to date, linear history, no force-push or deletion. Administrators may
+  both `image` jobs, `examples`, `dco`) required and up to date, linear history, no force-push or deletion. Administrators may
   bypass it only through a pull request, so a direct push to `main` is refused for everyone.
 - A tag ruleset for `v*`: only maintainers create, move or delete release tags.
 

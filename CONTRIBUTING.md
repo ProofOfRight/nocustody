@@ -24,12 +24,13 @@ commits that are not signed off. No CLA is required.
 
 ## Development environment
 
-Everything runs in Docker (`compose.yaml`); the host needs only Docker and `make`.
+Everything runs in Docker (`compose.yaml`); the host needs Docker, `make` and `git` (`make smoke-image` also uses
+`curl`).
 
 | Command | What it does |
 |---|---|
 | `make install` | `npm ci --ignore-scripts` in the dev container |
-| `make check` | everything CI runs: lint, typecheck, layer rules, licenses, source policy, unit and integration tests |
+| `make check` | lint, typecheck, layer rules, licenses, source policy, unit and integration tests; CI also runs `npm audit`, the build, the image smoke test (`make smoke-image`), `make php-selftest` and the DCO check |
 | `make test` | unit tests |
 | `make format` | apply Biome formatting and safe fixes |
 | `make shell` | shell in the dev container |
@@ -77,7 +78,9 @@ A pull request adding or changing a chain adapter must satisfy all of the follow
    duplicate delivery, late payment.
 8. External hosts, rate limits and costs are documented.
 
-Changes to `src/domain`, `src/application` and `src/adapters/chains` require maintainer review.
+Changes to `src/domain`, `src/application` and `src/adapters/chains` require maintainer review; so do the other
+paths in [.github/CODEOWNERS](.github/CODEOWNERS) (the rest of the payment path, `src/app`, CI, the toolchain,
+agent instructions, examples).
 
 ## Reviewing pull requests
 
@@ -93,7 +96,9 @@ git worktree add ../nocustody-pr-<N> pr-<N>
 make check-untrusted PR_DIR=../nocustody-pr-<N>
 ```
 
-The sandbox (`compose.yaml`, profile `untrusted`) mounts the worktree read-only and nothing of this repository, has
+The sandbox (`compose.yaml`, profile `untrusted`) mounts the worktree read-only and, of this repository, only its
+`node_modules` (read-only, when the pull request does not change dependencies) and the database init script; never
+`.git`, `.claude/`, internal notes or `.env`. It has
 no route out of its internal network (DNS included), no API keys, no Linux capabilities, a read-only root file
 system and its own in-memory PostgreSQL. If the pull request changes `package.json` or `package-lock.json`, read
 `git -C ../nocustody-pr-<N> diff main -- package-lock.json` first; `make install-untrusted PR_DIR=…` then installs

@@ -20,7 +20,7 @@ typecheck:
 	$(RUN) npm run typecheck
 test:
 	$(RUN) npm test
-check:         ## everything CI runs: lint, typecheck, layers, licenses, SPDX, tests
+check:         ## lint, typecheck, layers, licenses, SPDX, tests (CI also: npm audit, build, image, examples, DCO)
 	$(RUN) npm run check
 # Code from a pull request runs only in the sandbox (compose.yaml, profile untrusted): its worktree read-only, no
 # network, no keys, nothing of this repository mounted. CONTRIBUTING.md, "Reviewing pull requests".
