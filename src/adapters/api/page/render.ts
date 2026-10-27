@@ -25,6 +25,8 @@ export interface PageView {
 }
 
 const PAYABLE_STATUSES = new Set(["awaiting_payment", "confirming", "underpaid", "expired"]);
+/** The payment is in and nothing more is needed from the payer; the same set as `OK` in the page script. */
+const RECEIVED_STATUSES = new Set(["paid", "overpaid", "paid_late", "completed", "aml_pending"]);
 
 /** The server-side half of `PageView.payable`: payable status and still inside the grace period. */
 export function isPayable(status: string, graceUntil: Date, now: Date): boolean {
@@ -62,7 +64,7 @@ const CSS = `
 body{margin:0;font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",Tahoma,sans-serif;color:var(--ink);background:var(--page)}
 main{max-width:34rem;margin:0 auto;padding:40px 20px}
 .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:16px}
-h1{font-size:20px;line-height:1.3;font-weight:700;margin:0}
+h1{font-size:20px;line-height:1.3;font-weight:700;margin:0}.card>p{margin:0}
 .muted{color:var(--ink-3);font-size:13px;line-height:1.45}
 .total{background:var(--page);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:4px}
 .amount-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
@@ -95,6 +97,7 @@ const SCRIPT = `
 (function(){
   var d = JSON.parse(document.getElementById("page-data").textContent);
   var statusEl = document.getElementById("status"), timerEl = document.getElementById("timer");
+  var hintEl = document.getElementById("done-hint");
   // Stop polling on a final status, or once the grace period is over (an expired invoice stays "expired" forever).
   // "underpaid" is not final: a top-up with the same memo completes the invoice.
   var FINAL = {paid:1,overpaid:1,paid_late:1,completed:1,aml_pending:1,aml_hold:1,rejected:1,cancelled:1};
@@ -103,6 +106,7 @@ const SCRIPT = `
   function show(s){
     statusEl.textContent = d.statusText[s] || s;
     statusEl.className = "status " + (OK[s] ? "ok" : (s === "awaiting_payment" || s === "confirming") ? "" : s === "expired" ? "warn" : "err");
+    hintEl.hidden = !OK[s];
   }
   function tick(){
     if (!timerEl) return;
@@ -175,6 +179,7 @@ ${v.uri ? `<a class="btn" href="${esc(v.uri)}" rel="noopener noreferrer">${esc(t
     : ""
 }
 <div class="status" id="status" role="status" aria-live="polite">${esc(statusText(t, v.status))}</div>
+<p class="muted" id="done-hint"${RECEIVED_STATUSES.has(v.status) ? "" : " hidden"}>${esc(t.doneHint)}</p>
 ${v.payable ? `<div class="muted">${esc(t.timeLeft)}: <span id="timer" class="value"></span></div>` : ""}
 </div>
 <nav>${langs}</nav>

@@ -22,6 +22,8 @@ export interface Messages {
   readonly timeLeft: string;
   readonly qr: string;
   readonly onlyAsset: string;
+  /** Shown once the payment is received: nothing more is needed from the payer. */
+  readonly doneHint: string;
   /** One text per invoice status: a new status is a type error here, not a raw code shown to a payer. */
   readonly status: Readonly<Record<InvoiceStatus, string>>;
 }
@@ -40,6 +42,7 @@ const en: Messages = {
   timeLeft: "Time left",
   qr: "QR code with the payment details",
   onlyAsset: "Send only {asset} on {network}. Other tokens or networks are lost.",
+  doneHint: "You can close this page and return to the merchant's website.",
   status: {
     awaiting_payment: "Waiting for your payment",
     confirming: "Payment detected, waiting for confirmation",
@@ -71,6 +74,7 @@ const ru: Messages = {
   timeLeft: "Осталось",
   qr: "QR-код с реквизитами платежа",
   onlyAsset: "Отправляйте только {asset} в сети {network}. Другие токены или сети будут потеряны.",
+  doneHint: "Можно закрыть эту страницу и вернуться на сайт продавца.",
   status: {
     awaiting_payment: "Ожидаем ваш платёж",
     confirming: "Платёж обнаружен, ждём подтверждения",
@@ -101,6 +105,7 @@ const fr: Messages = {
   timeLeft: "Temps restant",
   qr: "Code QR avec les détails du paiement",
   onlyAsset: "Envoyez uniquement {asset} sur {network}. Les autres jetons ou réseaux seront perdus.",
+  doneHint: "Vous pouvez fermer cette page et revenir sur le site du marchand.",
   status: {
     awaiting_payment: "En attente de votre paiement",
     confirming: "Paiement détecté, en attente de confirmation",
@@ -133,6 +138,7 @@ const fa: Messages = {
   qr: "کد QR با جزئیات پرداخت",
   onlyAsset:
     "فقط {asset} را در شبکه {network} ارسال کنید. توکن\u200cها یا شبکه\u200cهای دیگر از دست می\u200cروند.",
+  doneHint: "می\u200cتوانید این صفحه را ببندید و به وب\u200cسایت فروشنده برگردید.",
   status: {
     awaiting_payment: "در انتظار پرداخت شما",
     confirming: "پرداخت شناسایی شد، در انتظار تأیید",
@@ -164,6 +170,7 @@ const zhCN: Messages = {
   timeLeft: "剩余时间",
   qr: "包含付款信息的二维码",
   onlyAsset: "仅发送 {network} 网络上的 {asset}。发送其他代币或使用其他网络将会丢失。",
+  doneHint: "您可以关闭此页面并返回商家网站。",
   status: {
     awaiting_payment: "等待您的付款",
     confirming: "已检测到付款，等待确认",

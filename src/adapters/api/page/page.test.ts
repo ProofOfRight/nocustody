@@ -133,6 +133,30 @@ describe("payment page", () => {
     expect(renderPaymentPage(view, "en", "n")).toContain(">Waiting for your payment<");
   });
 
+  it("tells the payer they may leave only once the payment is received", () => {
+    const hint = (status: string) =>
+      renderPaymentPage({ ...view, status, payable: false }, "en", "n").match(
+        /<p[^>]*id="done-hint"[^>]*>/,
+      )?.[0];
+    for (const s of ["paid", "overpaid", "paid_late", "completed", "aml_pending"])
+      expect(hint(s), s).not.toContain("hidden");
+    for (const s of [
+      "awaiting_payment",
+      "confirming",
+      "underpaid",
+      "expired",
+      "cancelled",
+      "aml_hold",
+      "rejected",
+    ])
+      expect(hint(s), s).toContain("hidden");
+    expect(renderPaymentPage(view, "en", "n")).toContain(MESSAGES.en.doneHint.replace("'", "&#39;"));
+    // the script reveals the hint for the same statuses when polling sees the payment
+    expect(renderPaymentPage(view, "en", "n")).toMatch(
+      /var OK = \{paid:1,overpaid:1,paid_late:1,completed:1,aml_pending:1\}/,
+    );
+  });
+
   it("payable: payable statuses inside the grace period only", () => {
     const grace = new Date("2026-10-26T13:30:00Z");
     const before = new Date("2026-10-26T13:00:00Z");
