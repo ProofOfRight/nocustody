@@ -28,9 +28,9 @@ before deploying it:
 ```bash
 IMAGE=ghcr.io/proofofright/nocustody@sha256:<digest>
 gh attestation verify oci://$IMAGE --repo ProofOfRight/nocustody \
-  --signer-workflow ProofOfRight/nocustody/.github/workflows/release.yml --source-ref refs/tags/v0.5.0
+  --signer-workflow ProofOfRight/nocustody/.github/workflows/release.yml --source-ref refs/tags/v0.5.1
 gh attestation verify oci://$IMAGE --repo ProofOfRight/nocustody \
-  --signer-workflow ProofOfRight/nocustody/.github/workflows/release.yml --source-ref refs/tags/v0.5.0 \
+  --signer-workflow ProofOfRight/nocustody/.github/workflows/release.yml --source-ref refs/tags/v0.5.1 \
   --predicate-type https://spdx.dev/Document/v2.3 --format json --jq '.[0].verificationResult.statement.predicate'
 ```
 
@@ -50,7 +50,7 @@ publishes in its [root-signing](https://github.com/sigstore/root-signing) reposi
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sigstore/root-signing/main/targets/trusted_root.json | jq -c . > trusted_root.jsonl
 gh attestation verify oci://$IMAGE --repo ProofOfRight/nocustody \
-  --signer-workflow ProofOfRight/nocustody/.github/workflows/release.yml --source-ref refs/tags/v0.5.0 \
+  --signer-workflow ProofOfRight/nocustody/.github/workflows/release.yml --source-ref refs/tags/v0.5.1 \
   --custom-trusted-root trusted_root.jsonl
 ```
 
