@@ -4,9 +4,10 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 Before 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
-## [Unreleased]
+## [0.5.0] - 2026-10-27
 
-No migration, no config or pinned-checksum change.
+The invoice keeps a price given in the asset itself (breaking: `price` is no longer `null` for it). No migration,
+no config or pinned-checksum change.
 
 ### Changed
 
@@ -242,6 +243,7 @@ mainnet**; start with small amounts.
 - Production container image (`FROM scratch`, non-root, no shell), example `docker compose` deployment,
   reproducible multi-arch builds, signed build provenance and SPDX SBOM attestations.
 
+[0.5.0]: https://github.com/ProofOfRight/nocustody/releases/tag/v0.5.0
 [0.4.0]: https://github.com/ProofOfRight/nocustody/releases/tag/v0.4.0
 [0.3.2]: https://github.com/ProofOfRight/nocustody/releases/tag/v0.3.2
 [0.3.1]: https://github.com/ProofOfRight/nocustody/releases/tag/v0.3.1
