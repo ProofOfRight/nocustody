@@ -1,6 +1,6 @@
 # 0029. Releases: tag-triggered workflow, GitHub artifact attestations, own SBOM
 
-- Status: accepted
+- Status: accepted, amended by [0033](0033-release-isolated-signing.md) (build, attest and publish in separate jobs)
 - Date: 2026-10-26
 
 ## Context
