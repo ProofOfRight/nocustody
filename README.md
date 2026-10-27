@@ -11,7 +11,7 @@ The gateway issues invoices, watches the merchant's own addresses on supported b
 transfers and notifies the merchant's application. It never holds private keys: funds go directly to wallets whose
 keys stay offline. A compromised server does not mean stolen funds.
 
-> **Status: 0.3, early release.** Verified end to end on the TRON Nile and TON testnets and with a read-only replay
+> **Status: 0.5, early release.** Verified end to end on the TRON Nile and TON testnets and with a read-only replay
 > of real mainnet payments; no production deployment yet. Start with small amounts.
 
 ## Principles
@@ -42,7 +42,7 @@ Start from the example [deploy/compose.yaml](deploy/compose.yaml) and the [deplo
 
 ## Development
 
-Everything runs in Docker; the host needs only Docker and `make`.
+Everything runs in Docker; the host needs Docker, `make` and `git` (`make smoke-image` also uses `curl`).
 
 ```bash
 make install   # npm ci --ignore-scripts inside the dev container
