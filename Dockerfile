@@ -9,12 +9,12 @@
 # digest. It is written out in each FROM (not an ARG) so that Dependabot can update it; keep the four identical.
 
 # Production dependencies only, from the lockfile, lifecycle scripts disabled.
-FROM --platform=$BUILDPLATFORM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS deps
+FROM --platform=$BUILDPLATFORM node:26.13.0-alpine3.24@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS deps
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
-FROM --platform=$BUILDPLATFORM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS build
+FROM --platform=$BUILDPLATFORM node:26.13.0-alpine3.24@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
@@ -23,14 +23,14 @@ COPY src ./src
 RUN npm run build
 
 # Account database and a sticky /tmp for the scratch image (text files, platform independent).
-FROM --platform=$BUILDPLATFORM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS rootfs
+FROM --platform=$BUILDPLATFORM node:26.13.0-alpine3.24@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS rootfs
 RUN mkdir -p /out/etc /out/tmp \
  && chmod 1777 /out/tmp \
  && echo 'nonroot:x:65532:65532:nonroot:/nonexistent:/sbin/nologin' > /out/etc/passwd \
  && echo 'nonroot:x:65532:' > /out/etc/group
 
 # Target platform: only files are copied out of it, nothing runs there (no emulation for multi-arch builds).
-FROM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS node
+FROM node:26.13.0-alpine3.24@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS node
 
 FROM scratch
 ARG VERSION=dev
